@@ -1,0 +1,12 @@
+{
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Models/BookingDetails.swift" : {
+    "abi-baseline-json" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphonesimulator/wayfind.build/Objects-normal/x86_64/wayfind.abi.json",
+    "const-values" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphonesimulator/wayfind.build/Objects-normal/x86_64/wayfind-primary.swiftconstvalues",
+    "dependencies" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphonesimulator/wayfind.build/Objects-normal/x86_64/wayfind-primary.d",
+    "diagnostics" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphonesimulator/wayfind.build/Objects-normal/x86_64/wayfind-primary.dia",
+    "objc-header" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphonesimulator/wayfind.build/Objects-normal/x86_64/wayfind-Swift.h",
+    "swiftdoc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphonesimulator/wayfind.build/Objects-normal/x86_64/wayfind.swiftdoc",
+    "swiftmodule" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphonesimulator/wayfind.build/Objects-normal/x86_64/wayfind.swiftmodule",
+    "swiftsourceinfo" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphonesimulator/wayfind.build/Objects-normal/x86_64/wayfind.swiftsourceinfo"
+  }
+}

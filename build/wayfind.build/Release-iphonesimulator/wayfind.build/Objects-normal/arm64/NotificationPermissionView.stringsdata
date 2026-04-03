@@ -1,0 +1,32 @@
+{
+  "source": "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/NotificationPermissionView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "We'll notify you when your booking is ready",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 14
+        }
+      },
+      {
+        "comment": "",
+        "key": "Get alerts when we parse your forwarded bookings, and when your trip is about to start.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 18
+        }
+      },
+      {
+        "comment": "",
+        "key": "Not Now",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 37
+        }
+      }
+    ]
+  },
+  "version": 1
+}

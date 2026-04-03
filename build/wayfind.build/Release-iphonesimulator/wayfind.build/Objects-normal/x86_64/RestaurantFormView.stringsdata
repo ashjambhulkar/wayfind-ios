@@ -1,0 +1,24 @@
+{
+  "source": "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/RestaurantFormView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Party Size",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 15
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld %@",
+        "location": {
+          "startingColumn": 25,
+          "startingLine": 18
+        }
+      }
+    ]
+  },
+  "version": 1
+}

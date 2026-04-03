@@ -1,0 +1,40 @@
+{
+  "source": "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/BookingsScreenView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Bookings",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 85
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 55,
+          "startingLine": 56
+        }
+      },
+      {
+        "comment": "",
+        "key": "Booking removed",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 115
+        }
+      },
+      {
+        "comment": "",
+        "key": "Undo",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 119
+        }
+      }
+    ]
+  },
+  "version": 1
+}

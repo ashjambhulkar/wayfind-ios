@@ -1,0 +1,16 @@
+{
+  "source": "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/PlaceholderGradientView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Wayfind",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 29
+        }
+      }
+    ]
+  },
+  "version": 1
+}

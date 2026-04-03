@@ -1,0 +1,386 @@
+{
+  "" : {
+    "const-values" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/wayfind-primary.swiftconstvalues",
+    "dependencies" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/wayfind-primary.d",
+    "diagnostics" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/wayfind-primary.dia",
+    "emit-module-dependencies" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/wayfind-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/wayfind-primary-emit-module.dia",
+    "pch" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/wayfind-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/wayfind-primary.swiftdeps"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/GeneratedAssetSymbols.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/AppConfig.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppConfig.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppConfig.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppConfig.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Models/BookingDetails.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingDetails.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingDetails.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingDetails.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Models/ItineraryDay.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ItineraryDay.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ItineraryDay.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ItineraryDay.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Models/ParsedBooking.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ParsedBooking.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ParsedBooking.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ParsedBooking.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Models/Place.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/Place.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/Place.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/Place.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Models/Trip.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/Trip.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/Trip.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/Trip.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Services/DataService.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DataService.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DataService.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DataService.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Services/MockDataService.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/MockDataService.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/MockDataService.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/MockDataService.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Services/NotificationManager.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/NotificationManager.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/NotificationManager.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/NotificationManager.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Services/PlaceSearchService.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceSearchService.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceSearchService.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceSearchService.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Services/SupabaseManager.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SupabaseManager.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SupabaseManager.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SupabaseManager.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Services/UnsplashService.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/UnsplashService.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/UnsplashService.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/UnsplashService.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Theme/AppAnimations.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppAnimations.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppAnimations.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppAnimations.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Theme/AppColors.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppColors.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppColors.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppColors.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Theme/AppSpacing.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppSpacing.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppSpacing.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppSpacing.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Theme/AppTypography.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppTypography.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppTypography.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppTypography.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Theme/BookingTypeConstants.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingTypeConstants.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingTypeConstants.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingTypeConstants.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Utilities/ColorHelpers.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ColorHelpers.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ColorHelpers.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ColorHelpers.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Utilities/DateHelpers.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DateHelpers.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DateHelpers.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DateHelpers.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Utilities/HaversineDistance.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/HaversineDistance.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/HaversineDistance.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/HaversineDistance.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Utilities/HepticManager.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/HepticManager.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/HepticManager.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/HepticManager.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/ViewModels/AuthViewModel.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AuthViewModel.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AuthViewModel.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AuthViewModel.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/ViewModels/ForwardingDiscoveryManager.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ForwardingDiscoveryManager.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ForwardingDiscoveryManager.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ForwardingDiscoveryManager.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/ViewModels/TripDetailViewModel.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripDetailViewModel.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripDetailViewModel.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripDetailViewModel.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/ViewModels/TripsViewModel.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripsViewModel.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripsViewModel.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripsViewModel.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/AddPlace/AddPlaceView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AddPlaceView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AddPlaceView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AddPlaceView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/AddPlace/PlaceSearchResultsView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceSearchResultsView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceSearchResultsView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceSearchResultsView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/AddPlace/WishlistSectionView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/WishlistSectionView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/WishlistSectionView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/WishlistSectionView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Auth/SignInView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SignInView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SignInView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SignInView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Auth/SignUpView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SignUpView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SignUpView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SignUpView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/ActivityFormView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ActivityFormView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ActivityFormView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ActivityFormView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/AddBookingView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AddBookingView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AddBookingView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AddBookingView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/BookingFormHelpers.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingFormHelpers.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingFormHelpers.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingFormHelpers.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/BookingTypeChipSelector.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingTypeChipSelector.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingTypeChipSelector.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingTypeChipSelector.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/BookingsScreenView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingsScreenView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingsScreenView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/BookingsScreenView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/CarRentalFormView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/CarRentalFormView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/CarRentalFormView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/CarRentalFormView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/FlightFormView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/FlightFormView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/FlightFormView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/FlightFormView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/ForwardingEmailCardView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ForwardingEmailCardView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ForwardingEmailCardView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ForwardingEmailCardView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/HotelFormView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/HotelFormView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/HotelFormView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/HotelFormView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/ParsedBookingCardView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ParsedBookingCardView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ParsedBookingCardView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ParsedBookingCardView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/RestaurantFormView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/RestaurantFormView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/RestaurantFormView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/RestaurantFormView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/ReviewForwardedBookingsView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ReviewForwardedBookingsView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ReviewForwardedBookingsView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ReviewForwardedBookingsView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Bookings/TransportFormView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TransportFormView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TransportFormView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TransportFormView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/CreateTrip/CreateTripView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/CreateTripView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/CreateTripView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/CreateTripView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/CreateTrip/EditTripView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/EditTripView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/EditTripView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/EditTripView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Map/DayFilterChipsView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DayFilterChipsView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DayFilterChipsView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DayFilterChipsView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Map/PlaceCalloutView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceCalloutView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceCalloutView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceCalloutView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Map/TripMapView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripMapView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripMapView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripMapView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Profile/ProfileView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ProfileView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ProfileView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ProfileView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/AppButton.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppButton.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppButton.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/AppButton.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/EmptyStateView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/EmptyStateView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/EmptyStateView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/EmptyStateView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/NotificationPermissionView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/NotificationPermissionView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/NotificationPermissionView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/NotificationPermissionView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/PillButtonView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PillButtonView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PillButtonView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PillButtonView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/PlaceholderGradientView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceholderGradientView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceholderGradientView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceholderGradientView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/SkeletonView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SkeletonView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SkeletonView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SkeletonView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/SpeedDialFABView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SpeedDialFABView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SpeedDialFABView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/SpeedDialFABView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/ToastView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ToastView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ToastView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ToastView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/DaySectionHeaderView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DaySectionHeaderView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DaySectionHeaderView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/DaySectionHeaderView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/EditPlaceView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/EditPlaceView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/EditPlaceView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/EditPlaceView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/ForwardingBannerView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ForwardingBannerView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ForwardingBannerView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ForwardingBannerView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/InlineAddButtonView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/InlineAddButtonView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/InlineAddButtonView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/InlineAddButtonView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/MoveToDaySheet.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/MoveToDaySheet.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/MoveToDaySheet.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/MoveToDaySheet.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/NowIndicatorView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/NowIndicatorView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/NowIndicatorView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/NowIndicatorView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/OngoingBookingBannerView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/OngoingBookingBannerView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/OngoingBookingBannerView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/OngoingBookingBannerView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/PlaceDetailSheet.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceDetailSheet.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceDetailSheet.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/PlaceDetailSheet.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/TimelineBookingCardView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelineBookingCardView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelineBookingCardView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelineBookingCardView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/TimelineGapView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelineGapView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelineGapView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelineGapView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/TimelinePlaceCardView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelinePlaceCardView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelinePlaceCardView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelinePlaceCardView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/TimelineRailView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelineRailView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelineRailView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TimelineRailView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/TripDetail/TripDetailView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripDetailView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripDetailView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripDetailView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Trips/ActiveTripHeroView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ActiveTripHeroView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ActiveTripHeroView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/ActiveTripHeroView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Trips/TripCardView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripCardView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripCardView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripCardView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Trips/TripsListView.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripsListView.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripsListView.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/TripsListView.o"
+  },
+  "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/wayfindApp.swift" : {
+    "index-unit-output-path" : "/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/wayfindApp.o",
+    "llvm-bc" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/wayfindApp.bc",
+    "object" : "/Users/ashishjambhulkar/Desktop/wayfind/build/wayfind.build/Release-iphoneos/wayfind.build/Objects-normal/arm64/wayfindApp.o"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "source": "/Users/ashishjambhulkar/Desktop/wayfind/wayfind/Views/Shared/SpeedDialFABView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Close menu",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 130
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add new item",
+        "location": {
+          "startingColumn": 53,
+          "startingLine": 130
+        }
+      },
+      {
+        "comment": "",
+        "key": "Forward booking emails to ",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 69
+        }
+      },
+      {
+        "comment": "",
+        "key": " for auto-import",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 73
+        }
+      }
+    ]
+  },
+  "version": 1
+}
