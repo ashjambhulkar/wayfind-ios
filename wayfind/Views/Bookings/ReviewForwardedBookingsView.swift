@@ -3,7 +3,7 @@ import SwiftUI
 struct ReviewForwardedBookingsView: View {
     let trip: Trip
 
-    @Environment(MockDataService.self) private var dataService
+    @Environment(DataService.self) private var dataService
     @State private var parsedBookings: [ParsedBooking] = []
 
     var body: some View {

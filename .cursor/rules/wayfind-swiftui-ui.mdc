@@ -1,0 +1,13 @@
+---
+description: Load Wayfind SwiftUI UI skill when editing native iOS UI in this repo
+globs: wayfind/**/*.swift
+alwaysApply: false
+---
+
+When designing or changing SwiftUI UI in **wayfind-ios**, read and follow the project skill:
+
+`.cursor/skills/wayfind-swiftui-ui/SKILL.md`
+
+Apply **AppSpacing**, **AppColors**, **AppSpring**, HIG‑aligned layout (safe areas, bottom chrome pinning, no stretched UIKit hosts), and patterns consistent with existing trip detail, lists, and sheets.
+
+For Swift/UIKit API semantics, availability, and deprecations, use the **apple-docs** MCP tools when that server is enabled (configured in `.cursor/mcp.json`).

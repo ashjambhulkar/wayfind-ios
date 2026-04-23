@@ -5,7 +5,7 @@ import SwiftUI
 struct TripMapView: View {
     let trip: Trip
 
-    @Environment(MockDataService.self) var dataService
+    @Environment(DataService.self) var dataService
 
     @State private var places: [Place] = []
     @State private var dayNumberByDayId: [UUID: Int] = [:]

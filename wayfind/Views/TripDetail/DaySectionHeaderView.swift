@@ -67,5 +67,6 @@ struct DaySectionHeaderView: View {
             }
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

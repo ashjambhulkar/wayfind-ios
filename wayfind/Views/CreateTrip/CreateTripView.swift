@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct CreateTripView: View {
-    @Environment(MockDataService.self) private var dataService
+    @Environment(DataService.self) private var dataService
 
     var onCreate: ((Trip) -> Void)?
 
@@ -110,6 +110,10 @@ struct CreateTripView: View {
 
     private func createTrip() async {
         let title = "Trip to \(trimmedDestination)"
+        let now = Date()
+        let calendar = Calendar.current
+        let dbStatus = SupabaseModelMapping.inferTripStatus(startDate: startDate, endDate: endDate, calendar: calendar)
+        let isActive = SupabaseModelMapping.isTripActive(startDate: startDate, endDate: endDate, calendar: calendar)
         let trip = Trip(
             id: UUID(),
             userId: UUID(),
@@ -121,14 +125,18 @@ struct CreateTripView: View {
             endDate: endDate,
             coverImageUrl: nil,
             notes: nil,
-            createdAt: Date()
+            createdAt: now,
+            updatedAt: now,
+            databaseStatus: dbStatus,
+            isMarkedActiveOnServer: isActive
         )
-        await dataService.addTrip(trip)
-        onCreate?(trip)
+        let persisted = await dataService.addTrip(trip)
+        onCreate?(persisted)
     }
 }
 
 #Preview {
     CreateTripView()
-        .environment(MockDataService())
+        .environment(DataService())
+        .environment(UserPreferencesStore())
 }

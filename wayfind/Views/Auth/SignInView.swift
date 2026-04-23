@@ -6,6 +6,8 @@ struct SignInView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var email = ""
     @State private var password = ""
+    @State private var showPasswordReset = false
+    @State private var resetEmail = ""
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
@@ -74,6 +76,8 @@ struct SignInView: View {
                             await authViewModel.signInWithGoogle()
                         }
                     }
+                    .accessibilityLabel("Continue with Google")
+                    .accessibilityHint("Opens the Google sign-in flow")
 
                     Spacer()
                         .frame(height: AppSpacing.xl)
@@ -156,6 +160,14 @@ struct SignInView: View {
                         }
                     }
 
+                    Button("Forgot password?") {
+                        resetEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+                        showPasswordReset = true
+                    }
+                    .font(Font.appBody)
+                    .foregroundStyle(AppColors.appPrimary)
+                    .padding(.top, AppSpacing.md)
+
                     Spacer()
                         .frame(height: AppSpacing.xxl)
                 }
@@ -165,6 +177,56 @@ struct SignInView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .animation(AppSpring.smooth, value: authViewModel.errorMessage)
+        .animation(AppSpring.smooth, value: authViewModel.successMessage)
+        .sheet(isPresented: $showPasswordReset) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                    Text("We’ll email you a link to reset your password. The link opens in this app using your saved redirect URL.")
+                        .font(Font.appCaption)
+                        .foregroundStyle(AppColors.textSecondary)
+
+                    AuthIconRow(icon: "envelope") {
+                        TextField("Email", text: $resetEmail)
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+
+                    if let message = authViewModel.successMessage {
+                        Text(message)
+                            .font(Font.appCaption)
+                            .foregroundStyle(AppColors.appSuccess)
+                    }
+                    if let message = authViewModel.errorMessage {
+                        Text(message)
+                            .font(Font.appCaption)
+                            .foregroundStyle(AppColors.appError)
+                    }
+
+                    Spacer()
+                }
+                .padding(AppSpacing.xl)
+                .navigationTitle("Reset password")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") {
+                            showPasswordReset = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Send") {
+                            Task {
+                                await authViewModel.sendPasswordReset(email: resetEmail)
+                            }
+                        }
+                        .disabled(resetEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || authViewModel.isLoading)
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
     }
 }
 

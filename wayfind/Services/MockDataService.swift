@@ -48,6 +48,37 @@ final class MockDataService {
         parsedBookings.filter { $0.tripId == tripId }
     }
 
+    func fetchProfileAggregateStats() async -> ProfileAggregateStats {
+        let calendar = Calendar.current
+        let inputs: [ProfileTripBucketInput] = trips.map { trip in
+            let startISO = SupabaseModelMapping.calendarDateOnlyString(from: trip.startDate, calendar: calendar)
+            let endISO = SupabaseModelMapping.calendarDateOnlyString(from: trip.endDate, calendar: calendar)
+            let status =
+                trip.databaseStatus
+                ?? SupabaseModelMapping.inferTripStatus(startDate: trip.startDate, endDate: trip.endDate, calendar: calendar)
+            return ProfileTripBucketInput(
+                id: trip.id,
+                startDateISO: startISO,
+                endDateISO: endISO,
+                status: status,
+                isActive: trip.isMarkedActiveOnServer
+            )
+        }
+        var placeIds = Set<String>()
+        for places in dayPlaces.values {
+            for place in places {
+                let trimmed = place.googlePlaceId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !trimmed.isEmpty { placeIds.insert(trimmed) }
+            }
+        }
+        return ProfileAggregateStats(
+            tripCount: trips.count,
+            upcomingOrActiveCount: ProfileTripBucketing.countUpcomingOrActiveTrips(inputs),
+            distinctPlaceCount: placeIds.count,
+            importedBookingCount: parsedBookings.count
+        )
+    }
+
     func deleteTrip(id: UUID) async {
         trips.removeAll { $0.id == id }
         guard let days = tripDays.removeValue(forKey: id) else { return }
@@ -56,11 +87,13 @@ final class MockDataService {
         }
     }
 
-    func addTrip(_ trip: Trip) async {
+    @discardableResult
+    func addTrip(_ trip: Trip) async -> Trip {
         trips.append(trip)
         if tripDays[trip.id] == nil {
             tripDays[trip.id] = []
         }
+        return trip
     }
 
     func addPlace(_ place: Place) async {
@@ -105,6 +138,60 @@ final class MockDataService {
         if let index = trips.firstIndex(where: { $0.id == trip.id }) {
             trips[index] = trip
         }
+    }
+
+    private var mockTripNotes: [UUID: [TripNote]] = [:]
+
+    func listTripNotes(tripId: UUID) async -> [TripNote] {
+        mockTripNotes[tripId] ?? []
+    }
+
+    func createTripNote(tripId: UUID) async -> TripNote? {
+        guard let trip = trips.first(where: { $0.id == tripId }) else { return nil }
+        let note = TripNote(
+            id: UUID(),
+            tripId: tripId,
+            userId: trip.userId,
+            title: "",
+            body: "",
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        var list = mockTripNotes[tripId] ?? []
+        list.insert(note, at: 0)
+        mockTripNotes[tripId] = list
+        return note
+    }
+
+    func updateTripNote(noteId: UUID, title: String, body: String) async {
+        for tid in mockTripNotes.keys {
+            guard var list = mockTripNotes[tid] else { continue }
+            if let i = list.firstIndex(where: { $0.id == noteId }) {
+                list[i].title = title
+                list[i].body = body
+                list[i].updatedAt = Date()
+                mockTripNotes[tid] = list
+                return
+            }
+        }
+    }
+
+    func deleteTripNote(noteId: UUID) async {
+        for tid in mockTripNotes.keys {
+            guard var list = mockTripNotes[tid] else { continue }
+            list.removeAll { $0.id == noteId }
+            mockTripNotes[tid] = list
+        }
+    }
+
+    func listTemplateTripChecklistsWithItems(tripId: UUID) async -> [TripChecklistWithItems] {
+        _ = tripId
+        return []
+    }
+
+    func setChecklistItemDone(itemId: UUID, isDone: Bool) async {
+        _ = itemId
+        _ = isDone
     }
 
     func regenerateDays(for tripId: UUID, startDate: Date, endDate: Date) async {
@@ -161,6 +248,12 @@ final class MockDataService {
             calendar.date(bySettingHour: hour, minute: minute, second: 0, of: calendar.startOfDay(for: day)) ?? day
         }
 
+        func tripServerSync(start: Date, end: Date) -> (status: String, isActive: Bool) {
+            let status = SupabaseModelMapping.inferTripStatus(startDate: start, endDate: end, calendar: calendar)
+            let isActive = SupabaseModelMapping.isTripActive(startDate: start, endDate: end, calendar: calendar)
+            return (status, isActive)
+        }
+
         let userId = UUID(uuidString: "6F1E8B2A-4C3D-5E6F-A7B8-9012345678AB")!
 
         let tripParisId = UUID(uuidString: "11111111-2222-3333-4444-555555550001")!
@@ -169,6 +262,7 @@ final class MockDataService {
 
         let parisStart = dayOffset(-2)
         let parisEnd = endOfCalendarDay(dayOffset(5))
+        let parisSync = tripServerSync(start: parisStart, end: parisEnd)
 
         let tripParis = Trip(
             id: tripParisId,
@@ -181,11 +275,15 @@ final class MockDataService {
             endDate: parisEnd,
             coverImageUrl: nil,
             notes: nil,
-            createdAt: dayOffset(-30)
+            createdAt: dayOffset(-30),
+            updatedAt: dayOffset(-2),
+            databaseStatus: parisSync.status,
+            isMarkedActiveOnServer: parisSync.isActive
         )
 
         let tokyoStart = dayOffset(12)
         let tokyoEnd = endOfCalendarDay(dayOffset(12 + 6))
+        let tokyoSync = tripServerSync(start: tokyoStart, end: tokyoEnd)
 
         let tripTokyo = Trip(
             id: tripTokyoId,
@@ -198,11 +296,15 @@ final class MockDataService {
             endDate: tokyoEnd,
             coverImageUrl: nil,
             notes: nil,
-            createdAt: dayOffset(-14)
+            createdAt: dayOffset(-14),
+            updatedAt: dayOffset(-10),
+            databaseStatus: tokyoSync.status,
+            isMarkedActiveOnServer: tokyoSync.isActive
         )
 
         let barcelonaEnd = endOfCalendarDay(dayOffset(-20))
         let barcelonaStart = dayOffset(-25)
+        let barcelonaSync = tripServerSync(start: barcelonaStart, end: barcelonaEnd)
 
         let tripBarcelona = Trip(
             id: tripBarcelonaId,
@@ -215,7 +317,10 @@ final class MockDataService {
             endDate: barcelonaEnd,
             coverImageUrl: nil,
             notes: nil,
-            createdAt: dayOffset(-60)
+            createdAt: dayOffset(-60),
+            updatedAt: dayOffset(-58),
+            databaseStatus: barcelonaSync.status,
+            isMarkedActiveOnServer: barcelonaSync.isActive
         )
 
         var tripDaysMap: [UUID: [ItineraryDay]] = [:]
@@ -446,6 +551,9 @@ final class MockDataService {
         tripDaysMap[tripBarcelonaId] = []
 
         let tripLondonId = UUID(uuidString: "11111111-2222-3333-4444-555555550004")!
+        let londonStart = dayOffset(20)
+        let londonEnd = endOfCalendarDay(dayOffset(25))
+        let londonSync = tripServerSync(start: londonStart, end: londonEnd)
         let tripLondon = Trip(
             id: tripLondonId,
             userId: userId,
@@ -453,15 +561,21 @@ final class MockDataService {
             destination: "London, UK",
             lat: 51.5074,
             lng: -0.1278,
-            startDate: dayOffset(20),
-            endDate: endOfCalendarDay(dayOffset(25)),
+            startDate: londonStart,
+            endDate: londonEnd,
             coverImageUrl: nil,
             notes: nil,
-            createdAt: dayOffset(-7)
+            createdAt: dayOffset(-7),
+            updatedAt: dayOffset(-3),
+            databaseStatus: londonSync.status,
+            isMarkedActiveOnServer: londonSync.isActive
         )
         tripDaysMap[tripLondonId] = []
 
         let tripRomeId = UUID(uuidString: "11111111-2222-3333-4444-555555550005")!
+        let romeStart = dayOffset(-40)
+        let romeEnd = endOfCalendarDay(dayOffset(-35))
+        let romeSync = tripServerSync(start: romeStart, end: romeEnd)
         let tripRome = Trip(
             id: tripRomeId,
             userId: userId,
@@ -469,11 +583,14 @@ final class MockDataService {
             destination: "Rome, Italy",
             lat: nil,
             lng: nil,
-            startDate: dayOffset(-40),
-            endDate: endOfCalendarDay(dayOffset(-35)),
+            startDate: romeStart,
+            endDate: romeEnd,
             coverImageUrl: nil,
             notes: nil,
-            createdAt: dayOffset(-50)
+            createdAt: dayOffset(-50),
+            updatedAt: dayOffset(-45),
+            databaseStatus: romeSync.status,
+            isMarkedActiveOnServer: romeSync.isActive
         )
         tripDaysMap[tripRomeId] = []
 

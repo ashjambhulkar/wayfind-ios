@@ -60,7 +60,7 @@ struct ForwardingBannerView: View {
                 .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                        .stroke(AppColors.appPrimary, style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
+                        .stroke(AppColors.appDivider, style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
                 )
             }
             .buttonStyle(.plain)

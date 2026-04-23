@@ -4,6 +4,8 @@ import UIKit
 struct PillButtonView: View {
     let sfSymbol: String
     let label: String
+    /// Optional suffix after the label (e.g. `" 2/10"` for checklist progress, `" 3"` for note count).
+    var trailingDetail: String?
     var badgeCount: Int?
     var showPulseDot: Bool = false
     var isActive: Bool = true
@@ -38,7 +40,7 @@ struct PillButtonView: View {
     private var pillLabel: some View {
         HStack(spacing: AppSpacing.xs) {
             Image(systemName: sfSymbol)
-            Text(label)
+            Text(label + (trailingDetail ?? ""))
             if let badgeCount {
                 Text("\(badgeCount)")
             }
@@ -70,7 +72,9 @@ struct PillButtonView: View {
                     .fill(Color.clear)
             }
         }
-        .accessibilityLabel("\(label)\(badgeCount.map { ", \($0) items" } ?? "")")
+        .accessibilityLabel(
+            "\(label)\(trailingDetail.map { "\($0)" } ?? "")\(badgeCount.map { ", \($0) items" } ?? "")"
+        )
     }
 }
 

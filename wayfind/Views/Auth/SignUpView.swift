@@ -130,6 +130,14 @@ struct SignUpView: View {
                             }
                     }
 
+                    if let message = authViewModel.successMessage {
+                        Text(message)
+                            .font(Font.appCaption)
+                            .foregroundStyle(AppColors.appSuccess)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, AppSpacing.sm)
+                    }
+
                     if let message = authViewModel.errorMessage {
                         Text(message)
                             .font(Font.appCaption)
@@ -172,5 +180,6 @@ struct SignUpView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .animation(AppSpring.smooth, value: authViewModel.errorMessage)
+        .animation(AppSpring.smooth, value: authViewModel.successMessage)
     }
 }

@@ -11,7 +11,7 @@ import Observation
 @Observable
 @MainActor
 final class TripDetailViewModel {
-    private let dataService: MockDataService
+    private let dataService: DataService
 
     var trip: Trip
     var scheduledDays: [ItineraryDay] = []
@@ -19,10 +19,15 @@ final class TripDetailViewModel {
     private(set) var wishlistDayId: UUID?
     var isLoading = false
 
+    /// Hero pill counts (Expo `TripDetailHero` checklist / notes chips).
+    var checklistDoneCount = 0
+    var checklistTotalCount = 0
+    var noteCount = 0
+
     private var placesByDayId: [UUID: [Place]] = [:]
     private var collapsedDayIds: Set<UUID> = []
 
-    init(trip: Trip, dataService: MockDataService) {
+    init(trip: Trip, dataService: DataService) {
         self.trip = trip
         self.dataService = dataService
     }
@@ -80,6 +85,15 @@ final class TripDetailViewModel {
         } else {
             wishlistPlaces = []
         }
+
+        await refreshHeroShortcutCounts()
+    }
+
+    func refreshHeroShortcutCounts() async {
+        let counts = await dataService.tripHeroShortcutCounts(tripId: trip.id)
+        checklistDoneCount = counts.checklistDone
+        checklistTotalCount = counts.checklistTotal
+        noteCount = counts.noteCount
     }
 
     func expandAll() {

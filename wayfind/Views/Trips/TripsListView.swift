@@ -1,9 +1,15 @@
 import Observation
 import SwiftUI
 
+private enum TripsListLayout {
+    /// Fixed width for each active trip card when multiple trips overlap “today”.
+    static let activeTripCardWidth: CGFloat = 300
+}
+
 struct TripsListView: View {
     @Environment(AuthViewModel.self) private var authViewModel
-    @Environment(MockDataService.self) private var dataService
+    @Environment(DataService.self) private var dataService
+    @Environment(UserPreferencesStore.self) private var userPreferences
     @Environment(ToastManager.self) private var toastManager
 
     @State private var viewModel: TripsViewModel?
@@ -26,7 +32,7 @@ struct TripsListView: View {
         }
         .task {
             if viewModel == nil {
-                viewModel = TripsViewModel(mockDataService: dataService)
+                viewModel = TripsViewModel(dataService: dataService, preferences: userPreferences)
             }
             await viewModel?.loadTrips()
         }
@@ -35,6 +41,7 @@ struct TripsListView: View {
 
 private struct TripsListBody: View {
     @Bindable var viewModel: TripsViewModel
+    @Environment(UserPreferencesStore.self) private var userPreferences
 
     @Binding var showCreateTrip: Bool
     @Binding var navigationPath: NavigationPath
@@ -54,6 +61,7 @@ private struct TripsListBody: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             ScrollView {
+                let _ = userPreferences.tripSortMode
                 VStack(alignment: .leading, spacing: AppSpacing.xl) {
                     if viewModel.isLoading && viewModel.trips.isEmpty {
                         ProgressView()
@@ -69,16 +77,29 @@ private struct TripsListBody: View {
                         )
                         .frame(minHeight: 400)
                     } else {
-                        if let active = viewModel.activeTrip {
+                        if !viewModel.activeTrips.isEmpty {
                             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                                Text("YOUR CURRENT TRIP")
+                                Text(viewModel.activeTrips.count == 1 ? "YOUR CURRENT TRIP" : "YOUR CURRENT TRIPS")
                                     .font(.appSmall)
                                     .foregroundStyle(AppColors.textTertiary)
                                     .textCase(.uppercase)
                                     .tracking(1.5)
 
-                                ActiveTripHeroView(trip: active) {
-                                    navigationPath.append(active)
+                                if viewModel.activeTrips.count == 1, let active = viewModel.activeTrips.first {
+                                    ActiveTripHeroView(trip: active) {
+                                        navigationPath.append(active)
+                                    }
+                                } else {
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(spacing: AppSpacing.md) {
+                                            ForEach(viewModel.activeTrips) { trip in
+                                                ActiveTripHeroView(trip: trip) {
+                                                    navigationPath.append(trip)
+                                                }
+                                                .frame(width: TripsListLayout.activeTripCardWidth)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -149,15 +170,18 @@ private struct TripsListBody: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
-                        Button {
-                            viewModel.sortOrder = .date
-                        } label: {
-                            Label("Date", systemImage: viewModel.sortOrder == .date ? "checkmark" : "calendar")
-                        }
-                        Button {
-                            viewModel.sortOrder = .name
-                        } label: {
-                            Label("Name", systemImage: viewModel.sortOrder == .name ? "checkmark" : "textformat")
+                        ForEach(TripListSortMode.allCases) { mode in
+                            Button {
+                                userPreferences.tripSortMode = mode
+                            } label: {
+                                HStack {
+                                    Text(mode.menuTitle)
+                                    if userPreferences.tripSortMode == mode {
+                                        Spacer(minLength: 8)
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
                         }
                     } label: {
                         Image(systemName: "arrow.up.arrow.down")

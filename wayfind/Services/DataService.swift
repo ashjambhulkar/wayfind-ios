@@ -8,6 +8,34 @@
 import Foundation
 import Observation
 
+enum TripCoverUploadError: LocalizedError {
+    case requiresSignedInBackend
+    case couldNotReadImage
+
+    var errorDescription: String? {
+        switch self {
+        case .requiresSignedInBackend:
+            return "Cover photos require signing in with the live backend."
+        case .couldNotReadImage:
+            return "Could not read that photo. Try a different image."
+        }
+    }
+}
+
+enum ProfileSaveError: LocalizedError {
+    case requiresSignedInBackend
+    case couldNotReadImage
+
+    var errorDescription: String? {
+        switch self {
+        case .requiresSignedInBackend:
+            return "Profile changes require signing in with the live backend."
+        case .couldNotReadImage:
+            return "Could not read that photo. Try a different image."
+        }
+    }
+}
+
 @Observable
 final class DataService {
     private let mock: MockDataService?
@@ -28,6 +56,18 @@ final class DataService {
         return await mock!.fetchTrips()
     }
 
+    /// Full `profiles` row for the signed-in user (nil in mock / offline mode or on error).
+    func fetchOwnUserProfileDetail() async -> UserProfileDetail? {
+        guard let real else { return nil }
+        return try? await real.fetchOwnProfileDetail()
+    }
+
+    /// Profile stats strip + hero counts (Expo `fetchProfileAggregateStats`).
+    func fetchProfileAggregateStats() async -> ProfileAggregateStats {
+        if let real { return (try? await real.fetchProfileAggregateStats()) ?? .empty }
+        return await mock!.fetchProfileAggregateStats()
+    }
+
     func fetchDays(for tripId: UUID) async -> [ItineraryDay] {
         if let real { return (try? await real.fetchDays(for: tripId)) ?? [] }
         return await mock!.fetchDays(for: tripId)
@@ -38,9 +78,13 @@ final class DataService {
         return await mock!.fetchPlaces(for: dayId)
     }
 
-    func addTrip(_ trip: Trip) async {
-        if let real { try? await real.addTrip(trip) }
-        else { await mock!.addTrip(trip) }
+    @discardableResult
+    func addTrip(_ trip: Trip) async -> Trip {
+        if let real {
+            if let created = try? await real.addTrip(trip) { return created }
+            return trip
+        }
+        return await mock!.addTrip(trip)
     }
 
     func deleteTrip(id: UUID) async {
@@ -73,6 +117,35 @@ final class DataService {
         else { await mock!.updateTrip(trip) }
     }
 
+    func uploadTripCoverPhoto(tripId: UUID, imageData: Data) async throws -> String {
+        guard let real else { throw TripCoverUploadError.requiresSignedInBackend }
+        return try await real.uploadCoverPhoto(data: imageData, tripId: tripId)
+    }
+
+    func uploadProfileAvatar(imageData: Data, contentType: String) async throws -> String {
+        guard let real else { throw ProfileSaveError.requiresSignedInBackend }
+        return try await real.uploadProfileAvatar(imageData: imageData, contentType: contentType)
+    }
+
+    func updateUserProfile(
+        displayName: String?,
+        username: String,
+        bio: String?,
+        preferredAirport: String?,
+        preferredCurrency: String?,
+        avatarURL: String?
+    ) async throws {
+        guard let real else { throw ProfileSaveError.requiresSignedInBackend }
+        try await real.updateProfileFields(
+            displayName: displayName,
+            username: username,
+            bio: bio,
+            preferredAirport: preferredAirport,
+            preferredCurrency: preferredCurrency,
+            avatarURL: avatarURL
+        )
+    }
+
     func regenerateDays(for tripId: UUID, startDate: Date, endDate: Date) async {
         if let real { try? await real.regenerateDays(for: tripId, startDate: startDate, endDate: endDate) }
         else { await mock!.regenerateDays(for: tripId, startDate: startDate, endDate: endDate) }
@@ -81,5 +154,48 @@ final class DataService {
     func fetchParsedBookings(for tripId: UUID) async -> [ParsedBooking] {
         if let real { return (try? await real.fetchParsedBookings(for: tripId)) ?? [] }
         return await mock!.fetchParsedBookings(for: tripId)
+    }
+
+    /// Counts for trip detail hero pills (Expo `TripDetailHero` checklist + notes chips).
+    func tripHeroShortcutCounts(tripId: UUID) async -> (checklistDone: Int, checklistTotal: Int, noteCount: Int) {
+        guard let real else { return (0, 0, 0) }
+        do {
+            try? await real.ensureTripChecklistTemplates(tripId: tripId)
+            let progress = try await real.fetchTripChecklistProgress(tripId: tripId)
+            let notes = try await real.fetchTripNoteCount(tripId: tripId)
+            return (progress.done, progress.total, notes)
+        } catch {
+            return (0, 0, 0)
+        }
+    }
+
+    func listTripNotes(tripId: UUID) async -> [TripNote] {
+        if let real { return (try? await real.listTripNotes(tripId: tripId)) ?? [] }
+        return await mock!.listTripNotes(tripId: tripId)
+    }
+
+    func createTripNote(tripId: UUID) async -> TripNote? {
+        if let real { return try? await real.createTripNote(tripId: tripId) }
+        return await mock!.createTripNote(tripId: tripId)
+    }
+
+    func updateTripNote(noteId: UUID, title: String, body: String) async {
+        if let real { try? await real.updateTripNote(noteId: noteId, title: title, body: body) }
+        else { await mock!.updateTripNote(noteId: noteId, title: title, body: body) }
+    }
+
+    func deleteTripNote(noteId: UUID) async {
+        if let real { try? await real.deleteTripNote(noteId: noteId) }
+        else { await mock!.deleteTripNote(noteId: noteId) }
+    }
+
+    func listTemplateTripChecklistsWithItems(tripId: UUID) async -> [TripChecklistWithItems] {
+        if let real { return (try? await real.listTemplateTripChecklistsWithItems(tripId: tripId)) ?? [] }
+        return await mock!.listTemplateTripChecklistsWithItems(tripId: tripId)
+    }
+
+    func setChecklistItemDone(itemId: UUID, isDone: Bool) async {
+        if let real { try? await real.setChecklistItemDone(itemId: itemId, isDone: isDone) }
+        else { await mock!.setChecklistItemDone(itemId: itemId, isDone: isDone) }
     }
 }

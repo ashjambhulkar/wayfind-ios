@@ -4,5 +4,28 @@
 <dict>
 	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
+	<key>GIDClientID</key>
+	<string>1009434603775-8c92mfkampnmj1l7goj6517raaelq0vl.apps.googleusercontent.com</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.1009434603775-8c92mfkampnmj1l7goj6517raaelq0vl</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>travel.wayfind.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>wayfind</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

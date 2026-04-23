@@ -1,24 +1,25 @@
 import Observation
 import SwiftUI
 
-private struct TripHeaderMinYKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
+enum TripDetailTab: Hashable {
+    case itinerary
+    case map
+    case budget
+    case bookings
+    /// Shown in a separate tab-bar slot on iOS 18+ via `Tab(…, role: .search)`.
+    case ai
 }
 
 struct TripDetailView: View {
-    @Environment(MockDataService.self) private var dataService
+    @Environment(DataService.self) private var dataService
     @Environment(ToastManager.self) private var toastManager
     @State private var viewModel: TripDetailViewModel?
-    @State private var headerMinY: CGFloat = 0
-    @State private var showMap = false
-    @State private var showBookings = false
+    @State private var selectedTab: TripDetailTab = .itinerary
+    @State private var showTripNotes = false
+    @State private var showTripChecklists = false
     @State private var showAddPlace = false
     @State private var showAddBooking = false
     @State private var addPlaceTargetDay: Int = 1
-    @State private var fabOpen = false
     @State private var hasAutoScrolled = false
     @State private var discoveryManager = ForwardingDiscoveryManager()
     @State private var bannerDismissed = false
@@ -37,44 +38,48 @@ struct TripDetailView: View {
     }
 
     var body: some View {
-        ZStack {
-            Group {
-                if let viewModel {
-                    if viewModel.isLoading && viewModel.scheduledDays.isEmpty {
-                        ProgressView()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        tripContent(viewModel: viewModel)
-                    }
+        Group {
+            if let viewModel {
+                if viewModel.isLoading && viewModel.scheduledDays.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    AppColors.appBackground
-                        .overlay { ProgressView() }
+                    tripContent(viewModel: viewModel)
                 }
+            } else {
+                AppColors.appBackground
+                    .overlay { ProgressView() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-
-            SpeedDialFABView(
-                isOpen: $fabOpen,
-                items: [
-                    (sfSymbol: "mappin.and.ellipse", label: "Add Place", action: {
-                        addPlaceTargetDay = trip.currentDayNumber ?? 1
-                        showAddPlace = true
-                    }),
-                    (sfSymbol: "airplane", label: "Add Booking", action: {
-                        showAddBooking = true
-                    }),
-                ],
-                footerTip: discoveryManager.shouldShowSpeedDialFooter(totalBookingsAcrossTrips: tripBookingCount)
-                    ? SpeedDialFooterTip(email: discoveryManager.forwardingEmail, onCopy: {})
-                    : nil
-            )
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.appBackground)
-        .navigationTitle(trip.title)
+        .navigationTitle(viewModel?.trip.title ?? trip.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(AppColors.appBackground, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarBackground(.automatic, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if selectedTab != .budget && selectedTab != .ai {
+                    Menu {
+                        Button {
+                            addPlaceTargetDay = trip.currentDayNumber ?? 1
+                            showAddPlace = true
+                        } label: {
+                            Label("Add Place", systemImage: "mappin.and.ellipse")
+                        }
+                        Button {
+                            addPlaceTargetDay = trip.currentDayNumber ?? 1
+                            showAddBooking = true
+                        } label: {
+                            Label("Add Booking", systemImage: "airplane")
+                        }
+                    } label: {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 17))
+                            .foregroundStyle(AppColors.appPrimary)
+                    }
+                    .accessibilityLabel("Add to trip")
+                }
                 Menu {
                     Button {
                         showEditTrip = true
@@ -103,9 +108,10 @@ struct TripDetailView: View {
                         .font(.system(size: 17))
                         .foregroundStyle(AppColors.appPrimary)
                 }
+                .accessibilityLabel("Trip actions")
             }
         }
-        .confirmationDialog("Delete \(trip.title)?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+        .confirmationDialog("Delete \(viewModel?.trip.title ?? trip.title)?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 Task {
                     await dataService.deleteTrip(id: trip.id)
@@ -197,11 +203,23 @@ struct TripDetailView: View {
                 }
             )
         }
-        .navigationDestination(isPresented: $showMap) {
-            TripMapView(trip: trip)
+        .navigationDestination(isPresented: $showTripNotes) {
+            TripNotesView(trip: viewModel?.trip ?? trip)
+                .toolbar(.hidden, for: .tabBar)
         }
-        .navigationDestination(isPresented: $showBookings) {
-            BookingsScreenView(trip: trip)
+        .navigationDestination(isPresented: $showTripChecklists) {
+            TripChecklistsView(trip: viewModel?.trip ?? trip)
+                .toolbar(.hidden, for: .tabBar)
+        }
+        .onChange(of: showTripNotes) { _, isOpen in
+            if !isOpen {
+                Task { await viewModel?.refreshHeroShortcutCounts() }
+            }
+        }
+        .onChange(of: showTripChecklists) { _, isOpen in
+            if !isOpen {
+                Task { await viewModel?.refreshHeroShortcutCounts() }
+            }
         }
         .navigationDestination(isPresented: $showAddBooking) {
             if let vm = viewModel, let targetDayId = vm.scheduledDays.first(where: { $0.dayNumber == addPlaceTargetDay })?.id {
@@ -209,6 +227,14 @@ struct TripDetailView: View {
                     onSave: { _ in Task { await vm.loadTripData() } },
                     targetDayId: targetDayId
                 )
+                .toolbar(.hidden, for: .tabBar)
+            }
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            if newTab != .itinerary {
+                showTripNotes = false
+                showTripChecklists = false
+                showAddBooking = false
             }
         }
         .sheet(isPresented: $showAddPlace) {
@@ -259,75 +285,136 @@ struct TripDetailView: View {
 
     @ViewBuilder
     private func tripContent(viewModel: TripDetailViewModel) -> some View {
+        if #available(iOS 18.0, *) {
+            tripTabBarModern(viewModel: viewModel)
+        } else {
+            tripTabBarLegacy(viewModel: viewModel)
+        }
+    }
+
+    /// iOS 18+: `Tab` with `role: .search` renders +ai in a **separate** tab-bar segment (system chrome).
+    @available(iOS 18.0, *)
+    @ViewBuilder
+    private func tripTabBarModern(viewModel: TripDetailViewModel) -> some View {
+        TabView(selection: $selectedTab) {
+            Tab("Itinerary", systemImage: "list.bullet", value: TripDetailTab.itinerary) {
+                itineraryTab(viewModel: viewModel)
+            }
+            Tab("Map", systemImage: "map", value: TripDetailTab.map) {
+                TripMapView(trip: viewModel.trip)
+            }
+            Tab("Budget", systemImage: "dollarsign.circle", value: TripDetailTab.budget) {
+                TripBudgetTabView()
+            }
+            Tab("Bookings", systemImage: "airplane", value: TripDetailTab.bookings) {
+                bookingsTabRoot(viewModel: viewModel)
+            }
+            Tab("+ai", systemImage: "sparkles", value: TripDetailTab.ai, role: .search) {
+                TripAiTabView()
+            }
+        }
+        .tabBarMinimizeOnScroll()
+    }
+
+    @ViewBuilder
+    private func tripTabBarLegacy(viewModel: TripDetailViewModel) -> some View {
+        TabView(selection: $selectedTab) {
+            itineraryTab(viewModel: viewModel)
+                .tabItem { Label("Itinerary", systemImage: "list.bullet") }
+                .tag(TripDetailTab.itinerary)
+
+            TripMapView(trip: viewModel.trip)
+                .tabItem { Label("Map", systemImage: "map") }
+                .tag(TripDetailTab.map)
+
+            TripBudgetTabView()
+                .tabItem { Label("Budget", systemImage: "dollarsign.circle") }
+                .tag(TripDetailTab.budget)
+
+            bookingsTabRoot(viewModel: viewModel)
+                .tabItem { Label("Bookings", systemImage: "airplane") }
+                .tag(TripDetailTab.bookings)
+
+            TripAiTabView()
+                .tabItem { Label("+ai", systemImage: "sparkles") }
+                .tag(TripDetailTab.ai)
+        }
+        .tabBarMinimizeOnScroll()
+    }
+
+    @ViewBuilder
+    private func bookingsTabRoot(viewModel: TripDetailViewModel) -> some View {
+        if viewModel.totalBookingsCount > 0 {
+            BookingsScreenView(trip: viewModel.trip)
+                .badge(viewModel.totalBookingsCount)
+        } else {
+            BookingsScreenView(trip: viewModel.trip)
+        }
+    }
+
+    @ViewBuilder
+    private func itineraryTab(viewModel: TripDetailViewModel) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                TripDetailParallaxHeader(trip: trip, topInset: 0)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: TripHeaderMinYKey.self,
-                                value: geo.frame(in: .named("tripScroll")).minY
+                VStack(spacing: 0) {
+                    TripDetailHeroHeader(trip: viewModel.trip)
+
+                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        pillsRow(viewModel: viewModel)
+
+                        HStack {
+                            Spacer()
+                            Button {
+                                let allCollapsed = viewModel.scheduledDays.allSatisfy { viewModel.isDayCollapsed($0) }
+                                if allCollapsed {
+                                    viewModel.expandAll()
+                                } else {
+                                    viewModel.collapseAll()
+                                }
+                            } label: {
+                                let allCollapsed = viewModel.scheduledDays.allSatisfy { viewModel.isDayCollapsed($0) }
+                                Text(allCollapsed ? "Expand all" : "Collapse all")
+                                    .font(.appCaption)
+                                    .foregroundStyle(AppColors.appPrimary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, AppSpacing.lg)
+                        .padding(.bottom, AppSpacing.sm)
+
+                        if discoveryManager.shouldShowTimelineBanner(tripBookingCount: tripBookingCount, tripId: trip.id) && !bannerDismissed {
+                            ForwardingBannerView(
+                                email: discoveryManager.forwardingEmail,
+                                onCopy: {
+                                    withAnimation(AppSpring.smooth) {
+                                        bannerDismissed = true
+                                    }
+                                    discoveryManager.dismissBanner(for: trip.id)
+                                },
+                                onDismiss: {
+                                    withAnimation(AppSpring.smooth) {
+                                        bannerDismissed = true
+                                    }
+                                    discoveryManager.dismissBanner(for: trip.id)
+                                }
                             )
+                            .padding(.horizontal, AppSpacing.lg)
+                            .padding(.bottom, AppSpacing.md)
+                            .transition(.opacity.combined(with: .scale(scale: 0.95)))
                         }
-                    )
 
-                pillsRow(viewModel: viewModel)
-
-                HStack {
-                    Spacer()
-                    Button {
-                        let allCollapsed = viewModel.scheduledDays.allSatisfy { viewModel.isDayCollapsed($0) }
-                        if allCollapsed {
-                            viewModel.expandAll()
-                        } else {
-                            viewModel.collapseAll()
+                        ForEach(viewModel.scheduledDays) { day in
+                            daySection(day: day, viewModel: viewModel)
                         }
-                    } label: {
-                        let allCollapsed = viewModel.scheduledDays.allSatisfy { viewModel.isDayCollapsed($0) }
-                        Text(allCollapsed ? "Expand all" : "Collapse all")
-                            .font(.appCaption)
-                            .foregroundStyle(AppColors.appPrimary)
+
+                        if !viewModel.wishlistPlaces.isEmpty {
+                            wishlistSection(viewModel: viewModel)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, AppSpacing.lg)
-                .padding(.bottom, AppSpacing.sm)
-
-                // Touchpoint 1: Timeline banner
-                if discoveryManager.shouldShowTimelineBanner(tripBookingCount: tripBookingCount, tripId: trip.id) && !bannerDismissed {
-                    ForwardingBannerView(
-                        email: discoveryManager.forwardingEmail,
-                        onCopy: {
-                            withAnimation(AppSpring.smooth) {
-                                bannerDismissed = true
-                            }
-                            discoveryManager.dismissBanner(for: trip.id)
-                        },
-                        onDismiss: {
-                            withAnimation(AppSpring.smooth) {
-                                bannerDismissed = true
-                            }
-                            discoveryManager.dismissBanner(for: trip.id)
-                        }
-                    )
-                    .padding(.horizontal, AppSpacing.lg)
-                    .padding(.bottom, AppSpacing.md)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                }
-
-                ForEach(viewModel.scheduledDays) { day in
-                    daySection(day: day, viewModel: viewModel)
-                }
-
-                if !viewModel.wishlistPlaces.isEmpty {
-                    wishlistSection(viewModel: viewModel)
-                }
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
             }
-                .padding(.bottom, 80)
-            }
-            .coordinateSpace(name: "tripScroll")
-            .onPreferenceChange(TripHeaderMinYKey.self) { headerMinY = $0 }
+            .contentMargins(.bottom, AppSpacing.sm, for: .scrollContent)
             .onChange(of: viewModel.isLoading) { _, isLoading in
                 if isLoading == false, !hasAutoScrolled,
                    trip.status == .active,
@@ -349,22 +436,26 @@ struct TripDetailView: View {
     private func pillsRow(viewModel: TripDetailViewModel) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: AppSpacing.sm) {
-                PillButtonView(sfSymbol: "map", label: "Map", isActive: true) {
-                    showMap = true
-                }
-                // Touchpoint 4: Pulse dot on Bookings pill when 0 bookings
                 PillButtonView(
-                    sfSymbol: "airplane",
-                    label: "Bookings",
-                    badgeCount: viewModel.totalBookingsCount,
-                    showPulseDot: discoveryManager.shouldShowPillPulseDot(tripBookingCount: tripBookingCount),
+                    sfSymbol: "checklist",
+                    label: "Checklist",
+                    trailingDetail: viewModel.checklistTotalCount > 0
+                        ? " \(viewModel.checklistDoneCount)/\(viewModel.checklistTotalCount)"
+                        : nil,
                     isActive: true
                 ) {
-                    showBookings = true
+                    HapticManager.light()
+                    showTripChecklists = true
                 }
-                PillButtonView(sfSymbol: "checklist", label: "Soon", isActive: false) {}
-                PillButtonView(sfSymbol: "note.text", label: "Soon", isActive: false) {}
-                PillButtonView(sfSymbol: "dollarsign.circle", label: "Soon", isActive: false) {}
+                PillButtonView(
+                    sfSymbol: "note.text",
+                    label: "Notes",
+                    trailingDetail: viewModel.noteCount > 0 ? " \(viewModel.noteCount)" : nil,
+                    isActive: true
+                ) {
+                    HapticManager.light()
+                    showTripNotes = true
+                }
             }
             .padding(.horizontal, AppSpacing.lg)
             .padding(.vertical, AppSpacing.md)
@@ -377,7 +468,6 @@ struct TripDetailView: View {
     private func daySection(day: ItineraryDay, viewModel: TripDetailViewModel) -> some View {
         let places = viewModel.places(for: day)
         let preview = places.prefix(3).map(\.name).joined(separator: ", ")
-        let dayHasBookings = places.contains(where: \.isBooking)
 
         Section {
             if !viewModel.isDayCollapsed(day) {
@@ -585,11 +675,27 @@ struct TripDetailView: View {
     }
 }
 
-// MARK: - Parallax Header
+// MARK: - Tab bar minimize on scroll (iOS 26+)
 
-private struct TripDetailParallaxHeader: View {
+private extension View {
+    /// Uses `tabBarMinimizeBehavior(.onScrollDown)`: the system tab bar minimizes when the user scrolls downward (scrollable tab content). No `isMinimizedOnScroll` API exists on `TabView`; this is the public modifier.
+    @ViewBuilder
+    func tabBarMinimizeOnScroll() -> some View {
+        if #available(iOS 26.0, *) {
+            self.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            self
+        }
+    }
+}
+
+// MARK: - Hero header (cover image)
+
+/// Edge‑to‑edge cover in a **fixed** hero rect: one width × one height, `aspectRatio(.fill)`, top‑pinned.
+/// Previous version used `visibleHeroHeight + navChromeTop` inside a **bottom‑aligned** `ZStack` clipped to
+/// `visibleHeroHeight`, which discarded the **top** of the bitmap (wrong crop / “card” look).
+private struct TripDetailHeroHeader: View {
     let trip: Trip
-    let topInset: CGFloat
 
     private var statusLabel: String {
         switch trip.status {
@@ -599,19 +705,37 @@ private struct TripDetailParallaxHeader: View {
         }
     }
 
-    private var totalHeight: CGFloat { 240 + topInset }
+    private var heroHeight: CGFloat {
+        TripDetailOverlayMetrics.visibleHeroHeight
+    }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            heroImage
+            GeometryReader { proxy in
+                let width = max(proxy.size.width, 1)
+                heroCoverSurface(width: width, height: heroHeight)
+                    .frame(width: width, height: heroHeight, alignment: .top)
+                    .clipped()
+            }
+            .frame(height: heroHeight)
+            .frame(maxWidth: .infinity, alignment: .top)
+            .allowsHitTesting(false)
 
             LinearGradient(
-                colors: [.clear, Color.black.opacity(0.65)],
-                startPoint: .top,
+                colors: [
+                    Color.black.opacity(0.0),
+                    Color.black.opacity(0.38),
+                    Color.black.opacity(0.72),
+                ],
+                startPoint: UnitPoint(x: 0.5, y: 0.15),
                 endPoint: .bottom
             )
+            .frame(maxWidth: .infinity)
+            .frame(height: heroHeight)
+            .allowsHitTesting(false)
 
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                Spacer(minLength: 0)
                 Text(statusLabel)
                     .font(.appSmall)
                     .foregroundStyle(.white)
@@ -623,36 +747,65 @@ private struct TripDetailParallaxHeader: View {
                 Text(trip.title)
                     .font(.sectionHeader)
                     .foregroundStyle(.white)
+                    .multilineTextAlignment(.leading)
                     .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
 
                 Text("\(trip.startDate.shortFormatted) – \(trip.endDate.shortFormatted)")
                     .font(.appCaption)
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 1)
             }
             .padding(AppSpacing.lg)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
+        .frame(height: heroHeight)
         .frame(maxWidth: .infinity)
-        .frame(height: totalHeight)
         .clipped()
     }
 
     @ViewBuilder
-    private var heroImage: some View {
+    private func heroCoverSurface(width: CGFloat, height: CGFloat) -> some View {
         if let urlString = trip.coverImageUrl, let url = URL(string: urlString) {
             AsyncImage(url: url) { phase in
                 switch phase {
-                case .empty, .failure:
-                    PlaceholderGradientView(destinationName: trip.destination)
+                case .empty:
+                    ZStack {
+                        TripDetailOverlayMetrics.heroImageLoadingBackground
+                        ProgressView()
+                            .tint(.white)
+                    }
+                    .frame(width: width, height: height)
+                    .clipped()
                 case .success(let image):
                     image
                         .resizable()
-                        .scaledToFill()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: width, height: height)
+                        .clipped()
+                case .failure:
+                    PlaceholderGradientView(destinationName: trip.destination)
+                        .frame(width: width, height: height)
+                        .clipped()
                 @unknown default:
                     PlaceholderGradientView(destinationName: trip.destination)
+                        .frame(width: width, height: height)
+                        .clipped()
                 }
             }
         } else {
             PlaceholderGradientView(destinationName: trip.destination)
+                .frame(width: width, height: height)
+                .clipped()
         }
     }
+}
+
+private enum TripDetailOverlayMetrics {
+    /// Taller than the previous 240pt strip for a more cinematic, travel‑premium cover proportion.
+    static let visibleHeroHeight: CGFloat = 304
+    static let heroImageLoadingBackground = Color(red: 0.12, green: 0.12, blue: 0.14)
 }

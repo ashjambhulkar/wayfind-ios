@@ -20,6 +20,12 @@ struct Trip: Identifiable, Codable, Hashable {
     var coverImageAttribution: String?
     var notes: String?
     var createdAt: Date
+    /// Mirrors Supabase `trips.updated_at` (used for “Recently updated” sort).
+    var updatedAt: Date
+    /// `trips.status` when loaded from Supabase; `nil` means infer from dates (mock/offline).
+    var databaseStatus: String? = nil
+    /// `trips.is_active` when loaded from Supabase.
+    var isMarkedActiveOnServer: Bool = false
 
     var dayCount: Int {
         let days = Calendar.current.dateComponents([.day], from: startDate, to: endDate).day ?? 0

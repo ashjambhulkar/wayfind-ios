@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct BookingsScreenView: View {
-    @Environment(MockDataService.self) var dataService
+    @Environment(DataService.self) var dataService
 
     let trip: Trip
 

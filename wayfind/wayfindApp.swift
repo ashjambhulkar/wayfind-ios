@@ -3,8 +3,13 @@ import SwiftUI
 @main
 struct WayfindApp: App {
     @State private var authViewModel = AuthViewModel()
-    @State private var dataService = MockDataService()
+    @State private var dataService = DataService()
+    @State private var userPreferences = UserPreferencesStore()
     @State private var toastManager = ToastManager()
+
+    init() {
+        AuthSessionService.shared.configure()
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -39,10 +44,16 @@ struct WayfindApp: App {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(AppColors.appBackground.ignoresSafeArea())
+            .preferredColorScheme(userPreferences.appearancePreference.preferredColorScheme)
             .environment(authViewModel)
             .environment(dataService)
+            .environment(userPreferences)
             .environment(toastManager)
             .toastOverlay(manager: toastManager)
+            .onOpenURL { url in
+                if AuthSessionService.shared.handleGoogleURL(url) { return }
+                Task { await authViewModel.handleIncomingAuthURL(url) }
+            }
         }
     }
 }
@@ -104,7 +115,7 @@ private struct DisplayNamePromptView: View {
         .presentationDragIndicator(.visible)
         .interactiveDismissDisabled()
         .onAppear {
-            let prefix = authViewModel.currentUserEmail.components(separatedBy: "@").first ?? ""
+            let prefix = authViewModel.currentUserEmail.split(separator: "@").first.map(String.init) ?? ""
             name = prefix.capitalized
         }
     }
