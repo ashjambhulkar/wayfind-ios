@@ -49,3 +49,4 @@ enum HapticManager {
         selectionGenerator.selectionChanged()
     }
 }
+

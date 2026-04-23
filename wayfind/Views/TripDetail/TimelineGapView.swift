@@ -37,3 +37,4 @@ struct TimelineGapView: View {
         return HaversineDistance.estimateTravelTime(from: fromCoord, to: toCoord, mode: mode)
     }
 }
+

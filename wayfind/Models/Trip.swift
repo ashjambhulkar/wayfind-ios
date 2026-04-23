@@ -58,3 +58,4 @@ struct Trip: Identifiable, Codable, Hashable {
 enum TripStatus {
     case upcoming, active, past
 }
+

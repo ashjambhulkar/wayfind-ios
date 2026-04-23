@@ -14,3 +14,4 @@ struct ProfileAggregateStats: Equatable, Sendable {
         importedBookingCount: 0
     )
 }
+

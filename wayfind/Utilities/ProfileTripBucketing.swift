@@ -143,3 +143,4 @@ enum ProfileTripBucketing {
         return SupabaseModelMapping.inferTripStatus(startDate: trip.startDate, endDate: trip.endDate, calendar: calendar)
     }
 }
+

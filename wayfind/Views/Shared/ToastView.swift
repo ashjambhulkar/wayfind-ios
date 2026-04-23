@@ -130,3 +130,4 @@ extension View {
         modifier(ToastOverlayModifier(toastManager: manager))
     }
 }
+

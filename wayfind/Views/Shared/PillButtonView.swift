@@ -85,3 +85,4 @@ private struct PillPressButtonStyle: ButtonStyle {
             .animation(AppSpring.snappy, value: configuration.isPressed)
     }
 }
+

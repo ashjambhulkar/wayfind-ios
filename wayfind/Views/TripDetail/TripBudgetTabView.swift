@@ -12,3 +12,4 @@ struct TripBudgetTabView: View {
         .background(AppColors.appBackground)
     }
 }
+

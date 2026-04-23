@@ -94,3 +94,4 @@ struct TripNoteEditorView: View {
         dismiss()
     }
 }
+

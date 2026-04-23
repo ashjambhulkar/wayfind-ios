@@ -88,3 +88,4 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         [.banner, .sound]
     }
 }
+

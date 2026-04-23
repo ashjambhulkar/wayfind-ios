@@ -385,3 +385,4 @@ struct EditProfileView: View {
         dismiss()
     }
 }
+

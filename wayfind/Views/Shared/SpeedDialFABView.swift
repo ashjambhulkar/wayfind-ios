@@ -135,3 +135,4 @@ struct SpeedDialFooterTip {
     let email: String
     var onCopy: () -> Void
 }
+

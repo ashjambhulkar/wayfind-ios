@@ -82,3 +82,4 @@ struct ForwardingBannerView: View {
         .animation(AppSpring.smooth, value: copied)
     }
 }
+

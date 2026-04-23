@@ -70,3 +70,4 @@ struct DaySectionHeaderView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+

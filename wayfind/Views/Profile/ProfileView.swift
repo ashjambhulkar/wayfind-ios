@@ -573,3 +573,4 @@ struct ProfileView: View {
             .environment(UserPreferencesStore())
     }
 }
+

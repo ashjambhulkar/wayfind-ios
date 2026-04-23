@@ -1,0 +1,94 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Xcode — build & indexes
+build/
+Build/
+DerivedData/
+# Project-local custom derived data (e.g. `-derivedDataPath`)
+.derived-data-wayfind/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.bcsymbolmap
+*.xcresult
+*.moved-aside
+*.xcscmblueprint
+*.xcfilelist
+
+# Xcode — user / machine-specific
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcuserdatad
+# Legacy per-user project file noise (rare; xcuserdata/ covers most)
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Swift Package Manager
+# (Package.resolved is not ignored — commit it for reproducible dependency resolution.)
+.build/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+fastlane/.env
+match_version.txt
+*.jks
+*.p12
+*.cer
+*.mobileprovision
+
+# Accio
+Dependencies/
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# IDEs
+.idea/
+.vscode/
+.cursor/
+*.swp
+*~
+
+# Local tooling (e.g. concatenated “all files” scratch buffer)
+/AllFiles.swift
+
+# App packaging / archives
+*.crash
+
+# Test / coverage
+*.gcda
+*.gcno
+*.gcov
+coverage.xccovreport
+coverage.xccovjson
+
+# Instruments
+*.trace
+
+# Ruby / bundler (if used for fastlane, cocoapods)
+vendor/bundle

@@ -103,3 +103,4 @@ struct TripNotesView: View {
         noteToEdit = note
     }
 }
+

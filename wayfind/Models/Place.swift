@@ -75,3 +75,4 @@ struct Place: Identifiable, Codable, Hashable {
         }
     }
 }
+

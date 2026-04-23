@@ -44,3 +44,4 @@ extension View {
         modifier(ShimmerModifier())
     }
 }
+

@@ -9,3 +9,4 @@ struct TripNote: Identifiable, Hashable, Sendable {
     let createdAt: Date
     var updatedAt: Date
 }
+

@@ -24,3 +24,4 @@ enum AppSpring {
         .spring(response: 0.3, dampingFraction: 1.0)
     }
 }
+

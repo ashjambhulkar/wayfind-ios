@@ -28,3 +28,4 @@ enum TimelineRailView {
             .frame(width: 12, height: 2)
     }
 }
+

@@ -34,3 +34,4 @@ enum AppConfig {
         !supabaseURL.contains("YOUR_PROJECT")
     }
 }
+

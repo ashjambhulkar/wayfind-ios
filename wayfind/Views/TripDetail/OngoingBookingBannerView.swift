@@ -31,3 +31,4 @@ struct OngoingBookingBannerView: View {
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous))
     }
 }
+

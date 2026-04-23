@@ -315,3 +315,4 @@ struct EditTripView: View {
         dismiss()
     }
 }
+

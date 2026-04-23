@@ -1,9 +1,12 @@
 import SwiftUI
+import UIKit
 
 struct DayFilterChipsView: View {
     @Binding var selectedDay: Int?
     let dayCount: Int
     var unselectedBackground: Color = AppColors.appSurface
+    /// When `true` (e.g. map bottom sheet on material), unselected chips use `tertiarySystemFill` for a system pill look.
+    var unselectedSystemFill: Bool = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -34,11 +37,19 @@ struct DayFilterChipsView: View {
                 .foregroundStyle(isSelected ? Color.white : AppColors.textSecondary)
                 .padding(.horizontal, AppSpacing.md)
                 .frame(height: 32)
-                .background(isSelected ? AppColors.appPrimary : unselectedBackground)
+                .background {
+                    if isSelected {
+                        Capsule().fill(AppColors.appPrimary)
+                    } else if unselectedSystemFill {
+                        Capsule().fill(Color(UIColor.tertiarySystemFill))
+                    } else {
+                        Capsule().fill(unselectedBackground)
+                    }
+                }
                 .clipShape(Capsule())
                 .overlay(
                     Capsule()
-                        .strokeBorder(AppColors.appDivider, lineWidth: isSelected ? 0 : 1)
+                        .strokeBorder(AppColors.appDivider, lineWidth: (isSelected || unselectedSystemFill) ? 0 : 1)
                 )
         }
         .buttonStyle(.plain)

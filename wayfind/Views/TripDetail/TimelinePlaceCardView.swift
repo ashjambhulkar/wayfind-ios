@@ -79,3 +79,4 @@ struct TimelinePlaceCardView: View {
         .accessibilityLabel("\(place.categoryEnum.label): \(place.name)\(timeRangeText.map { ", \($0)" } ?? "")")
     }
 }
+

@@ -214,3 +214,4 @@ struct PlaceDetailSheet: View {
         .background(AppColors.appBackground)
     }
 }
+

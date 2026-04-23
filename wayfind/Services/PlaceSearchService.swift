@@ -188,3 +188,4 @@ private struct PlaceDetailsResponse: Decodable {
         let lng: Double
     }
 }
+

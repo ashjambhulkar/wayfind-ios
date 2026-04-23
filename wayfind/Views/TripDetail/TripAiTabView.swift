@@ -19,3 +19,4 @@ struct TripAiTabView: View {
         .background(AppColors.appBackground)
     }
 }
+

@@ -1,20 +1,12 @@
 import Observation
 import SwiftUI
 
-enum TripDetailTab: Hashable {
-    case itinerary
-    case map
-    case budget
-    case bookings
-    /// Shown in a separate tab-bar slot on iOS 18+ via `Tab(…, role: .search)`.
-    case ai
-}
-
 struct TripDetailView: View {
     @Environment(DataService.self) private var dataService
     @Environment(ToastManager.self) private var toastManager
     @State private var viewModel: TripDetailViewModel?
-    @State private var selectedTab: TripDetailTab = .itinerary
+
+    // Sheet state
     @State private var showTripNotes = false
     @State private var showTripChecklists = false
     @State private var showAddPlace = false
@@ -29,6 +21,12 @@ struct TripDetailView: View {
     @State private var placeToMove: Place?
     @State private var selectedPlace: Place?
     @State private var selectedPlacePrevious: Place?
+
+    // Action bar navigation (map is opened from the trip "…" menu, not the action bar)
+    @State private var showMap = false
+    @State private var showBookings = false
+    @State private var showBudget = false
+
     @Environment(\.dismiss) private var dismiss
 
     let trip: Trip
@@ -38,79 +36,7 @@ struct TripDetailView: View {
     }
 
     var body: some View {
-        Group {
-            if let viewModel {
-                if viewModel.isLoading && viewModel.scheduledDays.isEmpty {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    tripContent(viewModel: viewModel)
-                }
-            } else {
-                AppColors.appBackground
-                    .overlay { ProgressView() }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AppColors.appBackground)
-        .navigationTitle(viewModel?.trip.title ?? trip.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.automatic, for: .navigationBar)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if selectedTab != .budget && selectedTab != .ai {
-                    Menu {
-                        Button {
-                            addPlaceTargetDay = trip.currentDayNumber ?? 1
-                            showAddPlace = true
-                        } label: {
-                            Label("Add Place", systemImage: "mappin.and.ellipse")
-                        }
-                        Button {
-                            addPlaceTargetDay = trip.currentDayNumber ?? 1
-                            showAddBooking = true
-                        } label: {
-                            Label("Add Booking", systemImage: "airplane")
-                        }
-                    } label: {
-                        Image(systemName: "plus.circle")
-                            .font(.system(size: 17))
-                            .foregroundStyle(AppColors.appPrimary)
-                    }
-                    .accessibilityLabel("Add to trip")
-                }
-                Menu {
-                    Button {
-                        showEditTrip = true
-                    } label: {
-                        Label("Edit Trip", systemImage: "pencil")
-                    }
-                    Divider()
-                    Button {
-                        viewModel?.expandAll()
-                    } label: {
-                        Label("Expand All Days", systemImage: "arrow.up.left.and.arrow.down.right")
-                    }
-                    Button {
-                        viewModel?.collapseAll()
-                    } label: {
-                        Label("Collapse All Days", systemImage: "arrow.down.right.and.arrow.up.left")
-                    }
-                    Divider()
-                    Button(role: .destructive) {
-                        showDeleteConfirmation = true
-                    } label: {
-                        Label("Delete Trip", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 17))
-                        .foregroundStyle(AppColors.appPrimary)
-                }
-                .accessibilityLabel("Trip actions")
-            }
-        }
+        tripDetailNavigationShell
         .confirmationDialog("Delete \(viewModel?.trip.title ?? trip.title)?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 Task {
@@ -230,13 +156,6 @@ struct TripDetailView: View {
                 .toolbar(.hidden, for: .tabBar)
             }
         }
-        .onChange(of: selectedTab) { _, newTab in
-            if newTab != .itinerary {
-                showTripNotes = false
-                showTripChecklists = false
-                showAddBooking = false
-            }
-        }
         .sheet(isPresented: $showAddPlace) {
             if let vm = viewModel {
                 AddPlaceView(
@@ -281,76 +200,187 @@ struct TripDetailView: View {
         }
     }
 
-    // MARK: - Trip Content
+    /// Navigation shell: title, toolbar, and action-bar destinations.
+    private var tripDetailNavigationShell: some View {
+        Group {
+            if let viewModel {
+                if viewModel.isLoading && viewModel.scheduledDays.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    VStack(spacing: 0) {
+                        itineraryTab(viewModel: viewModel)
 
-    @ViewBuilder
-    private func tripContent(viewModel: TripDetailViewModel) -> some View {
-        if #available(iOS 18.0, *) {
-            tripTabBarModern(viewModel: viewModel)
-        } else {
-            tripTabBarLegacy(viewModel: viewModel)
-        }
-    }
-
-    /// iOS 18+: `Tab` with `role: .search` renders +ai in a **separate** tab-bar segment (system chrome).
-    @available(iOS 18.0, *)
-    @ViewBuilder
-    private func tripTabBarModern(viewModel: TripDetailViewModel) -> some View {
-        TabView(selection: $selectedTab) {
-            Tab("Itinerary", systemImage: "list.bullet", value: TripDetailTab.itinerary) {
-                itineraryTab(viewModel: viewModel)
-            }
-            Tab("Map", systemImage: "map", value: TripDetailTab.map) {
-                TripMapView(trip: viewModel.trip)
-            }
-            Tab("Budget", systemImage: "dollarsign.circle", value: TripDetailTab.budget) {
-                TripBudgetTabView()
-            }
-            Tab("Bookings", systemImage: "airplane", value: TripDetailTab.bookings) {
-                bookingsTabRoot(viewModel: viewModel)
-            }
-            Tab("+ai", systemImage: "sparkles", value: TripDetailTab.ai, role: .search) {
-                TripAiTabView()
+                        // Bottom action bar (replaces TabView)
+                        tripActionBar(viewModel: viewModel)
+                    }
+                }
+            } else {
+                AppColors.appBackground
+                    .overlay { ProgressView() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .tabBarMinimizeOnScroll()
-    }
-
-    @ViewBuilder
-    private func tripTabBarLegacy(viewModel: TripDetailViewModel) -> some View {
-        TabView(selection: $selectedTab) {
-            itineraryTab(viewModel: viewModel)
-                .tabItem { Label("Itinerary", systemImage: "list.bullet") }
-                .tag(TripDetailTab.itinerary)
-
-            TripMapView(trip: viewModel.trip)
-                .tabItem { Label("Map", systemImage: "map") }
-                .tag(TripDetailTab.map)
-
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppColors.appBackground)
+        .navigationTitle(viewModel?.trip.title ?? trip.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.automatic, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        showEditTrip = true
+                    } label: {
+                        Label("Edit Trip", systemImage: "pencil")
+                    }
+                    Divider()
+                    Button {
+                        viewModel?.expandAll()
+                    } label: {
+                        Label("Expand All Days", systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
+                    Button {
+                        viewModel?.collapseAll()
+                    } label: {
+                        Label("Collapse All Days", systemImage: "arrow.down.right.and.arrow.up.left")
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        showDeleteConfirmation = true
+                    } label: {
+                        Label("Delete Trip", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 17))
+                        .foregroundStyle(AppColors.appPrimary)
+                }
+                .accessibilityLabel("Trip actions")
+            }
+        }
+        .navigationDestination(isPresented: $showMap) {
+            TripMapView(trip: viewModel?.trip ?? trip)
+                .toolbar(.hidden, for: .tabBar)
+        }
+        .navigationDestination(isPresented: $showBookings) {
+            BookingsScreenView(trip: viewModel?.trip ?? trip)
+                .toolbar(.hidden, for: .tabBar)
+        }
+        .navigationDestination(isPresented: $showBudget) {
             TripBudgetTabView()
-                .tabItem { Label("Budget", systemImage: "dollarsign.circle") }
-                .tag(TripDetailTab.budget)
-
-            bookingsTabRoot(viewModel: viewModel)
-                .tabItem { Label("Bookings", systemImage: "airplane") }
-                .tag(TripDetailTab.bookings)
-
-            TripAiTabView()
-                .tabItem { Label("+ai", systemImage: "sparkles") }
-                .tag(TripDetailTab.ai)
-        }
-        .tabBarMinimizeOnScroll()
-    }
-
-    @ViewBuilder
-    private func bookingsTabRoot(viewModel: TripDetailViewModel) -> some View {
-        if viewModel.totalBookingsCount > 0 {
-            BookingsScreenView(trip: viewModel.trip)
-                .badge(viewModel.totalBookingsCount)
-        } else {
-            BookingsScreenView(trip: viewModel.trip)
+                .navigationTitle("Budget")
+                .toolbar(.hidden, for: .tabBar)
         }
     }
+
+    // MARK: - Bottom Action Bar (glass effect, separated primary action)
+
+    private func tripActionBar(viewModel: TripDetailViewModel) -> some View {
+        HStack(spacing: 0) {
+            // Left group: navigation actions
+            HStack(spacing: 0) {
+                actionBarButton(symbol: "map.fill", label: "Map") {
+                    showMap = true
+                }
+                actionBarButton(symbol: "airplane", label: "Bookings") {
+                    showBookings = true
+                }
+                actionBarButton(symbol: "creditcard", label: "Budget") {
+                    showBudget = true
+                }
+            }
+
+            // Separator
+            Capsule()
+                .fill(AppColors.appDivider)
+                .frame(width: 1, height: 28)
+                .padding(.horizontal, 2)
+
+            // Right: primary "Add" action (separated like Tab role: .search)
+            actionBarPrimaryButton {
+                addPlaceTargetDay = trip.currentDayNumber ?? 1
+                showAddPlace = true
+            }
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+        .background {
+            glassBar
+        }
+    }
+
+    /// Glass background that extends through the safe area.
+    private var glassBar: some View {
+        ZStack {
+            // Frosted glass base
+            Rectangle()
+                .fill(.ultraThinMaterial)
+
+            // Subtle top highlight for depth
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(.white.opacity(0.15))
+                    .frame(height: 0.5)
+                Spacer()
+            }
+        }
+        .ignoresSafeArea(edges: .bottom)
+    }
+
+    // MARK: - Action Bar Buttons
+
+    private func actionBarButton(symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            HapticManager.light()
+            action()
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: symbol)
+                    .font(.system(size: 20, weight: .medium))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .frame(height: 28)
+
+                Text(label)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(AppColors.textTertiary)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(ActionBarPressStyle())
+        .accessibilityLabel(label)
+    }
+
+    /// Primary creation button — separated to the right with a filled capsule.
+    private func actionBarPrimaryButton(action: @escaping () -> Void) -> some View {
+        Button {
+            HapticManager.medium()
+            action()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .bold))
+                Text("Add")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 20)
+            .frame(height: 40)
+            .background(
+                Capsule()
+                    .fill(AppColors.appPrimary)
+                    .shadow(color: AppColors.appPrimary.opacity(0.25), radius: 8, x: 0, y: 4)
+            )
+        }
+        .buttonStyle(ActionBarPressStyle())
+        .accessibilityLabel("Add place or booking")
+    }
+
+    // MARK: - Itinerary Content (always visible, no tab switching)
 
     @ViewBuilder
     private func itineraryTab(viewModel: TripDetailViewModel) -> some View {
@@ -675,17 +705,14 @@ struct TripDetailView: View {
     }
 }
 
-// MARK: - Tab bar minimize on scroll (iOS 26+)
+// MARK: - Action Bar Button Style
 
-private extension View {
-    /// Uses `tabBarMinimizeBehavior(.onScrollDown)`: the system tab bar minimizes when the user scrolls downward (scrollable tab content). No `isMinimizedOnScroll` API exists on `TabView`; this is the public modifier.
-    @ViewBuilder
-    func tabBarMinimizeOnScroll() -> some View {
-        if #available(iOS 26.0, *) {
-            self.tabBarMinimizeBehavior(.onScrollDown)
-        } else {
-            self
-        }
+private struct ActionBarPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.90 : 1.0)
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+            .animation(AppSpring.snappy, value: configuration.isPressed)
     }
 }
 
@@ -809,3 +836,4 @@ private enum TripDetailOverlayMetrics {
     static let visibleHeroHeight: CGFloat = 304
     static let heroImageLoadingBackground = Color(red: 0.12, green: 0.12, blue: 0.14)
 }
+

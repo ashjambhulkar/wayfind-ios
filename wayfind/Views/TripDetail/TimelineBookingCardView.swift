@@ -126,3 +126,4 @@ struct TimelineBookingCardView: View {
         .accessibilityLabel("\(place.bookingCategoryEnum?.label ?? "Booking"): \(place.name)\(place.confirmationNumber.map { ", confirmation \($0)" } ?? "")")
     }
 }
+

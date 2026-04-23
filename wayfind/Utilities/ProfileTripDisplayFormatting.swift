@@ -84,3 +84,4 @@ enum ProfileTripDisplayFormatting {
         return f.string(from: date)
     }
 }
+

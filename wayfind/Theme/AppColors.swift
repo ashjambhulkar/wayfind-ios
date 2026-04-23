@@ -60,3 +60,4 @@ enum AppColors {
         return palette[index]
     }
 }
+

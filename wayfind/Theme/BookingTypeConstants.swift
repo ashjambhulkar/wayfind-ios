@@ -91,3 +91,4 @@ enum PlaceCategory: String, CaseIterable, Codable {
         }
     }
 }
+
