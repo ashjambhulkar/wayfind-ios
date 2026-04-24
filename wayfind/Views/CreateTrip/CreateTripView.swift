@@ -140,3 +140,6 @@ struct CreateTripView: View {
         .environment(DataService())
         .environment(UserPreferencesStore())
 }
+
+// =============================================================================
+

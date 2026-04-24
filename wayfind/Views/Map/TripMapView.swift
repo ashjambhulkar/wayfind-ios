@@ -2,10 +2,31 @@ import CoreLocation
 import MapKit
 import SwiftUI
 
+/// Temporary pin dropped on the map for an autocomplete search result.
+struct MapSearchPin: Identifiable {
+    let id = UUID()
+    let name: String
+    let coordinate: CLLocationCoordinate2D
+}
+
+/// Downward-pointing triangle used for the search result pin callout.
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 struct TripMapView: View {
     let trip: Trip
     /// Legacy binding kept for callers that still pass it; ignored internally.
     var externalSearchText: Binding<String>?
+    /// Shared state with the tab accessory bar (iOS 26+). Nil when not in a tab.
+    var sharedState: MapTabSharedState?
 
     @Environment(DataService.self) var dataService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -23,14 +44,19 @@ struct TripMapView: View {
     @State private var wishlistPlaces: [Place] = []
     @State private var activeCategoryFilter: String?
 
-    /// Native `sheet` for places; temporarily hidden when another modal is on screen.
-    @State private var isPlacesListSheetPresented = true
-    @State private var placesListSheetDetent: PresentationDetent = .medium
+    /// Temporary map pin for a search result selected from autocomplete.
+    @State private var searchResultPin: MapSearchPin?
+
+    /// Controls whether the expanded places sheet is shown.
+    @State private var showPlacesSheet = false
     @State private var searchRegion: MKCoordinateRegion
     @State private var mapSearchDebounceGeneration = 0
 
     /// Hybrid is the default map style.
     @State private var mapMode: TripMapMode = .hybrid
+
+    /// Track map container height so we can offset the camera above the sheet.
+    @State private var mapContainerHeight: CGFloat = 0
 
     @State private var showMapModesSheet = false
     @State private var lastMapCamera: MapCamera?
@@ -92,9 +118,10 @@ struct TripMapView: View {
         )
     }
 
-    init(trip: Trip, searchText: Binding<String>? = nil) {
+    init(trip: Trip, searchText: Binding<String>? = nil, sharedState: MapTabSharedState? = nil) {
         self.trip = trip
         self.externalSearchText = searchText
+        self.sharedState = sharedState
 
         let center = CLLocationCoordinate2D(
             latitude: trip.lat ?? 0,
@@ -131,9 +158,11 @@ struct TripMapView: View {
             }
             .onChange(of: places) { _, _ in
                 fitMapForCurrentMode()
+                syncToSharedState()
             }
             .onChange(of: selectedDayFilter) { _, _ in
                 fitMapToMatchDayFilter(animated: !reduceMotion)
+                sharedState?.selectedDayFilter = selectedDayFilter
             }
             .onChange(of: searchText) { _, newValue in
                 externalSearchText?.wrappedValue = newValue
@@ -146,23 +175,50 @@ struct TripMapView: View {
             }
             .onAppear {
                 fitMapForCurrentMode()
-                updatePlacesSheetVisibility()
+                syncToSharedState()
             }
-            .onChange(of: showMapModesSheet) { _, _ in
-                updatePlacesSheetVisibility()
+            .onChange(of: sharedState?.selectedDayFilter) { _, newVal in
+                if let newVal, newVal != selectedDayFilter {
+                    selectedDayFilter = newVal
+                }
             }
-            .onChange(of: showAddPlace) { _, _ in
-                updatePlacesSheetVisibility()
+            .onChange(of: sharedState?.showPlacesSheet) { _, newVal in
+                if let newVal, newVal != showPlacesSheet {
+                    showPlacesSheet = newVal
+                }
             }
-            .onChange(of: selectedPlace) { _, _ in
-                updatePlacesSheetVisibility()
+            .onChange(of: showPlacesSheet) { _, newVal in
+                sharedState?.showPlacesSheet = newVal
             }
-            .sheet(isPresented: $isPlacesListSheetPresented) {
-                placesListSheetContent
+            .onChange(of: sharedState?.selectedPlaceToFocus) { _, place in
+                if let place {
+                    selectAndFocusPlace(place)
+                    sharedState?.selectedPlaceToFocus = nil
+                }
+            }
+            .onChange(of: sharedState?.searchResultToFocus?.1) { _, _ in
+                if let result = sharedState?.searchResultToFocus {
+                    handleSearchResultSelected(result.0, lat: result.1, lng: result.2)
+                    sharedState?.searchResultToFocus = nil
+                }
+            }
+            .onChange(of: selectedPlace) { oldPlace, newPlace in
+                if oldPlace != nil && newPlace == nil {
+                    withAnimation(Self.dayFilterMapAnimation) {
+                        fitMapToAnnotations()
+                    }
+                }
             }
             .sheet(item: $selectedPlace) { place in
-                PlaceCalloutView(place: place)
-                    .presentationDetents([.medium, .large])
+                let dayPlaces = places
+                    .filter { $0.itineraryDayId == place.itineraryDayId }
+                    .sorted { $0.sortOrder < $1.sortOrder }
+                let prevPlace = dayPlaces.first(where: { $0.sortOrder == place.sortOrder - 1 })
+
+                PlaceDetailSheet(
+                    place: place,
+                    previousPlace: prevPlace
+                )
             }
             .sheet(isPresented: $showMapModesSheet) {
                 TripMapModesSheet(selectedMode: $mapMode)
@@ -180,33 +236,21 @@ struct TripMapView: View {
         mapContent
             .ignoresSafeArea()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    @ViewBuilder
-    private var placesListSheetContent: some View {
-        TripMapPlacesSheet(
-            trip: trip,
-            selectedDayFilter: $selectedDayFilter,
-            activeCategoryFilter: $activeCategoryFilter,
-            mappablePlaces: mappablePlaces,
-            allPlacesForList: sortedMapDisplayedPlaces,
-            dayNumberByDayId: dayNumberByDayId,
-            sheetDetent: $placesListSheetDetent,
-            minSheetDetent: Self.placesListMinDetent,
-            onSelectPlace: { place in
-                selectedPlace = place
-            },
-            searchText: $searchText
-        )
-        .presentationDetents(
-            [Self.placesListMinDetent, .medium, .large],
-            selection: $placesListSheetDetent
-        )
-        .presentationBackground(.regularMaterial)
-        .presentationBackgroundInteraction(.enabled)
-        .presentationDragIndicator(.visible)
-        .interactiveDismissDisabled()
-        .tint(AppColors.appPrimary)
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { mapContainerHeight = geo.size.height }
+                        .onChange(of: geo.size.height) { _, h in mapContainerHeight = h }
+                }
+            )
+            .onChange(of: showPlacesSheet) { _, _ in
+                withAnimation(Self.dayFilterMapAnimation) {
+                    fitMapToAnnotations()
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                mapControlStack
+            }
     }
 
     @ViewBuilder
@@ -251,15 +295,15 @@ struct TripMapView: View {
         showAddPlace = false
     }
 
-    private static var placesListMinDetent: PresentationDetent {
-        .height(120)
+    private func syncToSharedState() {
+        guard let sharedState else { return }
+        sharedState.mappablePlaces = mappablePlaces
+        sharedState.dayNumberByDayId = dayNumberByDayId
+        sharedState.selectedDayFilter = selectedDayFilter
+        sharedState.searchText = searchText
+        sharedState.activeCategoryFilter = activeCategoryFilter
     }
 
-    /// One modal at a time: hide the places sheet while map modes, add place, or place callout is shown.
-    private func updatePlacesSheetVisibility() {
-        let otherModal = showMapModesSheet || showAddPlace || selectedPlace != nil
-        isPlacesListSheetPresented = !otherModal
-    }
 
     /// Hybrid is default. Both map styles use realistic elevation for globe-friendly zoom.
     private var currentMapStyle: MapStyle {
@@ -276,6 +320,12 @@ struct TripMapView: View {
                 }
             }
 
+            if let pin = searchResultPin {
+                Annotation(pin.name, coordinate: pin.coordinate) {
+                    searchResultMarker(pin: pin)
+                }
+            }
+
             if routePolylineCoordinates.count >= 2 {
                 MapPolyline(coordinates: routePolylineCoordinates)
                     .stroke(polylineStrokeColor.opacity(0.4), lineWidth: 3)
@@ -286,9 +336,7 @@ struct TripMapView: View {
         .onMapCameraChange(frequency: .onEnd) { context in
             let cam = context.camera
             lastMapCamera = cam
-
             let spanDeg = min(max(2 * cam.distance / 111_000, 0.04), 40)
-
             searchRegion = MKCoordinateRegion(
                 center: cam.centerCoordinate,
                 span: MKCoordinateSpan(
@@ -297,49 +345,45 @@ struct TripMapView: View {
                 )
             )
         }
-        .overlay(alignment: .topTrailing) {
-            mapControlGroup
-                .padding(.top, 120)
-                .padding(.trailing, 14)
-        }
         .accessibilityLabel("Map of places for \(trip.title)")
     }
 
-    /// Apple Maps style vertical pill: native current-location button + map mode button.
-    private var mapControlGroup: some View {
+    /// Compact vertical pill — right edge, just below nav bar.
+    private var mapControlStack: some View {
         VStack(spacing: 0) {
-            MapUserLocationButton(scope: mapScope)
-                .mapControlVisibility(.visible)
-                .frame(width: 50, height: 44)
-                .clipShape(Rectangle())
-                .accessibilityLabel("Center on current location")
+            Button {
+                HapticManager.light()
+                position = .userLocation(fallback: .automatic)
+            } label: {
+                Image(systemName: "location.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(AppColors.appPrimary)
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Current location")
 
-            Rectangle()
-                .fill(Color.primary.opacity(0.12))
-                .frame(height: 1)
-                .padding(.horizontal, 7)
+            Color(UIColor.separator)
+                .frame(width: 18, height: 0.5)
 
             Button {
                 HapticManager.light()
                 showMapModesSheet = true
             } label: {
-                Image(systemName: mapMode == .hybrid ? "map.fill" : "map")
-                    .font(.system(size: 17, weight: .semibold))
+                Image(systemName: mapMode == .hybrid ? "globe.americas.fill" : "map")
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
+                    .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Map modes")
+            .accessibilityLabel("Map style")
         }
-        .frame(width: 50, height: 89)
-        .background {
-            Capsule(style: .continuous)
-                .fill(.ultraThinMaterial)
-        }
-        .clipShape(Capsule(style: .continuous))
-        .compositingGroup()
-        .shadow(color: .black.opacity(0.2), radius: 10, y: 3)
+        .fixedSize()
+        .background(.regularMaterial)
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
+        .padding(.top, 10)
+        .padding(.trailing, 10)
     }
 
     private var emptyMapCard: some View {
@@ -407,6 +451,41 @@ struct TripMapView: View {
         }
     }
 
+    /// Distinctive orange pin for search autocomplete results.
+    private func searchResultMarker(pin: MapSearchPin) -> some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 36, height: 36)
+                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            Triangle()
+                .fill(Color.orange)
+                .frame(width: 10, height: 6)
+        }
+        .accessibilityLabel("Search result: \(pin.name)")
+    }
+
+    // MARK: - Search result selected from autocomplete
+
+    func handleSearchResultSelected(_ name: String, lat: Double, lng: Double) {
+        let pin = MapSearchPin(name: name, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lng))
+        searchResultPin = pin
+
+        withAnimation(.spring(response: 0.55, dampingFraction: 0.86)) {
+            position = .region(MKCoordinateRegion(
+                center: pin.coordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+            ))
+        }
+
+        HapticManager.light()
+    }
+
     private func loadMapData() async {
         let days = await dataService.fetchDays(for: trip.id)
         let sorted = days.sorted { $0.dayNumber < $1.dayNumber }
@@ -454,23 +533,75 @@ struct TripMapView: View {
         fitMapToAnnotations()
     }
 
+    /// Pans so the selected pin appears centered in the visible region above
+    /// the sheet, then opens the detail sheet after the animation settles.
+    private func selectAndFocusPlace(_ place: Place) {
+        guard let lat = place.lat, let lng = place.lng else {
+            selectedPlace = place
+            return
+        }
+
+        let covered = sheetCoveredFraction   // e.g. 0.5 for medium detent
+        let visible = visibleMapFraction     // e.g. 0.5 for medium detent
+
+        // Choose a comfortable zoom span for a single highlighted pin
+        let baseSpan: Double = 0.008
+        let adjustedSpan = baseSpan / visible
+        // Move camera SOUTH so selected pin appears in the upper visible region
+        let latOffset = adjustedSpan * (covered / 2 + 0.10)
+
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+            position = .region(
+                MKCoordinateRegion(
+                    center: CLLocationCoordinate2D(latitude: lat - latOffset, longitude: lng),
+                    span: MKCoordinateSpan(latitudeDelta: adjustedSpan, longitudeDelta: adjustedSpan)
+                )
+            )
+        }
+
+        // Open detail after the pan animation completes
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            selectedPlace = place
+        }
+    }
+
+    /// Reliable screen height — available immediately without GeometryReader.
+    private var screenHeight: CGFloat {
+        let h = mapContainerHeight > 0 ? mapContainerHeight : UIScreen.main.bounds.height
+        return max(h, 400)
+    }
+
+    /// Fraction of the screen height covered by the bottom sheet (0…1).
+    private var sheetCoveredFraction: CGFloat {
+        let sheetH: CGFloat = showPlacesSheet ? screenHeight * 0.5 : 120
+        return min(sheetH / screenHeight, 0.95)
+    }
+
+    /// Fraction of screen that is VISIBLE above the sheet (0…1).
+    private var visibleMapFraction: CGFloat {
+        max(1 - sheetCoveredFraction, 0.08)
+    }
+
     private func fitMapToAnnotations() {
         let coords = tripPlacesOnMap.map(\.coordinate)
-
         guard !coords.isEmpty else {
             position = globeMapPosition(center: tripMapCenter)
             return
         }
 
+        let covered  = sheetCoveredFraction   // e.g. 0.5 at medium
+        let visible  = visibleMapFraction      // e.g. 0.5 at medium
+
         if coords.count == 1 {
             let c = coords[0]
-
-            position = .camera(
-                MapCamera(
-                    centerCoordinate: c,
-                    distance: 12_000,
-                    heading: 0,
-                    pitch: 0
+            let baseSpan: Double = 0.008
+            let adjustedSpan = baseSpan / visible
+            // Move camera SOUTH so the pin appears in the northern (top) visible region
+            let latOffset = adjustedSpan * (covered / 2 + 0.10)
+            position = .region(
+                MKCoordinateRegion(
+                    center: CLLocationCoordinate2D(latitude: c.latitude - latOffset, longitude: c.longitude),
+                    span: MKCoordinateSpan(latitudeDelta: adjustedSpan, longitudeDelta: adjustedSpan)
                 )
             )
             return
@@ -481,39 +612,35 @@ struct TripMapView: View {
         let minLon = coords.map(\.longitude).min() ?? 0
         let maxLon = coords.map(\.longitude).max() ?? 0
 
-        var latDelta = max(maxLat - minLat, 0.02) * 1.35
-        var lonDelta = max(maxLon - minLon, 0.02) * 1.35
+        // Annotation spread + comfortable padding
+        let annotationLatSpan = max(maxLat - minLat, 0.006) * 1.25
+        let annotationLonSpan = max(maxLon - minLon, 0.006) * 1.25
 
-        latDelta = max(latDelta, 0.02)
-        lonDelta = max(lonDelta, 0.02)
+        // Expand vertically so the full annotation set fits inside the VISIBLE portion only
+        var latDelta = annotationLatSpan / visible
+        let lonDelta = max(annotationLonSpan, annotationLatSpan)
+        latDelta = max(latDelta, 0.01)
 
-        // Very wide spread: show the interactive globe instead of a flat world-spanning region.
         if latDelta > 55 || lonDelta > 90 {
             let midLat = (minLat + maxLat) / 2
             let midLon = (minLon + maxLon) / 2
-
-            position = globeMapPosition(
-                center: CLLocationCoordinate2D(
-                    latitude: midLat,
-                    longitude: midLon
-                )
-            )
+            position = globeMapPosition(center: CLLocationCoordinate2D(latitude: midLat, longitude: midLon))
             return
         }
 
         let midLat = (minLat + maxLat) / 2
         let midLon = (minLon + maxLon) / 2
 
+        // Shift the map center northward by exactly half the sheet-covered lat span
+        // so the annotation group sits centered in the visible upper region.
+        // Move the camera center SOUTH so annotations appear in the northern
+        // (top, visible) region of the screen, above the bottom sheet.
+        // + 0.10 adds a comfortable gap so pins don't sit right at the sheet edge.
+        let latOffset = latDelta * (covered / 2 + 0.10)
         position = .region(
             MKCoordinateRegion(
-                center: CLLocationCoordinate2D(
-                    latitude: midLat,
-                    longitude: midLon
-                ),
-                span: MKCoordinateSpan(
-                    latitudeDelta: latDelta,
-                    longitudeDelta: lonDelta
-                )
+                center: CLLocationCoordinate2D(latitude: midLat - latOffset, longitude: midLon),
+                span: MKCoordinateSpan(latitudeDelta: latDelta, longitudeDelta: lonDelta)
             )
         )
     }
@@ -529,3 +656,6 @@ struct TripMapView: View {
         )
     }
 }
+
+// =============================================================================
+

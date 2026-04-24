@@ -89,3 +89,6 @@ struct ForwardingEmailCardView: View {
         .animation(AppSpring.snappy, value: copied)
     }
 }
+
+// =============================================================================
+

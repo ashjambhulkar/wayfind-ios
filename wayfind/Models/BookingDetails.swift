@@ -259,3 +259,6 @@ private struct TransportTagged: Encodable {
         case seat
     }
 }
+
+// =============================================================================
+

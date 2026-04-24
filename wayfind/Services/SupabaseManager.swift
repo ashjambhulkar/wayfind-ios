@@ -8,9 +8,9 @@ import Observation
 import Supabase
 
 /// Uses ``AuthSessionService/shared`` as the single `SupabaseClient` (session + PostgREST auth headers).
-@Observable
+@Observable @MainActor
 final class SupabaseManager {
-    init() {}
+    nonisolated init() {}
 
     private static let tripDocumentsBucket = "trip-documents"
     private static let avatarsBucket = "avatars"
@@ -900,4 +900,7 @@ final class SupabaseManager {
         )
     }
 }
+
+
+// =============================================================================
 

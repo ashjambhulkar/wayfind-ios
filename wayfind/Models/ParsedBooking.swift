@@ -19,3 +19,6 @@ struct ParsedBooking: Identifiable, Codable, Hashable {
 enum ParsedBookingStatus: String, Codable {
     case pending, parsed, confirmed, failed
 }
+
+// =============================================================================
+

@@ -2,7 +2,7 @@ import Observation
 import SwiftUI
 
 private enum TripsListLayout {
-    /// Fixed width for each active trip card when multiple trips overlap “today”.
+    /// Fixed width for each active trip card when multiple trips overlap "today".
     static let activeTripCardWidth: CGFloat = 300
 }
 
@@ -11,10 +11,10 @@ struct TripsListView: View {
     @Environment(DataService.self) private var dataService
     @Environment(UserPreferencesStore.self) private var userPreferences
     @Environment(ToastManager.self) private var toastManager
+    @Environment(TabNavigationCoordinator.self) private var coordinator
 
     @State private var viewModel: TripsViewModel?
     @State private var showCreateTrip = false
-    @State private var navigationPath = NavigationPath()
 
     var body: some View {
         Group {
@@ -22,7 +22,6 @@ struct TripsListView: View {
                 TripsListBody(
                     viewModel: viewModel,
                     showCreateTrip: $showCreateTrip,
-                    navigationPath: $navigationPath,
                     userInitials: authViewModel.userInitials,
                     toastManager: toastManager
                 )
@@ -42,9 +41,9 @@ struct TripsListView: View {
 private struct TripsListBody: View {
     @Bindable var viewModel: TripsViewModel
     @Environment(UserPreferencesStore.self) private var userPreferences
+    @Environment(TabNavigationCoordinator.self) private var coordinator
 
     @Binding var showCreateTrip: Bool
-    @Binding var navigationPath: NavigationPath
     var userInitials: String
     var toastManager: ToastManager
 
@@ -59,12 +58,11 @@ private struct TripsListBody: View {
     }
 
     var body: some View {
-        NavigationStack(path: $navigationPath) {
+        NavigationStack {
             ScrollView {
                 let _ = userPreferences.tripSortMode
                 TripsListContentSections(
                     viewModel: viewModel,
-                    navigationPath: $navigationPath,
                     showCreateTrip: $showCreateTrip,
                     showMainEmpty: showMainEmpty,
                     showNoSearchResults: showNoSearchResults
@@ -134,11 +132,8 @@ private struct TripsListBody: View {
             .sheet(isPresented: $showCreateTrip) {
                 CreateTripView { newTrip in
                     showCreateTrip = false
-                    navigationPath.append(newTrip)
+                    coordinator.openTrip(newTrip)
                 }
-            }
-            .navigationDestination(for: Trip.self) { trip in
-                TripDetailView(trip: trip)
             }
         }
     }
@@ -148,7 +143,7 @@ private struct TripsListBody: View {
 
 private struct TripsListContentSections: View {
     @Bindable var viewModel: TripsViewModel
-    @Binding var navigationPath: NavigationPath
+    @Environment(TabNavigationCoordinator.self) private var coordinator
     @Binding var showCreateTrip: Bool
     var showMainEmpty: Bool
     var showNoSearchResults: Bool
@@ -179,14 +174,14 @@ private struct TripsListContentSections: View {
 
                         if viewModel.activeTrips.count == 1, let active = viewModel.activeTrips.first {
                             ActiveTripHeroView(trip: active) {
-                                navigationPath.append(active)
+                                coordinator.openTrip(active)
                             }
                         } else {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: AppSpacing.md) {
                                     ForEach(viewModel.activeTrips) { trip in
                                         ActiveTripHeroView(trip: trip) {
-                                            navigationPath.append(trip)
+                                            coordinator.openTrip(trip)
                                         }
                                         .frame(width: TripsListLayout.activeTripCardWidth)
                                     }
@@ -208,7 +203,7 @@ private struct TripsListContentSections: View {
                             HStack(spacing: AppSpacing.md) {
                                 ForEach(viewModel.upcomingTrips) { trip in
                                     TripCardView(trip: trip) {
-                                        navigationPath.append(trip)
+                                        coordinator.openTrip(trip)
                                     }
                                 }
                             }
@@ -221,7 +216,7 @@ private struct TripsListContentSections: View {
                         VStack(alignment: .leading, spacing: AppSpacing.sm) {
                             ForEach(viewModel.pastTrips) { trip in
                                 Button {
-                                    navigationPath.append(trip)
+                                    coordinator.openTrip(trip)
                                 } label: {
                                     PastTripRowView(trip: trip)
                                 }

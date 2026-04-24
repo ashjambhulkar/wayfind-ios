@@ -26,6 +26,22 @@ struct Place: Identifiable, Codable, Hashable {
     var bookingDetails: BookingDetailUnion?
     var googlePlaceId: String?
 
+    // MARK: – city_places enrichment (joined via place_id / googlePlaceId)
+    var heroImageUrl: String?          // city_places.thumbnail_url
+    var rating: Double?                // city_places.rating
+    var userRatingsTotal: Int?         // city_places.user_ratings_total
+    var priceLevel: Int?               // city_places.price_level (1–4)
+    var website: String?               // city_places.website
+    var phoneNumber: String?           // city_places.formatted_phone_number
+    var isOpenNow: Bool?               // derived from city_places.opening_hours
+    var openingHoursText: String?      // e.g. "Open · Closes 10 PM"
+    var aiSummary: String?             // city_places.ai_editorial_summary
+    var aiShortSummary: String?        // city_places.ai_short_summary
+    var whyGo: [String]?               // city_places.ai_why_go
+    var knowBeforeYouGo: [String]?     // city_places.ai_know_before_you_go
+    var reviewsTags: [String]?         // city_places.reviews_tags
+    var durationMinutes: Int?          // city_places.time_spent_min (suggested visit length)
+
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: lat ?? 0, longitude: lng ?? 0)
     }
@@ -75,4 +91,7 @@ struct Place: Identifiable, Codable, Hashable {
         }
     }
 }
+
+
+// =============================================================================
 

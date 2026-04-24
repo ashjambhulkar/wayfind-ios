@@ -20,7 +20,21 @@ struct UnsplashPhoto: Identifiable {
 }
 
 enum UnsplashService {
+    // Mock photos for Machine A — real Unsplash URLs that load without API key
+    private static let mockPhotos: [UnsplashPhoto] = [
+        UnsplashPhoto(id: "mock1", url: "https://images.unsplash.com/photo-1534430480872-3498386e7856?w=800&q=80", authorName: "Colton Duke", authorUsername: "coltonhdukefilm", downloadLocation: ""),
+        UnsplashPhoto(id: "mock2", url: "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=800&q=80", authorName: "Chris Karidis", authorUsername: "chriskaridis", downloadLocation: ""),
+        UnsplashPhoto(id: "mock3", url: "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?w=800&q=80", authorName: "Jezael Melgoza", authorUsername: "jezael", downloadLocation: ""),
+        UnsplashPhoto(id: "mock4", url: "https://images.unsplash.com/photo-1583422409516-2895a77efded?w=800&q=80", authorName: "Hala AlGhawormed", authorUsername: "hala", downloadLocation: ""),
+        UnsplashPhoto(id: "mock5", url: "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=800&q=80", authorName: "Pedro Lastra", authorUsername: "peterlaster", downloadLocation: ""),
+    ]
+
     static func searchPhotos(query: String, count: Int = 5) async -> [UnsplashPhoto] {
+        guard AppConfig.useRealBackend else {
+            // Machine A: return mock photos (real Unsplash image URLs, no API call)
+            return Array(mockPhotos.prefix(count))
+        }
+
         let accessKey = AppConfig.unsplashAccessKey
         guard !accessKey.contains("YOUR_") else { return [] }
 
@@ -57,6 +71,7 @@ enum UnsplashService {
     }
 
     static func trackDownload(downloadLocation: String) async {
+        guard AppConfig.useRealBackend else { return }  // Machine A: no-op
         let accessKey = AppConfig.unsplashAccessKey
         guard !accessKey.contains("YOUR_"), !downloadLocation.isEmpty else { return }
 
@@ -97,3 +112,6 @@ private struct UnsplashSearchResponse: Decodable {
         }
     }
 }
+
+// =============================================================================
+

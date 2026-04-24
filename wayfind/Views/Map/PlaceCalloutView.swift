@@ -49,3 +49,6 @@ struct PlaceCalloutView: View {
         .background(AppColors.appBackground)
     }
 }
+
+// =============================================================================
+

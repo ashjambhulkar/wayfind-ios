@@ -289,3 +289,6 @@ struct AuthOutlinePressStyle: ButtonStyle {
             .animation(AppSpring.snappy, value: configuration.isPressed)
     }
 }
+
+// =============================================================================
+

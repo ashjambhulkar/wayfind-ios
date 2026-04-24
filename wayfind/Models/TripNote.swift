@@ -10,3 +10,6 @@ struct TripNote: Identifiable, Hashable, Sendable {
     var updatedAt: Date
 }
 
+
+// =============================================================================
+

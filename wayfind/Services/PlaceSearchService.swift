@@ -43,6 +43,11 @@ final class PlaceSearchService {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
 
+            guard AppConfig.useRealBackend else {
+                await loadMockResults(query: trimmed)
+                return
+            }
+
             let apiKey = AppConfig.googlePlacesAPIKey
             guard !apiKey.contains("YOUR_") else {
                 await loadMockResults(query: trimmed)
@@ -80,6 +85,10 @@ final class PlaceSearchService {
     }
 
     func getPlaceDetails(placeId: String) async -> PlaceDetail? {
+        guard AppConfig.useRealBackend else {
+            // Return a mock detail for Machine A
+            return PlaceDetail(placeId: placeId, name: "Mock Place", address: "123 Main St", lat: 48.8566, lng: 2.3522, types: ["point_of_interest"])
+        }
         let apiKey = AppConfig.googlePlacesAPIKey
         guard !apiKey.contains("YOUR_") else { return nil }
 
@@ -188,4 +197,7 @@ private struct PlaceDetailsResponse: Decodable {
         let lng: Double
     }
 }
+
+
+// =============================================================================
 

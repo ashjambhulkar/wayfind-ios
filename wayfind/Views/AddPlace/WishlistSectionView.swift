@@ -64,3 +64,6 @@ private struct WishlistPlaceRowView: View {
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
     }
 }
+
+// =============================================================================
+

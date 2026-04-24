@@ -15,3 +15,6 @@ struct ItineraryDay: Identifiable, Codable, Hashable {
 
     var isWishlist: Bool { dayNumber == 0 }
 }
+
+// =============================================================================
+

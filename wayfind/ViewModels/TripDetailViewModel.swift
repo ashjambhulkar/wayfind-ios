@@ -142,3 +142,6 @@ final class TripDetailViewModel {
         return Calendar.current.date(byAdding: .day, value: dayNumber - 1, to: trip.startDate) ?? trip.startDate
     }
 }
+
+// =============================================================================
+

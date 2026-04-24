@@ -1,6 +1,14 @@
 import Observation
 import SwiftUI
 
+/// Vertical offset of the itinerary `VStack` in `tripDetailScroll` — turns negative as the user scrolls up.
+private struct TripDetailScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct TripDetailView: View {
     @Environment(DataService.self) private var dataService
     @Environment(ToastManager.self) private var toastManager
@@ -22,12 +30,8 @@ struct TripDetailView: View {
     @State private var selectedPlace: Place?
     @State private var selectedPlacePrevious: Place?
 
-    // Action bar navigation (map is opened from the trip "…" menu, not the action bar)
-    @State private var showMap = false
-    @State private var showBookings = false
-    @State private var showBudget = false
-
     @Environment(\.dismiss) private var dismiss
+    @State private var isNavigationOverLightContent = false
 
     let trip: Trip
 
@@ -131,12 +135,10 @@ struct TripDetailView: View {
         }
         .navigationDestination(isPresented: $showTripNotes) {
             TripNotesView(trip: viewModel?.trip ?? trip)
-                .toolbar(.hidden, for: .tabBar)
-        }
+                        }
         .navigationDestination(isPresented: $showTripChecklists) {
             TripChecklistsView(trip: viewModel?.trip ?? trip)
-                .toolbar(.hidden, for: .tabBar)
-        }
+                        }
         .onChange(of: showTripNotes) { _, isOpen in
             if !isOpen {
                 Task { await viewModel?.refreshHeroShortcutCounts() }
@@ -153,8 +155,7 @@ struct TripDetailView: View {
                     onSave: { _ in Task { await vm.loadTripData() } },
                     targetDayId: targetDayId
                 )
-                .toolbar(.hidden, for: .tabBar)
-            }
+                            }
         }
         .sheet(isPresented: $showAddPlace) {
             if let vm = viewModel {
@@ -208,12 +209,7 @@ struct TripDetailView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    VStack(spacing: 0) {
-                        itineraryTab(viewModel: viewModel)
-
-                        // Bottom action bar (replaces TabView)
-                        tripActionBar(viewModel: viewModel)
-                    }
+                    itineraryTab(viewModel: viewModel)
                 }
             } else {
                 AppColors.appBackground
@@ -225,7 +221,8 @@ struct TripDetailView: View {
         .background(AppColors.appBackground)
         .navigationTitle(viewModel?.trip.title ?? trip.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.automatic, for: .navigationBar)
+        .toolbarColorScheme(isNavigationOverLightContent ? .light : .dark, for: .navigationBar)
+        .toolbarBackground(isNavigationOverLightContent ? .visible : .hidden, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Menu {
@@ -259,135 +256,36 @@ struct TripDetailView: View {
                 .accessibilityLabel("Trip actions")
             }
         }
-        .navigationDestination(isPresented: $showMap) {
-            TripMapView(trip: viewModel?.trip ?? trip)
-                .toolbar(.hidden, for: .tabBar)
-        }
-        .navigationDestination(isPresented: $showBookings) {
-            BookingsScreenView(trip: viewModel?.trip ?? trip)
-                .toolbar(.hidden, for: .tabBar)
-        }
-        .navigationDestination(isPresented: $showBudget) {
-            TripBudgetTabView()
-                .navigationTitle("Budget")
-                .toolbar(.hidden, for: .tabBar)
-        }
-    }
-
-    // MARK: - Bottom Action Bar (glass effect, separated primary action)
-
-    private func tripActionBar(viewModel: TripDetailViewModel) -> some View {
-        HStack(spacing: 0) {
-            // Left group: navigation actions
-            HStack(spacing: 0) {
-                actionBarButton(symbol: "map.fill", label: "Map") {
-                    showMap = true
-                }
-                actionBarButton(symbol: "airplane", label: "Bookings") {
-                    showBookings = true
-                }
-                actionBarButton(symbol: "creditcard", label: "Budget") {
-                    showBudget = true
-                }
-            }
-
-            // Separator
-            Capsule()
-                .fill(AppColors.appDivider)
-                .frame(width: 1, height: 28)
-                .padding(.horizontal, 2)
-
-            // Right: primary "Add" action (separated like Tab role: .search)
-            actionBarPrimaryButton {
+        .safeAreaInset(edge: .bottom, alignment: .trailing) {
+            Button {
+                HapticManager.medium()
                 addPlaceTargetDay = trip.currentDayNumber ?? 1
                 showAddPlace = true
-            }
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .padding(.top, 10)
-        .padding(.bottom, 6)
-        .background {
-            glassBar
-        }
-    }
-
-    /// Glass background that extends through the safe area.
-    private var glassBar: some View {
-        ZStack {
-            // Frosted glass base
-            Rectangle()
-                .fill(.ultraThinMaterial)
-
-            // Subtle top highlight for depth
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(.white.opacity(0.15))
-                    .frame(height: 0.5)
-                Spacer()
-            }
-        }
-        .ignoresSafeArea(edges: .bottom)
-    }
-
-    // MARK: - Action Bar Buttons
-
-    private func actionBarButton(symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button {
-            HapticManager.light()
-            action()
-        } label: {
-            VStack(spacing: 3) {
-                Image(systemName: symbol)
-                    .font(.system(size: 20, weight: .medium))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(AppColors.textSecondary)
-                    .frame(height: 28)
-
-                Text(label)
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(AppColors.textTertiary)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 50)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(ActionBarPressStyle())
-        .accessibilityLabel(label)
-    }
-
-    /// Primary creation button — separated to the right with a filled capsule.
-    private func actionBarPrimaryButton(action: @escaping () -> Void) -> some View {
-        Button {
-            HapticManager.medium()
-            action()
-        } label: {
-            HStack(spacing: 6) {
+            } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 14, weight: .bold))
-                Text("Add")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 56, height: 56)
+                    .background(AppColors.appPrimary)
+                    .clipShape(Circle())
+                    .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
             }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 20)
-            .frame(height: 40)
-            .background(
-                Capsule()
-                    .fill(AppColors.appPrimary)
-                    .shadow(color: AppColors.appPrimary.opacity(0.25), radius: 8, x: 0, y: 4)
-            )
+            .padding(.trailing, AppSpacing.lg)
+            .padding(.bottom, AppSpacing.sm)
         }
-        .buttonStyle(ActionBarPressStyle())
-        .accessibilityLabel("Add place or booking")
     }
 
-    // MARK: - Itinerary Content (always visible, no tab switching)
+    // MARK: - Itinerary Content
 
     @ViewBuilder
     private func itineraryTab(viewModel: TripDetailViewModel) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
-                    TripDetailHeroHeader(trip: viewModel.trip)
+                    TripDetailHeroHeader(
+                        trip: viewModel.trip,
+                        topBleed: KeyWindowSafeArea.topInset
+                    )
 
                     LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                         pillsRow(viewModel: viewModel)
@@ -443,8 +341,29 @@ struct TripDetailView: View {
                     }
                 }
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: TripDetailScrollOffsetKey.self,
+                            value: geo.frame(in: .named("tripDetailScroll")).minY
+                        )
+                    }
+                )
             }
-            .contentMargins(.bottom, AppSpacing.sm, for: .scrollContent)
+            .coordinateSpace(name: "tripDetailScroll")
+            .ignoresSafeArea(edges: .top)
+            .contentMargins(
+                .bottom,
+                80,
+                for: .scrollContent
+            )
+            .onPreferenceChange(TripDetailScrollOffsetKey.self) { minY in
+                let threshold: CGFloat = 56
+                let next = -minY > threshold
+                if next != isNavigationOverLightContent {
+                    isNavigationOverLightContent = next
+                }
+            }
             .onChange(of: viewModel.isLoading) { _, isLoading in
                 if isLoading == false, !hasAutoScrolled,
                    trip.status == .active,
@@ -705,24 +624,13 @@ struct TripDetailView: View {
     }
 }
 
-// MARK: - Action Bar Button Style
-
-private struct ActionBarPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.90 : 1.0)
-            .opacity(configuration.isPressed ? 0.7 : 1.0)
-            .animation(AppSpring.snappy, value: configuration.isPressed)
-    }
-}
-
 // MARK: - Hero header (cover image)
 
-/// Edge‑to‑edge cover in a **fixed** hero rect: one width × one height, `aspectRatio(.fill)`, top‑pinned.
-/// Previous version used `visibleHeroHeight + navChromeTop` inside a **bottom‑aligned** `ZStack` clipped to
-/// `visibleHeroHeight`, which discarded the **top** of the bitmap (wrong crop / “card” look).
+/// Full-bleed cover: image runs under the status bar; nav is transparent over the top (tinted via scrims in `TripDetailView`).
+/// `topBleed` is added to the bitmap height so the same aspect crop reaches the top of the display.
 private struct TripDetailHeroHeader: View {
     let trip: Trip
+    var topBleed: CGFloat = 0
 
     private var statusLabel: String {
         switch trip.status {
@@ -732,33 +640,37 @@ private struct TripDetailHeroHeader: View {
         }
     }
 
-    private var heroHeight: CGFloat {
-        TripDetailOverlayMetrics.visibleHeroHeight
+    private var totalHeight: CGFloat {
+        TripDetailOverlayMetrics.visibleHeroHeight + topBleed
     }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             GeometryReader { proxy in
                 let width = max(proxy.size.width, 1)
-                heroCoverSurface(width: width, height: heroHeight)
-                    .frame(width: width, height: heroHeight, alignment: .top)
+                heroCoverSurface(width: width, height: totalHeight)
+                    .frame(width: width, height: totalHeight, alignment: .top)
                     .clipped()
             }
-            .frame(height: heroHeight)
+            .frame(height: totalHeight)
             .frame(maxWidth: .infinity, alignment: .top)
             .allowsHitTesting(false)
 
+            // Top + bottom dark scrims so the nav chrome and the hero text stay legible.
             LinearGradient(
-                colors: [
-                    Color.black.opacity(0.0),
-                    Color.black.opacity(0.38),
-                    Color.black.opacity(0.72),
+                stops: [
+                    .init(color: .black.opacity(0.55), location: 0.0),
+                    .init(color: .black.opacity(0.2), location: 0.16),
+                    .init(color: .clear, location: 0.32),
+                    .init(color: .clear, location: 0.42),
+                    .init(color: .black.opacity(0.2), location: 0.62),
+                    .init(color: .black.opacity(0.55), location: 0.86),
+                    .init(color: .black.opacity(0.78), location: 1.0),
                 ],
-                startPoint: UnitPoint(x: 0.5, y: 0.15),
+                startPoint: .top,
                 endPoint: .bottom
             )
-            .frame(maxWidth: .infinity)
-            .frame(height: heroHeight)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .allowsHitTesting(false)
 
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
@@ -789,7 +701,7 @@ private struct TripDetailHeroHeader: View {
             .padding(AppSpacing.lg)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         }
-        .frame(height: heroHeight)
+        .frame(height: totalHeight)
         .frame(maxWidth: .infinity)
         .clipped()
     }
@@ -832,8 +744,11 @@ private struct TripDetailHeroHeader: View {
 }
 
 private enum TripDetailOverlayMetrics {
-    /// Taller than the previous 240pt strip for a more cinematic, travel‑premium cover proportion.
+    /// Design height of the **main** cover below the status inset (nav floats over the upper part of this band).
     static let visibleHeroHeight: CGFloat = 304
     static let heroImageLoadingBackground = Color(red: 0.12, green: 0.12, blue: 0.14)
 }
+
+
+// =============================================================================
 
