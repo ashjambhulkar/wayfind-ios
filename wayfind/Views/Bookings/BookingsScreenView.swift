@@ -84,6 +84,19 @@ struct BookingsScreenView: View {
         }
         .navigationTitle("Bookings")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    HapticManager.light()
+                    showAddBooking = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(AppColors.appPrimary)
+                }
+                .accessibilityLabel("Add a booking")
+            }
+        }
         .animation(AppSpring.smooth, value: pendingUndo != nil)
         .task {
             await loadBookings()

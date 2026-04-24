@@ -113,25 +113,16 @@ private struct AppRootTabView: View {
                     }
                 }
 
-                Tab("+ai", systemImage: "sparkles") {
+                Tab("+ai", systemImage: "sparkles", role: .search) {
                     NavigationStack {
                         TripAiTabView()
                     }
                 }
             }
+            .modifier(ScrollDownMinimizeTabBarModifier())
         } else {
-            // LIST MODE
-            TabView {
-                Tab("Home", systemImage: "house.fill") {
-                    TripsListView()
-                }
-
-                Tab(role: .search) {
-                    NavigationStack {
-                        TripsSearchTabView()
-                    }
-                }
-            }
+            // LIST MODE — no tab bar; create button lives in the nav toolbar
+            TripsListView()
         }
     }
 
@@ -172,11 +163,7 @@ private struct AppRootTabView: View {
                 .tag(4)
             }
         } else {
-            TabView {
-                TripsListView()
-                    .tabItem { Label("Home", systemImage: "house.fill") }
-                    .tag(0)
-            }
+            TripsListView()
         }
     }
 
@@ -442,5 +429,17 @@ private struct DisplayNamePromptView: View {
             await authViewModel.setDisplayName(trimmed)
         }
         dismiss()
+    }
+}
+
+// MARK: - Tab bar minimize on scroll (iOS 26+)
+
+private struct ScrollDownMinimizeTabBarModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            content
+        }
     }
 }

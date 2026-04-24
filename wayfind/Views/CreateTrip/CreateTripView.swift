@@ -27,84 +27,61 @@ struct CreateTripView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            Text("Plan a New Trip")
-                .font(.sectionHeader)
-                .foregroundStyle(AppColors.textPrimary)
+        NavigationStack {
+            VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text("When?")
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textSecondary)
 
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                Text("Where are you going?")
-                    .font(.appCaption)
-                    .foregroundStyle(AppColors.textSecondary)
+                    HStack(spacing: AppSpacing.lg) {
+                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                            Text("Start")
+                                .font(.appSmall)
+                                .foregroundStyle(AppColors.textSecondary)
+                            DatePicker("", selection: $startDate, displayedComponents: .date)
+                                .labelsHidden()
+                                .tint(AppColors.appPrimary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                HStack(spacing: AppSpacing.sm) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(AppColors.textTertiary)
-                    TextField("Search destination", text: $destination)
-                        .font(.appBody)
-                        .textInputAutocapitalization(.words)
+                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                            Text("End")
+                                .font(.appSmall)
+                                .foregroundStyle(AppColors.textSecondary)
+                            DatePicker("", selection: $endDate, displayedComponents: .date)
+                                .labelsHidden()
+                                .tint(AppColors.appPrimary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                .padding(.horizontal, AppSpacing.md)
-                .frame(height: 48)
-                .background(AppColors.appSurface)
-                .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                        .strokeBorder(AppColors.appDivider, lineWidth: 1)
-                )
-            }
 
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                Text("When?")
-                    .font(.appCaption)
-                    .foregroundStyle(AppColors.textSecondary)
+                Spacer()
 
-                HStack(spacing: AppSpacing.lg) {
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        Text("Start")
-                            .font(.appSmall)
-                            .foregroundStyle(AppColors.textSecondary)
-                        DatePicker("", selection: $startDate, displayedComponents: .date)
-                            .labelsHidden()
-                            .tint(AppColors.appPrimary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        Text("End")
-                            .font(.appSmall)
-                            .foregroundStyle(AppColors.textSecondary)
-                        DatePicker("", selection: $endDate, displayedComponents: .date)
-                            .labelsHidden()
-                            .tint(AppColors.appPrimary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                AppButton(
+                    title: "Start Planning →",
+                    style: .primary,
+                    isDisabled: !canSubmit,
+                    isLoading: false
+                ) {
+                    Task { await createTrip() }
                 }
             }
-
-            AppButton(
-                title: "Start Planning →",
-                style: .primary,
-                isDisabled: !canSubmit,
-                isLoading: false
-            ) {
-                Task { await createTrip() }
-            }
+            .padding(AppSpacing.xl)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(AppColors.appBackground)
+            .navigationTitle("Plan a New Trip")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $destination, placement: .navigationBarDrawer(displayMode: .always), prompt: "Where are you going?")
         }
-        .padding(AppSpacing.xl)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(AppColors.appBackground)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .onChange(of: startDate) { _, newValue in
-            if newValue > endDate {
-                endDate = newValue
-            }
+            if newValue > endDate { endDate = newValue }
         }
         .onChange(of: endDate) { _, newValue in
-            if newValue < startDate {
-                startDate = newValue
-            }
+            if newValue < startDate { startDate = newValue }
         }
     }
 
@@ -140,6 +117,3 @@ struct CreateTripView: View {
         .environment(DataService())
         .environment(UserPreferencesStore())
 }
-
-// =============================================================================
-

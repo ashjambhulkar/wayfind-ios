@@ -256,23 +256,6 @@ struct TripDetailView: View {
                 .accessibilityLabel("Trip actions")
             }
         }
-        .safeAreaInset(edge: .bottom, alignment: .trailing) {
-            Button {
-                HapticManager.medium()
-                addPlaceTargetDay = trip.currentDayNumber ?? 1
-                showAddPlace = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 56, height: 56)
-                    .background(AppColors.appPrimary)
-                    .clipShape(Circle())
-                    .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
-            }
-            .padding(.trailing, AppSpacing.lg)
-            .padding(.bottom, AppSpacing.sm)
-        }
     }
 
     // MARK: - Itinerary Content
@@ -352,9 +335,13 @@ struct TripDetailView: View {
             }
             .coordinateSpace(name: "tripDetailScroll")
             .ignoresSafeArea(edges: .top)
+            // Reserve enough end-of-scroll clearance so the last day card and
+            // "+ Add to Day" button rest above iOS 26's floating glass tab bar
+            // even when fully scrolled. Mid-scroll occlusion under the bar is
+            // intentional iOS 26 behavior (backdrop blur handles legibility).
             .contentMargins(
                 .bottom,
-                80,
+                110,
                 for: .scrollContent
             )
             .onPreferenceChange(TripDetailScrollOffsetKey.self) { minY in
@@ -424,6 +411,8 @@ struct TripDetailView: View {
                     Spacer()
                         .frame(height: AppSpacing.md)
 
+                    DaySummaryView(places: places)
+
                     if isTodayDay(day) {
                         NowIndicatorView()
                             .padding(.horizontal, AppSpacing.lg)
@@ -444,7 +433,19 @@ struct TripDetailView: View {
                     }
 
                     ForEach(Array(places.enumerated()), id: \.element.id) { index, place in
-                        if index > 0 {
+                        // Chapter break (Morning / Afternoon / Evening / Night)
+                        // takes precedence over the travel-time gap when the
+                        // time-of-day bucket changes. Within the same chapter
+                        // we keep the lightweight gap row.
+                        let prevChapter = index > 0
+                            ? TimeOfDayChapter.from(places[index - 1].startTime)
+                            : nil
+                        let currChapter = TimeOfDayChapter.from(place.startTime)
+
+                        if let chapter = currChapter, chapter != prevChapter {
+                            TimeOfDayDividerView(chapter: chapter)
+                                .padding(.bottom, AppSpacing.xs)
+                        } else if index > 0 {
                             TimelineGapView(fromPlace: places[index - 1], toPlace: place)
                         }
 

@@ -69,7 +69,7 @@ private struct TripsListBody: View {
                 )
                 .padding(.horizontal, AppSpacing.lg)
                 .padding(.top, AppSpacing.sm)
-                .padding(.bottom, 100)
+                .padding(.bottom, AppSpacing.xl)
             }
             .background(AppColors.appBackground)
             .refreshable {
@@ -99,7 +99,16 @@ private struct TripsListBody: View {
                             .foregroundStyle(AppColors.appPrimary)
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    NavigationLink {
+                        NotificationsView()
+                    } label: {
+                        Image(systemName: "bell")
+                            .font(.system(size: 17))
+                            .foregroundStyle(AppColors.appPrimary)
+                    }
+                    .accessibilityLabel("Notifications")
+
                     NavigationLink {
                         ProfileView()
                     } label: {
@@ -114,7 +123,7 @@ private struct TripsListBody: View {
             }
             .safeAreaInset(edge: .bottom, alignment: .trailing) {
                 Button {
-                    HapticManager.light()
+                    HapticManager.medium()
                     showCreateTrip = true
                 } label: {
                     Image(systemName: "plus")
@@ -125,7 +134,7 @@ private struct TripsListBody: View {
                         .clipShape(Circle())
                         .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
                 }
-                .buttonStyle(FABPressStyle())
+                .accessibilityLabel("Plan a new trip")
                 .padding(.trailing, AppSpacing.lg)
                 .padding(.bottom, AppSpacing.sm)
             }
@@ -212,7 +221,13 @@ private struct TripsListContentSections: View {
                 }
 
                 if !viewModel.pastTrips.isEmpty {
-                    DisclosureGroup {
+                    VStack(alignment: .leading, spacing: AppSpacing.md) {
+                        Text("PAST TRIPS")
+                            .font(.appSmall)
+                            .foregroundStyle(AppColors.textTertiary)
+                            .textCase(.uppercase)
+                            .tracking(1.5)
+
                         VStack(alignment: .leading, spacing: AppSpacing.sm) {
                             ForEach(viewModel.pastTrips) { trip in
                                 Button {
@@ -224,14 +239,7 @@ private struct TripsListContentSections: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    } label: {
-                        Text("PAST TRIPS")
-                            .font(.appSmall)
-                            .foregroundStyle(AppColors.textTertiary)
-                            .textCase(.uppercase)
-                            .tracking(1.5)
                     }
-                    .tint(AppColors.appPrimary)
                 }
 
                 if showNoSearchResults {
@@ -295,14 +303,6 @@ private struct PastTripRowView: View {
             RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
                 .strokeBorder(AppColors.appDivider, lineWidth: 1)
         )
-    }
-}
-
-private struct FABPressStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-            .animation(AppSpring.snappy, value: configuration.isPressed)
     }
 }
 
