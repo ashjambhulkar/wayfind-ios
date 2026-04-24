@@ -30,6 +30,17 @@ final class MockDataService {
         return trips.sorted { $0.startDate > $1.startDate }
     }
 
+    /// Mock equivalent of `SupabaseManager.fetchTripTimeline` — reuses the
+    /// per-day fetch so the mock stays authoritative without duplicating data.
+    func fetchTripTimeline(for tripId: UUID) async -> (days: [ItineraryDay], placesByDayId: [UUID: [Place]]) {
+        let days = await fetchDays(for: tripId)
+        var placesByDayId: [UUID: [Place]] = [:]
+        for day in days {
+            placesByDayId[day.id] = await fetchPlaces(for: day.id)
+        }
+        return (days, placesByDayId)
+    }
+
     func fetchDays(for tripId: UUID) async -> [ItineraryDay] {
         #if DEBUG
         try? await Task.sleep(for: .milliseconds(500))

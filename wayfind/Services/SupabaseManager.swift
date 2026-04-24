@@ -256,6 +256,151 @@ final class SupabaseManager {
 
     // MARK: - Days & activities
 
+    // MARK: - Bulk timeline fetch (mirrors web fetchTripTimelineEnriched)
+
+    /// Fetches `trip_days` + `trip_activities` + `trip_bookings` in three
+    /// parallel queries, then groups activities by their `day_id` and matches
+    /// bookings to days by the calendar date of `starts_at`.
+    ///
+    /// This replaces the old N+1 pattern (one `fetchPlaces(for:)` call per day)
+    /// and aligns with the web app's `fetchTripTimelineEnriched` + parallel
+    /// `trip_bookings` fetch in `tripDetailStore`.
+    func fetchTripTimeline(for tripId: UUID) async throws -> (days: [ItineraryDay], placesByDayId: [UUID: [Place]]) {
+        let (client, _) = try await requireClientAndUserId()
+
+        async let daysTask: [TripDayRow] = client
+            .from("trip_days")
+            .select()
+            .eq("trip_id", value: tripId.uuidString)
+            .order("day_number", ascending: true)
+            .execute()
+            .value
+
+        async let activitiesTask: [TripActivityRow] = client
+            .from("trip_activities")
+            .select()
+            .eq("trip_id", value: tripId.uuidString)
+            .order("sort_order", ascending: true)
+            .execute()
+            .value
+
+        async let bookingsTask: [TripBookingRow] = client
+            .from("trip_bookings")
+            .select()
+            .eq("trip_id", value: tripId.uuidString)
+            .order("sort_order", ascending: true)
+            .execute()
+            .value
+
+        let (dayRows, activityRows, bookingRows) = try await (daysTask, activitiesTask, bookingsTask)
+
+        // Once we have the activities, fan out one more parallel query to
+        // `city_places` for the distinct Google place_ids referenced by the
+        // trip. This is the canonical enrichment table (rating, price level,
+        // hero thumbnail, AI summary, subtypes, suggested visit length…).
+        // We intentionally do NOT use `place_cache` — it's deprecated.
+        let placeIds = Self.distinctPlaceIds(from: activityRows)
+        let enrichments = try await Self.fetchCityPlaceEnrichments(client: client, placeIds: placeIds)
+
+        let days = dayRows.map { Self.mapDayRow($0, tripId: tripId) }
+
+        // Seed the map so every day has an entry even when it has no places yet.
+        var placesByDayId: [UUID: [Place]] = Dictionary(
+            uniqueKeysWithValues: days.map { ($0.id, [Place]()) }
+        )
+
+        // Activities already carry their day_id directly.
+        for row in activityRows {
+            let enrichment = row.place_id.flatMap { enrichments[$0] }
+            let place = Self.mapActivityRow(row, dayId: row.day_id, enrichment: enrichment)
+            placesByDayId[row.day_id, default: []].append(place)
+        }
+
+        // Bookings have no day_id — match by calendar date of starts_at.
+        let calendar = Calendar.current
+        let daysByDateKey: [String: UUID] = Dictionary(
+            uniqueKeysWithValues: days.compactMap { day -> (String, UUID)? in
+                guard let date = day.date else { return nil }
+                let key = SupabaseModelMapping.calendarDateOnlyString(from: date, calendar: calendar)
+                return (key, day.id)
+            }
+        )
+        for row in bookingRows {
+            guard let dayId = Self.resolveDayId(for: row, daysByDateKey: daysByDateKey, calendar: calendar) else { continue }
+            let place = Self.mapBookingRow(row, dayId: dayId)
+            placesByDayId[dayId, default: []].append(place)
+        }
+
+        // Sort each day's merged list: scheduled first (by startTime), then
+        // unscheduled (by sortOrder) — mirrors web buildDayTimelineEntries.
+        for dayId in placesByDayId.keys {
+            placesByDayId[dayId]?.sort { a, b in
+                switch (a.startTime, b.startTime) {
+                case let (l?, r?): return l < r
+                case (nil, _?):    return false
+                case (_?, nil):    return true
+                case (nil, nil):   return a.sortOrder < b.sortOrder
+                }
+            }
+        }
+
+        return (days, placesByDayId)
+    }
+
+    // MARK: - city_places enrichment
+
+    /// Subset of `city_places` columns we care about for timeline rendering.
+    /// All optional — any single field can be null in the database depending
+    /// on enrichment status.
+    private struct CityPlaceEnrichmentRow: Decodable, Sendable {
+        let place_id: String
+        let rating: Double?
+        let user_ratings_total: Int?
+        let price_level: Int?
+        let thumbnail_url: String?
+        let ai_short_summary: String?
+        let subtypes: [String]?
+        let time_spent_min: Int?
+        let time_spent_max: Int?
+    }
+
+    /// Pulls distinct, non-empty Google `place_id`s from the activity rows so
+    /// we can do one bulk `IN (…)` query instead of N round-trips.
+    private static func distinctPlaceIds(from rows: [TripActivityRow]) -> [String] {
+        var seen = Set<String>()
+        for row in rows {
+            let id = row.place_id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !id.isEmpty { seen.insert(id) }
+        }
+        return Array(seen)
+    }
+
+    /// Fetches the city_places rows for the given place_ids and returns a
+    /// `[place_id: row]` lookup. Returns an empty map when `placeIds` is empty
+    /// (skips the round-trip entirely) or when the query errors — enrichment
+    /// is best-effort and must never block timeline rendering.
+    private static func fetchCityPlaceEnrichments(
+        client: SupabaseClient,
+        placeIds: [String]
+    ) async throws -> [String: CityPlaceEnrichmentRow] {
+        guard !placeIds.isEmpty else { return [:] }
+        do {
+            let rows: [CityPlaceEnrichmentRow] = try await client
+                .from("city_places")
+                .select("place_id,rating,user_ratings_total,price_level,thumbnail_url,ai_short_summary,subtypes,time_spent_min,time_spent_max")
+                .in("place_id", values: placeIds)
+                .execute()
+                .value
+            return Dictionary(uniqueKeysWithValues: rows.map { ($0.place_id, $0) })
+        } catch {
+            // Enrichment is non-essential — log via assertion in DEBUG, swallow
+            // in RELEASE so the timeline still renders even if city_places
+            // RLS or schema changes break this query.
+            assertionFailure("city_places enrichment failed: \(error)")
+            return [:]
+        }
+    }
+
     func fetchDays(for tripId: UUID) async throws -> [ItineraryDay] {
         let (client, _) = try await requireClientAndUserId()
         let rows: [TripDayRow] = try await client
@@ -714,8 +859,43 @@ final class SupabaseManager {
         let longitude: Double?
         let address: String?
         let place_id: String?
+        let rating: Double?
+        let price_level: Int?
         let sort_order: Int
         let booking_id: UUID?
+        let travel_from_previous_minutes: Int?
+        let travel_mode: String?
+        let hero_image_url: String?
+    }
+
+    // Partial decode of trip_bookings.details_json — only the fields we need
+    // for building a `BookingDetailUnion`. Extra keys are silently ignored.
+    private struct BookingJSONDetails: Decodable, Sendable {
+        let party_size: Int?
+        let airline: String?
+        let flight_number: String?
+        let terminal: String?
+        let seat: String?
+        let room_type: String?
+        let car_type: String?
+    }
+
+    private struct TripBookingRow: Decodable, Sendable {
+        let id: UUID
+        let trip_id: UUID
+        let user_id: UUID
+        let kind: String
+        let title: String
+        let confirmation_code: String?
+        let provider: String?
+        let starts_at: String?
+        let ends_at: String?
+        let start_location: String?
+        let end_location: String?
+        let start_lat: Double?
+        let start_lng: Double?
+        let sort_order: Int
+        let details_json: BookingJSONDetails?
     }
 
     private struct TripActivityInsert: Encodable, Sendable {
@@ -793,9 +973,30 @@ final class SupabaseManager {
         )
     }
 
-    private static func mapActivityRow(_ row: TripActivityRow, dayId: UUID) -> Place {
+    /// Maps a single `trip_activities` row → `Place`, folding in any
+    /// `city_places` enrichment we have for the same Google `place_id`.
+    /// Activity-row fields take precedence (the user's plan); city_places
+    /// fills in NULL gaps (rating, price level, hero thumbnail, subtypes…).
+    /// `enrichment` may be `nil` when the activity has no `place_id` or the
+    /// enrichment row hasn't been written yet — both are graceful no-ops.
+    private static func mapActivityRow(
+        _ row: TripActivityRow,
+        dayId: UUID,
+        enrichment: CityPlaceEnrichmentRow? = nil
+    ) -> Place {
         let isBooking = row.booking_id != nil
         let start = row.starts_at.flatMap { SupabaseModelMapping.parsePostgresTimestamp($0) }
+
+        // Prefer the activity's own duration; fall back to city_places'
+        // editorial "time_spent_min" so we still have *something* to show in
+        // the subtitle / accessibility for places the user hasn't sized.
+        let mergedDurationMinutes = row.duration_minutes ?? enrichment?.time_spent_min
+
+        let end: Date? = {
+            guard let s = start, let dur = mergedDurationMinutes, dur > 0 else { return nil }
+            return s.addingTimeInterval(Double(dur) * 60)
+        }()
+
         return Place(
             id: row.id,
             itineraryDayId: dayId,
@@ -807,13 +1008,146 @@ final class SupabaseManager {
             notes: row.description,
             sortOrder: row.sort_order,
             startTime: start,
-            endTime: nil,
+            endTime: end,
             isBooking: isBooking,
             bookingType: isBooking ? "activity" : nil,
             confirmationNumber: nil,
             bookingDetails: nil,
-            googlePlaceId: row.place_id
+            googlePlaceId: row.place_id,
+            heroImageUrl: row.hero_image_url ?? enrichment?.thumbnail_url,
+            rating: row.rating ?? enrichment?.rating,
+            userRatingsTotal: enrichment?.user_ratings_total,
+            priceLevel: row.price_level ?? enrichment?.price_level,
+            aiShortSummary: enrichment?.ai_short_summary,
+            durationMinutes: mergedDurationMinutes,
+            subtypes: enrichment?.subtypes,
+            travelFromPreviousMinutes: row.travel_from_previous_minutes,
+            travelMode: row.travel_mode
         )
+    }
+
+    // MARK: - Booking row mapping
+
+    private static func mapBookingRow(_ row: TripBookingRow, dayId: UUID) -> Place {
+        let category = bookingKindToCategory(row.kind)
+        let start = row.starts_at.flatMap { SupabaseModelMapping.parsePostgresTimestamp($0) }
+        let end   = row.ends_at.flatMap   { SupabaseModelMapping.parsePostgresTimestamp($0) }
+        let details = buildBookingDetails(row: row, category: category, start: start, end: end)
+        return Place(
+            id: row.id,
+            itineraryDayId: dayId,
+            name: row.title,
+            address: row.start_location,
+            lat: row.start_lat,
+            lng: row.start_lng,
+            category: category.map(\.rawValue) ?? row.kind,
+            notes: nil,
+            sortOrder: row.sort_order,
+            startTime: start,
+            endTime: end,
+            isBooking: true,
+            bookingType: category?.rawValue ?? row.kind,
+            confirmationNumber: row.confirmation_code,
+            bookingDetails: details,
+            googlePlaceId: nil
+        )
+    }
+
+    private static func bookingKindToCategory(_ kind: String) -> BookingCategory? {
+        switch kind.lowercased() {
+        case "flight":                        return .flight
+        case "lodging", "hotel":              return .hotel
+        case "restaurant":                    return .restaurant
+        case "car_rental", "car":             return .carRental
+        case "activity", "tour", "ticket":    return .activity
+        case "transport", "train", "bus",
+             "ferry", "transit":              return .transport
+        default:                              return nil
+        }
+    }
+
+    private static func buildBookingDetails(
+        row: TripBookingRow,
+        category: BookingCategory?,
+        start: Date?,
+        end: Date?
+    ) -> BookingDetailUnion? {
+        let json = row.details_json
+        switch category {
+        case .flight:
+            return .flight(FlightDetails(
+                airline: json?.airline ?? row.provider ?? "",
+                flightNumber: json?.flight_number ?? "",
+                departureAirport: row.start_location ?? "",
+                arrivalAirport: row.end_location ?? "",
+                departureTime: start,
+                arrivalTime: end,
+                terminal: json?.terminal ?? "",
+                gate: "",
+                seat: json?.seat ?? ""
+            ))
+        case .hotel:
+            let nights: Int? = {
+                guard let s = start, let e = end else { return nil }
+                return Calendar.current.dateComponents([.day], from: s, to: e).day
+            }()
+            return .hotel(HotelDetails(
+                checkInDate: start,
+                checkInTime: nil,
+                checkOutDate: end,
+                checkOutTime: nil,
+                roomType: json?.room_type ?? "",
+                nights: nights
+            ))
+        case .restaurant:
+            return .restaurant(RestaurantDetails(
+                reservationTime: start,
+                partySize: json?.party_size
+            ))
+        case .carRental:
+            return .carRental(CarRentalDetails(
+                company: row.provider ?? "",
+                pickupLocation: row.start_location ?? "",
+                dropoffLocation: row.end_location ?? "",
+                pickupTime: start,
+                dropoffTime: end,
+                carType: json?.car_type ?? ""
+            ))
+        case .activity:
+            return .activity(ActivityDetails(
+                provider: row.provider ?? "",
+                duration: nil,
+                ticketNumber: row.confirmation_code ?? ""
+            ))
+        case .transport:
+            return .transport(TransportDetails(
+                operatorName: row.provider ?? "",
+                serviceNumber: "",
+                departureStation: row.start_location ?? "",
+                arrivalStation: row.end_location ?? "",
+                departureTime: start,
+                arrivalTime: end,
+                seat: json?.seat ?? ""
+            ))
+        case nil:
+            return nil
+        }
+    }
+
+    /// Finds which day a booking belongs to by matching the calendar-date of
+    /// `starts_at` against the `trip_days.date` strings. Falls back to the
+    /// first day when no match is found.
+    private static func resolveDayId(
+        for booking: TripBookingRow,
+        daysByDateKey: [String: UUID],
+        calendar: Calendar
+    ) -> UUID? {
+        guard let raw = booking.starts_at,
+              let date = SupabaseModelMapping.parsePostgresTimestamp(raw) else {
+            return daysByDateKey.values.first
+        }
+        let key = SupabaseModelMapping.calendarDateOnlyString(from: date, calendar: calendar)
+        return daysByDateKey[key] ?? daysByDateKey.values.first
     }
 
     private static func activityCategory(for place: Place) -> String {

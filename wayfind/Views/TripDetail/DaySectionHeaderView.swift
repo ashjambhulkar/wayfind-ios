@@ -19,15 +19,12 @@ struct DaySectionHeaderView: View {
             }
             HapticManager.selection()
         } label: {
-            HStack(alignment: .center, spacing: 0) {
-                Color.clear
-                    .frame(width: 4)
-
+            HStack(alignment: .center, spacing: AppSpacing.sm) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(AppColors.textSecondary)
                     .rotationEffect(.degrees(isCollapsed ? -90 : 0))
-                    .frame(width: 24)
+                    .frame(width: 18, alignment: .center)
 
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(titleText)
@@ -40,17 +37,16 @@ struct DaySectionHeaderView: View {
                             .font(.appCaption)
                             .foregroundStyle(AppColors.textSecondary)
                             .lineLimit(2)
-                    } else {
-                        Text("\(itemCount) items")
-                            .font(.appCaption)
-                            .foregroundStyle(AppColors.textTertiary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Spacer(minLength: 0)
             }
-            .padding(.leading, AppSpacing.sm)
+            // Match `AppSpacing.lg` so the chevron's leading edge sits in the
+            // same column as the time-pin balloons rendered below in the
+            // expanded day body — one column, one ruler.
+            .padding(.leading, AppSpacing.lg)
             .padding(.trailing, AppSpacing.lg)
             .padding(.vertical, AppSpacing.sm)
             .frame(height: isCollapsed ? 48 : 52)

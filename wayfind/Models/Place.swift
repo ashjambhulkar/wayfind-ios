@@ -41,6 +41,15 @@ struct Place: Identifiable, Codable, Hashable {
     var knowBeforeYouGo: [String]?     // city_places.ai_know_before_you_go
     var reviewsTags: [String]?         // city_places.reviews_tags
     var durationMinutes: Int?          // city_places.time_spent_min (suggested visit length)
+    var subtypes: [String]?            // city_places.subtypes — e.g. ["Shopping mall", "Tourist attraction"]
+
+    // MARK: – stored travel hop (trip_activities.travel_from_previous_minutes/mode)
+    /// Real, stored travel time **from the previous stop** to this one. When
+    /// present we prefer it over our haversine estimate in `TimelineGapView`.
+    var travelFromPreviousMinutes: Int?
+    /// Stored travel mode for the same hop (e.g. "driving", "walking",
+    /// "transit"). Falls back to the estimator's heuristic when nil.
+    var travelMode: String?
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: lat ?? 0, longitude: lng ?? 0)
@@ -67,6 +76,25 @@ struct Place: Identifiable, Codable, Hashable {
         case "nature", "park", "outdoor": return .nature
         default: return .custom
         }
+    }
+
+    /// Human-friendly label for the most specific Google subtype, e.g.
+    /// `"shopping_mall"` → `"Shopping mall"`. Returns `nil` when no subtypes
+    /// are present so callers can fall back to the broader category label.
+    /// We intentionally drop the catch-all buckets (`point_of_interest`,
+    /// `establishment`, `tourist_attraction`) — they read as filler in the UI.
+    var placeKindLabel: String? {
+        guard let subtypes else { return nil }
+        let blacklist: Set<String> = [
+            "point_of_interest", "establishment", "tourist_attraction", "place_of_interest",
+        ]
+        let pick = subtypes.first { !blacklist.contains($0.lowercased()) } ?? subtypes.first
+        guard let raw = pick, !raw.isEmpty else { return nil }
+        let words = raw.replacingOccurrences(of: "_", with: " ").split(separator: " ")
+        guard let first = words.first else { return nil }
+        let head = first.prefix(1).uppercased() + first.dropFirst().lowercased()
+        let tail = words.dropFirst().map { $0.lowercased() }
+        return ([head] + tail).joined(separator: " ")
     }
 
     var bookingCategoryEnum: BookingCategory? {

@@ -1,0 +1,59 @@
+# https://supabase.com/docs/guides/functions/function-configuration
+# CLI deploy defaults verify_jwt to true; this function already enforces auth via getUser().
+[functions.places-cache]
+verify_jwt = false
+
+# SendGrid inbound uses HTTP Basic (INBOUND_EMAIL_*), not a Supabase JWT — must disable JWT gate.
+[functions.receive-forwarded-email]
+verify_jwt = false
+
+# JWT is validated inside the function via `auth.getUser()`; disabling the gateway gate avoids 401s from
+# relay/JWT verification quirks while the session token is still valid for Auth API (same pattern as places-cache).
+[functions.extract-booking]
+verify_jwt = false
+
+# Anon client + `getUser()` with `Authorization: Bearer <user_jwt>` (see index.ts). Gateway JWT verify off avoids
+# 401s when the platform relay rejects tokens the Auth API still accepts.
+[functions.itinerary-ai]
+verify_jwt = false
+
+# Validates caller JWT inside the function (same pattern as delete-user / extract-booking).
+[functions.send-invite-email]
+verify_jwt = false
+
+[functions.validate-subscription]
+verify_jwt = false
+
+# Database Webhook calls with X-Wayfind-Collab-Secret (see migration Stage 12).
+[functions.collaboration-notify]
+verify_jwt = false
+
+# pg_cron + pg_net: only x-worker-secret (Vault); see migration city_place_enricher_cron.sql.
+[functions.city-place-enricher]
+verify_jwt = false
+
+[functions.serp-consumer]
+enabled = true
+verify_jwt = true
+import_map = "./functions/serp-consumer/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/serp-consumer/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/serp-consumer/*.html" ]
+
+[functions.ai-consumer]
+enabled = true
+verify_jwt = true
+import_map = "./functions/ai-consumer/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/ai-consumer/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/ai-consumer/*.html" ]
+
+# After user adds a place-backed `trip_activities` row: upsert `city_places` using `matchCityProfile` (same as itinerary-ai).
+[functions.sync-city-place-from-trip]
+verify_jwt = false

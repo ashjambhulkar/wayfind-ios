@@ -68,6 +68,13 @@ final class DataService {
         return await mock!.fetchProfileAggregateStats()
     }
 
+    /// Bulk timeline load: days + all activities + all bookings in parallel,
+    /// merged and sorted per day. Replaces the old N+1 pattern.
+    func fetchTripTimeline(for tripId: UUID) async -> (days: [ItineraryDay], placesByDayId: [UUID: [Place]]) {
+        if let real { return (try? await real.fetchTripTimeline(for: tripId)) ?? ([], [:]) }
+        return await mock!.fetchTripTimeline(for: tripId)
+    }
+
     func fetchDays(for tripId: UUID) async -> [ItineraryDay] {
         if let real { return (try? await real.fetchDays(for: tripId)) ?? [] }
         return await mock!.fetchDays(for: tripId)

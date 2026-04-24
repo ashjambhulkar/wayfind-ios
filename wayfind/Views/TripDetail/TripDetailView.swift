@@ -17,6 +17,7 @@ struct TripDetailView: View {
     // Sheet state
     @State private var showTripNotes = false
     @State private var showTripChecklists = false
+    @State private var showTripDocuments = false
     @State private var showAddPlace = false
     @State private var showAddBooking = false
     @State private var addPlaceTargetDay: Int = 1
@@ -135,7 +136,10 @@ struct TripDetailView: View {
         }
         .navigationDestination(isPresented: $showTripNotes) {
             TripNotesView(trip: viewModel?.trip ?? trip)
-                        }
+        }
+        .navigationDestination(isPresented: $showTripDocuments) {
+            TripDocumentsView(trip: viewModel?.trip ?? trip)
+        }
         .navigationDestination(isPresented: $showTripChecklists) {
             TripChecklistsView(trip: viewModel?.trip ?? trip)
                         }
@@ -222,6 +226,10 @@ struct TripDetailView: View {
         .navigationTitle(viewModel?.trip.title ?? trip.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(isNavigationOverLightContent ? .light : .dark, for: .navigationBar)
+        // Use the app's solid background color rather than the system's
+        // translucent material so scrolled content (e.g. the forwarding
+        // banner) cannot ghost through the nav as it scrolls past.
+        .toolbarBackground(AppColors.appBackground, for: .navigationBar)
         .toolbarBackground(isNavigationOverLightContent ? .visible : .hidden, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -391,6 +399,15 @@ struct TripDetailView: View {
                 ) {
                     HapticManager.light()
                     showTripNotes = true
+                }
+                PillButtonView(
+                    sfSymbol: "doc.text",
+                    label: "Documents",
+                    trailingDetail: nil,
+                    isActive: true
+                ) {
+                    HapticManager.light()
+                    showTripDocuments = true
                 }
             }
             .padding(.horizontal, AppSpacing.lg)

@@ -69,19 +69,17 @@ final class TripDetailViewModel {
         isLoading = true
         defer { isLoading = false }
 
-        let days = await dataService.fetchDays(for: trip.id)
+        // Parallel fetch: trip_days + all trip_activities + all trip_bookings
+        // in three concurrent queries, merged by day. Mirrors the web app's
+        // fetchTripTimelineEnriched + tripDetailStore booking fetch pattern.
+        let (days, fetched) = await dataService.fetchTripTimeline(for: trip.id)
         let sorted = days.sorted { $0.dayNumber < $1.dayNumber }
         scheduledDays = sorted.filter { !$0.isWishlist }
         wishlistDayId = sorted.first(where: { $0.isWishlist })?.id
-
-        var nextPlaces: [UUID: [Place]] = [:]
-        for day in sorted {
-            nextPlaces[day.id] = await dataService.fetchPlaces(for: day.id)
-        }
-        placesByDayId = nextPlaces
+        placesByDayId = fetched
 
         if let wishlistDay = sorted.first(where: { $0.isWishlist }) {
-            wishlistPlaces = nextPlaces[wishlistDay.id] ?? []
+            wishlistPlaces = fetched[wishlistDay.id] ?? []
         } else {
             wishlistPlaces = []
         }

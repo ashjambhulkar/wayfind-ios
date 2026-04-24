@@ -1,5 +1,9 @@
 import SwiftUI
 
+/// Activity row in the trip-detail timeline. Same chassis as
+/// `TimelineBookingCardView` (see `TimelineCardChassis`) — what makes each
+/// card recognisable at a glance is the inline category icon next to the
+/// title and the type-aware subtitle (rating · price · duration · area).
 struct TimelinePlaceCardView: View {
     let place: Place
     let dayNumber: Int
@@ -13,16 +17,8 @@ struct TimelinePlaceCardView: View {
         place.categoryEnum.color
     }
 
-    private var subtitleParts: [String] {
-        var parts: [String] = []
-        if let dur = durationLabel(start: place.startTime, end: place.endTime) {
-            parts.append(dur)
-        }
-        if let area = neighborhood(from: place.address) {
-            parts.append(area)
-        }
-        parts.append(place.categoryEnum.label)
-        return parts
+    private var inlineIcon: String {
+        place.categoryEnum.sfSymbol
     }
 
     var body: some View {
@@ -56,27 +52,81 @@ struct TimelinePlaceCardView: View {
     // MARK: - Card surface
 
     private var cardSurface: some View {
-        HStack(alignment: .top, spacing: 0) {
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(familyColor)
-                .frame(width: 3)
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+                Image(systemName: inlineIcon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(familyColor)
+                    .frame(width: 16, alignment: .center)
 
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                // Use `Color.primary` (true system-black in light, true white
+                // in dark) for the strongest, Apple-correct title contrast.
+                // `AppColors.textPrimary` reads slightly washed at 0x1A1A1A.
                 Text(place.name)
                     .font(.cardTitle)
-                    .foregroundStyle(AppColors.textPrimary)
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+            }
 
+            if !subtitleParts.isEmpty {
                 Text(subtitleParts.joined(separator: " · "))
                     .font(.appCaption)
                     .foregroundStyle(AppColors.textSecondary)
                     .lineLimit(1)
             }
-            .padding(AppSpacing.md)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(AppColors.appSurface)
-        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-        .shadow(color: Color.black.opacity(0.06), radius: 4, x: 0, y: 2)
+        .timelineCardChassis(stripeColor: familyColor)
+    }
+
+    // MARK: - Type-aware subtitle
+    //
+    // We compose a 1-line "tag string" tuned per category so each card carries
+    // the metadata most useful for that kind of place. Order is: identifying
+    // signal first (rating / price), shape signal next (duration), then a quiet
+    // place anchor (neighborhood or category label) so the row always ends
+    // with where-or-what-it-is.
+
+    private var subtitleParts: [String] {
+        var parts: [String] = []
+
+        if let r = place.rating {
+            parts.append(String(format: "★ %.1f", r))
+        }
+
+        switch place.categoryEnum {
+        case .restaurant, .nightlife, .shopping:
+            if let price = priceString(place.priceLevel) {
+                parts.append(price)
+            }
+        case .attraction, .nature, .hotel, .transport, .custom:
+            if let dur = primaryDurationString {
+                parts.append(dur)
+            }
+        }
+
+        // Trailing tag: prefer the most specific Google subtype (e.g.
+        // "Shopping mall", "Cocktail bar") over the broad category label so
+        // every card carries a sharper "what is this" signal. Otherwise fall
+        // back to neighborhood, then to the category label.
+        if let kind = place.placeKindLabel {
+            parts.append(kind)
+        } else if let area = neighborhood(from: place.address) {
+            parts.append(area)
+        } else {
+            parts.append(place.categoryEnum.label)
+        }
+
+        return parts
+    }
+
+    /// Prefer the actual scheduled duration (start→end) since that reflects
+    /// the user's plan; fall back to the editorial `durationMinutes` when the
+    /// place has no fixed slot.
+    private var primaryDurationString: String? {
+        if let dur = durationLabel(start: place.startTime, end: place.endTime) {
+            return dur
+        }
+        return durationFromMinutes(place.durationMinutes)
     }
 
     // MARK: - Accessibility
@@ -90,6 +140,9 @@ struct TimelinePlaceCardView: View {
                 pieces.append(start.timeFormatted)
             }
         }
+        if let r = place.rating {
+            pieces.append(String(format: "rated %.1f", r))
+        }
         if let area = neighborhood(from: place.address) {
             pieces.append("in \(area)")
         }
@@ -97,101 +150,29 @@ struct TimelinePlaceCardView: View {
     }
 }
 
-// MARK: - Time pin (Apple-Maps callout balloon)
-
-/// Compact rounded balloon with a right-pointing tail, evoking an Apple Maps
-/// callout. Renders the start time as a single-line 24-hour `HH:mm` glyph so
-/// every pin in a day is the same width — a clean leading column of times.
-private struct TimePinView: View {
-    let time: Date
-    let tint: Color
-
-    private static let tailSize: CGFloat = 5
-    private static let cornerRadius: CGFloat = 8
-
-    var body: some View {
-        Text(hourMinuteString(time))
-            .font(.appSmall.weight(.semibold))
-            .monospacedDigit()
-            .foregroundStyle(AppColors.textPrimary)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.leading, 8)
-            .padding(.trailing, 8 + Self.tailSize)
-            .padding(.vertical, 5)
-            .background(
-                BalloonShape(tailSize: Self.tailSize, cornerRadius: Self.cornerRadius)
-                    .fill(tint.opacity(0.16))
-            )
-            .overlay(
-                BalloonShape(tailSize: Self.tailSize, cornerRadius: Self.cornerRadius)
-                    .strokeBorder(tint.opacity(0.4), lineWidth: 0.6)
-            )
-    }
-}
-
-/// Quiet anchor for stops with no scheduled time — small family-tinted dot.
-private struct UnscheduledMarkerView: View {
-    let tint: Color
-
-    var body: some View {
-        Circle()
-            .fill(tint.opacity(0.55))
-            .frame(width: 8, height: 8)
-            .padding(.horizontal, 14)
-    }
-}
-
-/// Rounded-rectangle balloon with a small triangular tail centered on the
-/// trailing edge — like an iMessage bubble pointing right into the card.
-private struct BalloonShape: InsettableShape {
-    var tailSize: CGFloat
-    var cornerRadius: CGFloat
-    var insetAmount: CGFloat = 0
-
-    func path(in rect: CGRect) -> Path {
-        let r = rect.insetBy(dx: insetAmount, dy: insetAmount)
-        let bodyRect = CGRect(
-            x: r.minX,
-            y: r.minY,
-            width: max(0, r.width - tailSize),
-            height: r.height
-        )
-        var path = Path(roundedRect: bodyRect, cornerRadius: cornerRadius, style: .continuous)
-
-        let tipY = bodyRect.midY
-        path.move(to: CGPoint(x: bodyRect.maxX, y: tipY - tailSize))
-        path.addLine(to: CGPoint(x: bodyRect.maxX + tailSize, y: tipY))
-        path.addLine(to: CGPoint(x: bodyRect.maxX, y: tipY + tailSize))
-        path.closeSubpath()
-
-        return path
-    }
-
-    func inset(by amount: CGFloat) -> some InsettableShape {
-        var copy = self
-        copy.insetAmount += amount
-        return copy
-    }
-}
-
 // MARK: - Helpers
 
-/// Returns a 24-hour `HH:mm` time string with leading zeros so every pin in a
-/// timeline column has identical width.
-///
-/// Locale-independent on purpose — the visual timeline reads better with a
-/// single, predictable format. The locale-aware string lives in the
-/// accessibility label via `Date.timeFormatted`.
-private func hourMinuteString(_ date: Date) -> String {
-    let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
-    let hour = comps.hour ?? 0
-    let minute = comps.minute ?? 0
-    return String(format: "%02d:%02d", hour, minute)
+/// Compact `$`/`$$`/`$$$`/`$$$$` glyph for Google `priceLevel` 1–4.
+/// Returns `nil` for missing or out-of-range values so callers can drop the
+/// chip cleanly.
+private func priceString(_ level: Int?) -> String? {
+    guard let level, (1...4).contains(level) else { return nil }
+    return String(repeating: "$", count: level)
 }
 
-/// Human duration string like "1h 30m" / "45m" / "2h".
-/// Defaults to a 60-minute window when `endTime` is missing.
+/// Human duration string built from a raw minute count: "1h 30m" / "45m" / "2h".
+private func durationFromMinutes(_ minutes: Int?) -> String? {
+    guard let minutes, minutes > 0 else { return nil }
+    let h = minutes / 60
+    let m = minutes % 60
+    if h > 0 && m > 0 { return "\(h)h \(m)m" }
+    if h > 0 { return "\(h)h" }
+    return "\(m)m"
+}
+
+/// Human duration string from start/end. Returns `nil` when no `start` is
+/// known. When `end` is missing, defaults to a 60-minute window so the row
+/// still carries shape for unsized stops.
 private func durationLabel(start: Date?, end: Date?) -> String? {
     guard let start else { return nil }
     let endResolved = end ?? start.addingTimeInterval(60 * 60)
@@ -204,20 +185,56 @@ private func durationLabel(start: Date?, end: Date?) -> String? {
     return "\(m)m"
 }
 
-/// Returns a likely neighborhood from a free-form address by splitting on `,` and `-`
-/// and grabbing the second-to-last non-empty segment.
+/// Best-effort neighborhood extraction from a free-form address. Splits on
+/// `,` and `-`, drops trailing country names, dedupes consecutive identical
+/// segments (so `"Dubai - Dubai - UAE"` doesn't render `"Dubai"` twice), and
+/// returns the most-specific *non-city* segment when one exists.
 ///
-/// - "1 Sheikh Mohammed Bin Rashid Blvd, Downtown Dubai, Dubai, UAE" → "Dubai"
-/// - "Burj Khalifa - Downtown Dubai - Dubai - UAE" → "Dubai"
-/// - "Tokyo" → nil
-private func neighborhood(from address: String?) -> String? {
+/// Examples:
+/// - `"1 Sheikh Mohammed Bin Rashid Blvd, Downtown Dubai, Dubai, UAE"` → `"Downtown Dubai"`
+/// - `"Burj Khalifa - Downtown Dubai - Dubai - United Arab Emirates"` → `"Downtown Dubai"`
+/// - `"Tokyo"` → `nil`
+func neighborhood(from address: String?) -> String? {
     guard let address, !address.isEmpty else { return nil }
-    let parts = address
+
+    var parts = address
         .components(separatedBy: CharacterSet(charactersIn: ",-"))
         .map { $0.trimmingCharacters(in: .whitespaces) }
         .filter { !$0.isEmpty }
-    guard parts.count >= 2 else { return nil }
-    return parts[parts.count - 2]
+
+    // 1. Drop trailing country / region segments. Tightly scoped to the names
+    //    that actually show up in our trip data so we don't accidentally
+    //    swallow legitimate city/neighborhood names.
+    let countryNames: Set<String> = [
+        "uae", "united arab emirates",
+        "usa", "u.s.a.", "u.s.", "united states", "united states of america",
+        "uk", "u.k.", "united kingdom",
+        "france", "italy", "spain", "japan", "germany", "portugal",
+        "netherlands", "the netherlands", "belgium", "switzerland", "austria",
+        "greece", "turkey", "thailand", "indonesia", "vietnam", "singapore",
+        "australia", "new zealand", "canada", "mexico", "brazil", "argentina",
+        "china", "south korea", "korea", "india", "egypt", "morocco",
+    ]
+    while let last = parts.last, countryNames.contains(last.lowercased()) {
+        parts.removeLast()
+    }
+
+    // 2. Collapse consecutive duplicates ("Dubai - Dubai" → "Dubai").
+    var deduped: [String] = []
+    for segment in parts {
+        if deduped.last?.caseInsensitiveCompare(segment) != .orderedSame {
+            deduped.append(segment)
+        }
+    }
+
+    guard deduped.count >= 2 else { return nil }
+
+    // 3. The last segment is the city — return the second-to-last as the
+    //    neighborhood, but only when it actually differs from the city.
+    let city = deduped.last!
+    let candidate = deduped[deduped.count - 2]
+    if candidate.caseInsensitiveCompare(city) == .orderedSame { return nil }
+    return candidate
 }
 
 
