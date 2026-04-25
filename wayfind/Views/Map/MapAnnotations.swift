@@ -207,7 +207,7 @@ final class BookingAnnotationView: MKAnnotationView {
     }
 }
 
-/// Search-result marker — neutral material drop pin. The lower-trailing
+/// Search-result marker — Apple Maps-style red drop pin. The lower-trailing
 /// corner gets a small accent-colored dot when `isOwnedRow == true` so the
 /// user can tell at a glance which results came from a row we already
 /// paid to enrich.
@@ -225,8 +225,9 @@ final class SearchResultAnnotationView: MKMarkerAnnotationView {
         clusteringIdentifier = SearchResultAnnotation.clusterId
         canShowCallout = false
         animatesWhenAdded = !UIAccessibility.isReduceMotionEnabled
-        markerTintColor = .systemOrange
-        glyphImage = UIImage(systemName: "magnifyingglass")
+        markerTintColor = .systemRed
+        glyphImage = nil
+        glyphText = nil
         glyphTintColor = .white
 
         // Owned-row dot, hidden until configure() turns it on.
@@ -295,7 +296,7 @@ final class SearchResultClusterView: MKAnnotationView {
     private func setupLayers() {
         circle.frame = bounds
         circle.path = UIBezierPath(ovalIn: bounds).cgPath
-        circle.fillColor = UIColor.systemOrange.cgColor
+        circle.fillColor = UIColor.systemRed.cgColor
         circle.strokeColor = UIColor.white.cgColor
         circle.lineWidth = 2
         circle.shadowColor = UIColor.black.cgColor
@@ -320,6 +321,175 @@ final class SearchResultClusterView: MKAnnotationView {
         accessibilityLabel = "\(count) places"
         accessibilityHint = "Double tap to expand cluster"
         isAccessibilityElement = true
+    }
+}
+
+// MARK: - Route badge (mode + minutes capsule on each polyline)
+
+/// Floating capsule placed at the midpoint of a route polyline that
+/// shows the chosen transport mode (walk / drive / transit) and the
+/// estimated travel minutes. This is the readability layer for the
+/// dashed-vs-dotted-vs-solid line styles — most users will not decode
+/// "dotted means walking" without a glyph alongside it.
+final class RouteBadgeAnnotation: NSObject, MKAnnotation {
+    let id: String              // e.g. "<segmentId>.badge"
+    let segmentId: String
+    @objc dynamic var coordinate: CLLocationCoordinate2D
+    let mode: AppleTravelTimesService.Mode?
+    let minutes: Int?
+    let dayColor: UIColor
+
+    init(
+        segmentId: String,
+        coordinate: CLLocationCoordinate2D,
+        mode: AppleTravelTimesService.Mode?,
+        minutes: Int?,
+        dayColor: UIColor
+    ) {
+        self.id = "\(segmentId).badge"
+        self.segmentId = segmentId
+        self.coordinate = coordinate
+        self.mode = mode
+        self.minutes = minutes
+        self.dayColor = dayColor
+        super.init()
+    }
+
+    /// Visual fingerprint for diffing.
+    var visualFingerprint: String {
+        let lat = String(format: "%.5f", coordinate.latitude)
+        let lng = String(format: "%.5f", coordinate.longitude)
+        let modeKey = mode?.rawValue ?? "fallback"
+        let mins = minutes.map(String.init) ?? "-"
+        // Pull RGBA so day-color swaps trigger redraw.
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        dayColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let colorKey = String(format: "%.2f-%.2f-%.2f-%.2f", r, g, b, a)
+        return "\(lat)|\(lng)|\(modeKey)|\(mins)|\(colorKey)"
+    }
+}
+
+/// Tinted capsule with an SF Symbol + minutes label. Sized to its
+/// content so different durations don't shift the layout. Hidden by
+/// the coordinator when the map is too zoomed out for the badge to
+/// be readable.
+final class RouteBadgeAnnotationView: MKAnnotationView {
+    static let reuseId = "RouteBadgeAnnotationView"
+
+    private let container = UIView()
+    private let stack = UIStackView()
+    private let symbol = UIImageView()
+    private let label = UILabel()
+
+    override var annotation: MKAnnotation? {
+        didSet { configure() }
+    }
+
+    override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
+        super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
+        canShowCallout = false
+        // Below trip pins so badges never occlude a numbered stop.
+        displayPriority = .defaultLow
+        // Don't cluster — we want one per leg, always.
+        clusteringIdentifier = nil
+        // Not interactive: tapping the badge would compete with
+        // tapping the pin behind it. Keep it as decoration.
+        isUserInteractionEnabled = false
+        setupViews()
+        configure()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
+
+    private func setupViews() {
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.layer.cornerRadius = 11
+        container.layer.shadowColor = UIColor.black.cgColor
+        container.layer.shadowOpacity = 0.20
+        container.layer.shadowRadius = 2
+        container.layer.shadowOffset = CGSize(width: 0, height: 1)
+        addSubview(container)
+
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 3
+        container.addSubview(stack)
+
+        symbol.contentMode = .center
+        symbol.tintColor = .white
+        symbol.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
+            pointSize: 10,
+            weight: .semibold
+        )
+        stack.addArrangedSubview(symbol)
+
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .white
+        label.adjustsFontForContentSizeCategory = false
+        stack.addArrangedSubview(label)
+
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: topAnchor),
+            container.bottomAnchor.constraint(equalTo: bottomAnchor),
+            container.leadingAnchor.constraint(equalTo: leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 3),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -3),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 7),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -7),
+        ])
+    }
+
+    private func configure() {
+        guard let badge = annotation as? RouteBadgeAnnotation else { return }
+        container.backgroundColor = badge.dayColor
+
+        let symbolName: String
+        let modeWord: String
+        switch badge.mode {
+        case .walking:
+            symbolName = "figure.walk"
+            modeWord = "walking"
+        case .driving:
+            symbolName = "car.fill"
+            modeWord = "driving"
+        case .transit:
+            symbolName = "tram.fill"
+            modeWord = "transit"
+        case .none:
+            // Haversine fallback — show a generic "directions" glyph
+            // and skip the minutes (we don't have a real estimate).
+            symbolName = "arrow.triangle.swap"
+            modeWord = "estimated"
+        }
+        symbol.image = UIImage(systemName: symbolName)
+
+        if let minutes = badge.minutes, minutes > 0 {
+            label.text = "\(minutes) min"
+            label.isHidden = false
+            accessibilityLabel = "\(minutes) minute \(modeWord)"
+        } else {
+            // Don't show "0 min" / nil — collapse to just the symbol.
+            label.text = ""
+            label.isHidden = true
+            accessibilityLabel = "\(modeWord) leg"
+        }
+        isAccessibilityElement = true
+        accessibilityTraits = .staticText
+
+        setNeedsLayout()
+        invalidateIntrinsicContentSize()
+        // Match the intrinsic size of the stack so MKMapView centers
+        // us correctly on the coordinate.
+        layoutIfNeeded()
+        let target = stack.systemLayoutSizeFitting(
+            UIView.layoutFittingCompressedSize
+        )
+        // Pad for the container insets (3 + 3 / 7 + 7).
+        frame.size = CGSize(width: target.width + 14, height: target.height + 6)
+        // Anchor by the visual center, not the default top-left.
+        centerOffset = .zero
     }
 }
 

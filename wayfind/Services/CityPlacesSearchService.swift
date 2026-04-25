@@ -141,6 +141,74 @@ final class CityPlacesSearchService {
         }
     }
 
+    // MARK: - Suggested places (empty state)
+
+    /// Pull the highest-tier rows for a city, ignoring viewport. Used to
+    /// populate the "Suggested Places" carousel when the search bar is
+    /// empty — we want the best curated rows for the destination, not
+    /// just whatever happens to fall inside the user's current zoom.
+    ///
+    /// - Parameters:
+    ///   - cityProfileId: Trip's resolved city. Returns empty without
+    ///     hitting Postgres when nil.
+    ///   - category: Optional family filter (e.g. only restaurants).
+    ///   - excluding: Place ids already on a scheduled day to skip.
+    ///   - limit: Hard cap. Defaults to 30 — enough to fill an "all
+    ///     suggestions" sheet without choking the JSON decode.
+    /// - Returns: Curated rows ordered by `tier` ASC then
+    ///   `dist_from_center_km` ASC. Tagged `.cityPlaces`. Empty array on
+    ///   any failure — search fan-out should never fail because of us.
+    func topPicks(
+        cityProfileId: UUID?,
+        category: PlaceCategory? = nil,
+        excluding: Set<String> = [],
+        limit: Int = 30
+    ) async -> [MapSearchPreview] {
+        guard let cityProfileId else { return [] }
+        guard let client = AuthSessionService.shared.client else { return [] }
+
+        do {
+            var builder = client
+                .from("city_places")
+                .select(
+                    """
+                    place_id,name,lat,lng,formatted_address,wayfind_category,\
+                    thumbnail_url,formatted_phone_number,website,tier,dist_from_center_km
+                    """
+                )
+                .eq("city_profile_id", value: cityProfileId.uuidString.lowercased())
+                .eq("status", value: "active")
+
+            if let category {
+                builder = builder.eq(
+                    "wayfind_category",
+                    value: category.cityPlacesCategoryString
+                )
+            }
+
+            let rows: [Row] = try await builder
+                .order("tier", ascending: true)
+                .order("dist_from_center_km", ascending: true, nullsFirst: false)
+                .limit(limit * 2)
+                .execute()
+                .value
+
+            var out: [MapSearchPreview] = []
+            out.reserveCapacity(min(limit, rows.count))
+            for row in rows {
+                if excluding.contains(row.place_id) { continue }
+                out.append(row.toPreview)
+                if out.count == limit { break }
+            }
+            return out
+        } catch {
+            #if DEBUG
+            print("[CityPlacesSearchService] topPicks failed: \(error)")
+            #endif
+            return []
+        }
+    }
+
     // MARK: - Wire format
 
     private struct Row: Decodable, Sendable {

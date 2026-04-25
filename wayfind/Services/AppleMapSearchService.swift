@@ -199,7 +199,15 @@ final class AppleMapSearchService: NSObject {
 
         do {
             let response = try await MKLocalSearch(request: request).start()
-            let mapped = response.mapItems.prefix(resultLimit).map { item in
+            let maxKm = Self.maxResultDistanceKm(for: region)
+            let filtered = response.mapItems.filter { item in
+                Self.isWithinRegion(
+                    item.placemark.coordinate,
+                    center: region.center,
+                    maxKm: maxKm
+                )
+            }
+            let mapped = filtered.prefix(resultLimit).map { item in
                 AppleMapResolvedPlace(
                     name: item.name ?? query,
                     subtitle: item.placemark.title ?? "",
@@ -219,7 +227,8 @@ final class AppleMapSearchService: NSObject {
 
     /// Resolve a tapped suggestion to a `MapSearchPreview`. Returns nil
     /// when MapKit can't materialise the completion (rare — usually
-    /// transient network).
+    /// transient network) or when the resolved place is far outside the
+    /// caller's bias region (Apple's silent global fallback).
     func resolveDetail(suggestion: AppleMapSuggestion,
                        in region: MKCoordinateRegion?) async -> MapSearchPreview? {
         let signpost = PlatformUsageTelemetry.begin(.mkLocalSearch)
@@ -237,6 +246,21 @@ final class AppleMapSearchService: NSObject {
                 outcome = .empty
                 return nil
             }
+            if let region {
+                let maxKm = Self.maxResultDistanceKm(for: region)
+                if !Self.isWithinRegion(
+                    first.placemark.coordinate,
+                    center: region.center,
+                    maxKm: maxKm
+                ) {
+                    // Apple Maps fell back to a global match (e.g., a
+                    // Chipotle in the US when the trip is in Bali).
+                    // Reject so we don't yank the camera across the
+                    // world. Caller surfaces an empty state instead.
+                    outcome = .empty
+                    return nil
+                }
+            }
             outcome = .ok
             return Self.preview(from: first, fallbackName: suggestion.title)
         } catch {
@@ -247,6 +271,8 @@ final class AppleMapSearchService: NSObject {
 
     /// Same `searchNearby(naturalLanguage:in:)` flow, but typed as
     /// previews so the overlay merge step doesn't have to translate.
+    /// Filters out results far outside the bias region so MapKit's
+    /// silent global fallback doesn't render pins on another continent.
     func searchNearbyPreviews(query: String,
                               in region: MKCoordinateRegion,
                               resultLimit: Int = 10) async -> [MapSearchPreview] {
@@ -265,7 +291,15 @@ final class AppleMapSearchService: NSObject {
 
         do {
             let response = try await MKLocalSearch(request: request).start()
-            let previews = response.mapItems
+            let maxKm = Self.maxResultDistanceKm(for: region)
+            let filtered = response.mapItems.filter { item in
+                Self.isWithinRegion(
+                    item.placemark.coordinate,
+                    center: region.center,
+                    maxKm: maxKm
+                )
+            }
+            let previews = filtered
                 .prefix(resultLimit)
                 .map { Self.preview(from: $0, fallbackName: query) }
             outcome = previews.isEmpty ? .empty : .ok
@@ -320,6 +354,40 @@ final class AppleMapSearchService: NSObject {
     }
 
     // MARK: - Helpers
+
+    /// Maximum allowable distance (km) between a search hit and the
+    /// bias region's center before we treat the hit as Apple's global
+    /// fallback. Scaled to the region span — tight viewports still get
+    /// a 75 km floor so the user can grab a place "in the same metro
+    /// area" while looking at downtown.
+    static func maxResultDistanceKm(for region: MKCoordinateRegion) -> Double {
+        // ~111 km per latitude degree; longitude varies with cosine but
+        // for a coarse "is it on the same continent" check the latitude
+        // approximation is plenty.
+        let largerSpanDeg = max(
+            region.span.latitudeDelta,
+            region.span.longitudeDelta
+        )
+        let halfSpanKm = (largerSpanDeg * 111.0) / 2.0
+        // 3× half-span ≈ 1.5× full span — generous enough to keep
+        // edge-of-viewport results, strict enough to drop another
+        // continent. Floor at 75 km so we always allow "next town over".
+        return max(3.0 * halfSpanKm, 75.0)
+    }
+
+    /// True when `coordinate` is within `maxKm` of `center` (great-circle).
+    static func isWithinRegion(
+        _ coordinate: CLLocationCoordinate2D,
+        center: CLLocationCoordinate2D,
+        maxKm: Double
+    ) -> Bool {
+        // Defensive: an unanchored region (0,0 fallback) shouldn't
+        // accidentally filter every result. Treat as "no constraint".
+        if abs(center.latitude) < 0.000_001 && abs(center.longitude) < 0.000_001 {
+            return true
+        }
+        return HaversineDistance.distance(from: center, to: coordinate) <= maxKm
+    }
 
     private static func preview(from item: MKMapItem, fallbackName: String) -> MapSearchPreview {
         let coord = item.placemark.coordinate

@@ -13,7 +13,22 @@ struct MapDockedAccessoryBar: View {
     var onExpand: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
+        // The whole bar is tappable — matches Apple Music's now-playing
+        // bar, which is the only Apple-blessed pattern for this API
+        // (`tabViewBottomAccessory` has no native drag-to-expand).
+        // Day-pill `Button`s intercept their own taps because SwiftUI
+        // hit-testing always prefers a child control over a background
+        // gesture, so taps that land on empty bar space fall through
+        // to `Color.clear` and trigger `onExpand()`.
+        ZStack {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    HapticManager.light()
+                    onExpand()
+                }
+                .accessibilityHidden(true)
+
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -33,32 +48,13 @@ struct MapDockedAccessoryBar: View {
                     proxy.scrollTo(selectedDayFilter ?? 0, anchor: .center)
                 }
             }
-
-            // Expand button
-            Button {
-                HapticManager.light()
-                onExpand()
-            } label: {
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(
-                        Circle()
-                            .fill(AppColors.appPrimary)
-                    )
-            }
-            .padding(.trailing, 6)
-            .accessibilityLabel("Expand places")
         }
         .frame(height: 52)
-        .contentShape(Capsule())
-        .onTapGesture {
-            HapticManager.light()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(mappablePlaces.count) places on map. Double tap to expand.")
+        .accessibilityAction(named: Text("Expand places")) {
             onExpand()
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(mappablePlaces.count) places on map. Tap list to expand.")
     }
 
     private func dockedDayTab(dayNum: Int, label: String) -> some View {

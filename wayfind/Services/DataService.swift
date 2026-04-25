@@ -333,6 +333,17 @@ final class DataService {
         return await real.fetchCityProfileId(forGooglePlaceId: googlePlaceId)
     }
 
+    /// Robust 3-tier `city_profile_id` resolver for a trip — slug match,
+    /// then geo proximity, then legacy `place_id` lookup. Use this for
+    /// any new caller that needs a city profile from a `Trip` rather
+    /// than just a Google place id, since trip destinations are usually
+    /// localities (not POIs in `city_places`). Returns `nil` in mock
+    /// mode and when none of the tiers match.
+    func resolveCityProfileId(forTrip trip: Trip) async -> UUID? {
+        guard let real else { return nil }
+        return await real.resolveCityProfileId(forTrip: trip)
+    }
+
     /// Enqueues a foreground enrichment job for the given Google `place_id`.
     /// Stampede-deduped server-side. No-op in mock mode.
     func requestCityPlaceEnrichment(googlePlaceId: String) async {

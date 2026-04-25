@@ -31,15 +31,48 @@ import SwiftUI
 
 /// One leg between two consecutive trip stops. Apple-routed legs render
 /// bolder than haversine fallbacks so the user can tell which legs are
-/// real routes vs straight-line approximations.
+/// real routes vs straight-line approximations. The optional `mode`
+/// drives stroke style (dotted for walking, dashed for transit, solid
+/// for driving) so the user can read the chosen transport at a glance.
 struct TripRouteSegment: Identifiable, Equatable {
     let id: String
     let coordinates: [CLLocationCoordinate2D]
     let isApple: Bool
+    /// Which routing mode produced this polyline (or that we want to
+    /// represent visually). `nil` for haversine fallbacks where mode
+    /// is unknown — renderer falls back to the solid driving style.
+    let mode: AppleTravelTimesService.Mode?
+    /// Cached travel time in minutes for callers that want to render
+    /// midpoint badges. Optional — not all sources publish minutes.
+    let minutes: Int?
+    /// Per-leg stroke color. Lets the renderer color each leg by its
+    /// day even when the user hasn't filtered to a specific day,
+    /// matching the day pin/dot colors. `nil` falls back to the
+    /// global `routeStrokeColor` so legacy callers stay correct.
+    let strokeColor: UIColor?
+
+    init(
+        id: String,
+        coordinates: [CLLocationCoordinate2D],
+        isApple: Bool,
+        mode: AppleTravelTimesService.Mode? = nil,
+        minutes: Int? = nil,
+        strokeColor: UIColor? = nil
+    ) {
+        self.id = id
+        self.coordinates = coordinates
+        self.isApple = isApple
+        self.mode = mode
+        self.minutes = minutes
+        self.strokeColor = strokeColor
+    }
 
     static func == (lhs: TripRouteSegment, rhs: TripRouteSegment) -> Bool {
         lhs.id == rhs.id
             && lhs.isApple == rhs.isApple
+            && lhs.mode == rhs.mode
+            && lhs.minutes == rhs.minutes
+            && lhs.strokeColor == rhs.strokeColor
             && lhs.coordinates.count == rhs.coordinates.count
             && zip(lhs.coordinates, rhs.coordinates).allSatisfy {
                 $0.latitude == $1.latitude && $0.longitude == $1.longitude
@@ -129,11 +162,16 @@ struct TripMapKitView: UIViewRepresentable {
             SearchResultClusterView.self,
             forAnnotationViewWithReuseIdentifier: SearchResultClusterView.reuseId
         )
+        map.register(
+            RouteBadgeAnnotationView.self,
+            forAnnotationViewWithReuseIdentifier: RouteBadgeAnnotationView.reuseId
+        )
 
         // Initial sync so the first frame has data.
         context.coordinator.applyAnnotations(to: map, places: tripPlaces, dayNumberByDayId: dayNumberByDayId)
         context.coordinator.applySearchResults(to: map, results: searchResults)
         context.coordinator.applyOverlays(to: map, segments: routeSegments)
+        context.coordinator.applyBadgeVisibility(to: map)
         if let target = cameraTarget {
             context.coordinator.apply(camera: target, to: map, reduceMotion: reduceMotion)
         }
@@ -199,6 +237,7 @@ struct TripMapKitView: UIViewRepresentable {
         private var searchAnnotationsById: [String: SearchResultAnnotation] = [:]
         private var overlaysById: [String: MKPolyline] = [:]
         private var segmentMetaById: [String: TripRouteSegment] = [:]
+        private var routeBadgesById: [String: RouteBadgeAnnotation] = [:]
 
         init(parent: TripMapKitView) {
             self.parent = parent
@@ -352,6 +391,109 @@ struct TripMapKitView: UIViewRepresentable {
 
             if !toRemove.isEmpty { map.removeOverlays(toRemove) }
             if !toAdd.isEmpty { map.addOverlays(toAdd, level: .aboveRoads) }
+
+            // Badges follow the polylines — same diff strategy.
+            applyRouteBadges(to: map, segments: segments)
+        }
+
+        /// Create / update / remove the floating mode-and-time badges
+        /// that ride at each leg's midpoint. Visibility (zoom-gated)
+        /// is applied separately by `applyBadgeVisibility(to:)`.
+        private func applyRouteBadges(to map: MKMapView, segments: [TripRouteSegment]) {
+            var nextIds = Set<String>()
+            var toAdd: [MKAnnotation] = []
+            var toRemove: [MKAnnotation] = []
+
+            for segment in segments {
+                guard let mid = Self.midpoint(of: segment.coordinates) else { continue }
+                let badgeId = "\(segment.id).badge"
+                nextIds.insert(badgeId)
+
+                let dayColor = segment.strokeColor ?? routeStrokeColor
+                let candidate = RouteBadgeAnnotation(
+                    segmentId: segment.id,
+                    coordinate: mid,
+                    mode: segment.mode,
+                    minutes: segment.minutes,
+                    dayColor: dayColor
+                )
+
+                if let existing = routeBadgesById[badgeId] {
+                    if existing.visualFingerprint != candidate.visualFingerprint {
+                        // Replace — the view's labelled state is baked
+                        // in during configure(), so swapping the
+                        // annotation forces a fresh layout.
+                        toRemove.append(existing)
+                        routeBadgesById[badgeId] = candidate
+                        toAdd.append(candidate)
+                    }
+                } else {
+                    routeBadgesById[badgeId] = candidate
+                    toAdd.append(candidate)
+                }
+            }
+
+            for (key, ann) in routeBadgesById where !nextIds.contains(key) {
+                toRemove.append(ann)
+                routeBadgesById.removeValue(forKey: key)
+            }
+
+            if !toRemove.isEmpty { map.removeAnnotations(toRemove) }
+            if !toAdd.isEmpty { map.addAnnotations(toAdd) }
+
+            applyBadgeVisibility(to: map)
+        }
+
+        /// Show badges only when the map is zoomed in enough that the
+        /// label is readable. We use the latitude span as the zoom
+        /// proxy — at ~0.05° (≈ 5.5 km tall on screen) badges read
+        /// cleanly without crowding. Wider than that and we hide them
+        /// to keep the dashed/dotted line styles legible on their own.
+        func applyBadgeVisibility(to map: MKMapView) {
+            let span = max(map.region.span.latitudeDelta, map.region.span.longitudeDelta)
+            let visible = span <= 0.05
+            for badge in routeBadgesById.values {
+                if let view = map.view(for: badge) {
+                    view.isHidden = !visible
+                }
+            }
+        }
+
+        /// Length-aware midpoint of a polyline. Walks the coordinates
+        /// summing segment lengths so the badge sits at half the
+        /// total *distance*, not just at the index midpoint —
+        /// otherwise long-tail polylines would put the badge in the
+        /// wrong half visually.
+        private static func midpoint(of coords: [CLLocationCoordinate2D]) -> CLLocationCoordinate2D? {
+            guard coords.count >= 2 else { return coords.first }
+            // Project to MKMapPoint so distance math is metric.
+            let points = coords.map { MKMapPoint($0) }
+            var lengths: [Double] = []
+            var total: Double = 0
+            for i in 0 ..< points.count - 1 {
+                let d = points[i].distance(to: points[i + 1])
+                lengths.append(d)
+                total += d
+            }
+            guard total > 0 else { return coords.first }
+            let target = total / 2
+            var running: Double = 0
+            for i in 0 ..< lengths.count {
+                let segLen = lengths[i]
+                if running + segLen >= target {
+                    let t = (target - running) / segLen
+                    let a = points[i]
+                    let b = points[i + 1]
+                    let mp = MKMapPoint(
+                        x: a.x + (b.x - a.x) * t,
+                        y: a.y + (b.y - a.y) * t
+                    )
+                    return mp.coordinate
+                }
+                running += segLen
+            }
+            // Numerical edge case — fall back to the geometric mid.
+            return coords[coords.count / 2]
         }
 
         // MARK: – Camera
@@ -468,6 +610,19 @@ struct TripMapKitView: UIViewRepresentable {
                     withIdentifier: SearchResultAnnotationView.reuseId,
                     for: annotation
                 )
+            case is RouteBadgeAnnotation:
+                let view = mapView.dequeueReusableAnnotationView(
+                    withIdentifier: RouteBadgeAnnotationView.reuseId,
+                    for: annotation
+                )
+                // Apply current zoom-gated visibility so newly-added
+                // badges don't pop in at a wide zoom.
+                let span = max(
+                    mapView.region.span.latitudeDelta,
+                    mapView.region.span.longitudeDelta
+                )
+                view.isHidden = span > 0.05
+                return view
             default:
                 return nil
             }
@@ -481,19 +636,42 @@ struct TripMapKitView: UIViewRepresentable {
                 return MKOverlayRenderer(overlay: overlay)
             }
             let renderer = MKPolylineRenderer(polyline: polyline)
-            // Apple-routed segments stand out from haversine fallbacks
-            // so the user can tell which legs are real routes vs straight
-            // haversine approximations.
-            let isApple: Bool
-            if let segmentId = polyline.title {
-                isApple = segmentMetaById[segmentId]?.isApple ?? false
-            } else {
-                isApple = false
-            }
-            renderer.strokeColor = routeStrokeColor.withAlphaComponent(isApple ? 0.7 : 0.35)
-            renderer.lineWidth = isApple ? 4 : 3
+
+            // Lookup the segment metadata so we can style by both
+            // provenance (Apple route vs haversine fallback) and the
+            // chosen transport mode for that leg.
+            let segment: TripRouteSegment? = polyline.title.flatMap { segmentMetaById[$0] }
+            let isApple = segment?.isApple ?? false
+            let mode = segment?.mode
+
+            // Per-leg color (day-keyed) overrides the global stroke
+            // when the caller supplied one; otherwise we fall back to
+            // the legacy single color. Higher alpha across the board
+            // — the previous 0.78 / 0.32 disappeared into satellite
+            // imagery and rich basemap tiles.
+            let baseColor = segment?.strokeColor ?? routeStrokeColor
+            renderer.strokeColor = baseColor.withAlphaComponent(isApple ? 0.95 : 0.55)
+            renderer.lineWidth = isApple ? 5.5 : 3.5
             renderer.lineCap = .round
             renderer.lineJoin = .round
+
+            // Mode-aware dash pattern. Reads at a glance:
+            //   • Walking — small dots, the universal "footsteps" cue.
+            //   • Transit — long-dash + short-dash, hints at "stops".
+            //   • Driving — solid, the conventional road-line.
+            //   • nil mode (haversine) — solid like driving so the
+            //     fallback stays visually quiet rather than fighting
+            //     for attention with a dash pattern that implies a
+            //     known mode.
+            switch mode {
+            case .walking:
+                renderer.lineDashPattern = [2, 6]
+                renderer.lineCap = .round
+            case .transit:
+                renderer.lineDashPattern = [10, 5, 2, 5]
+            case .driving, nil:
+                renderer.lineDashPattern = nil
+            }
             return renderer
         }
 
@@ -532,6 +710,7 @@ struct TripMapKitView: UIViewRepresentable {
             regionDidChangeAnimated animated: Bool
         ) {
             parent.onCameraIdle(mapView.region)
+            applyBadgeVisibility(to: mapView)
         }
     }
 }

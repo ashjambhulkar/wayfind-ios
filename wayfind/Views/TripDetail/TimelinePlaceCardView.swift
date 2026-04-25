@@ -23,7 +23,10 @@ struct TimelinePlaceCardView: View {
     }
 
     private var inlineIcon: String {
-        place.categoryEnum.sfSymbol
+        if place.categoryEnum == .attraction {
+            return "binoculars.fill"
+        }
+        return place.categoryEnum.sfSymbol
     }
 
     private var flash: TripCollaborationUiStore.ChangeFlash? {

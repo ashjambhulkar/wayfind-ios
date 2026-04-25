@@ -9,6 +9,13 @@ private struct TripDetailScrollOffsetKey: PreferenceKey {
     }
 }
 
+private struct TripDetailDayHeaderMinYKey: PreferenceKey {
+    static var defaultValue: CGFloat = .infinity
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = min(value, nextValue())
+    }
+}
+
 struct TripDetailView: View {
     @Environment(DataService.self) private var dataService
     @Environment(ToastManager.self) private var toastManager
@@ -45,7 +52,7 @@ struct TripDetailView: View {
     @State private var flightTracking: FlightTrackingService = FlightTrackingService()
 
     @Environment(\.dismiss) private var dismiss
-    @State private var isNavigationOverLightContent = false
+    @State private var isDayHeaderPinnedToNavigation = false
 
     let trip: Trip
 
@@ -178,7 +185,7 @@ struct TripDetailView: View {
         }
         .navigationDestination(isPresented: $showTripChecklists) {
             TripChecklistsView(trip: viewModel?.trip ?? trip)
-                        }
+        }
         .onChange(of: showTripNotes) { _, isOpen in
             if !isOpen {
                 Task { await viewModel?.refreshHeroShortcutCounts() }
@@ -309,12 +316,12 @@ struct TripDetailView: View {
         .background(AppColors.appBackground)
         .navigationTitle(viewModel?.trip.title ?? trip.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(isNavigationOverLightContent ? .light : .dark, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         // Use the app's solid background color rather than the system's
         // translucent material so scrolled content (e.g. the forwarding
         // banner) cannot ghost through the nav as it scrolls past.
         .toolbarBackground(AppColors.appBackground, for: .navigationBar)
-        .toolbarBackground(isNavigationOverLightContent ? .visible : .hidden, for: .navigationBar)
+        .toolbarBackground(isDayHeaderPinnedToNavigation ? .visible : .hidden, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 TripMembersAvatarStack {
@@ -536,11 +543,10 @@ struct TripDetailView: View {
                 110,
                 for: .scrollContent
             )
-            .onPreferenceChange(TripDetailScrollOffsetKey.self) { minY in
-                let threshold: CGFloat = 56
-                let next = -minY > threshold
-                if next != isNavigationOverLightContent {
-                    isNavigationOverLightContent = next
+            .onPreferenceChange(TripDetailDayHeaderMinYKey.self) { minY in
+                let next = minY <= TripDetailOverlayMetrics.stickyDayHeaderTop + 1
+                if next != isDayHeaderPinnedToNavigation {
+                    isDayHeaderPinnedToNavigation = next
                 }
             }
             .onChange(of: viewModel.isLoading) { _, isLoading in
@@ -719,6 +725,22 @@ struct TripDetailView: View {
                 contentPreview: preview
             ) {
                 viewModel.toggleDayCollapse(day)
+            }
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: TripDetailDayHeaderMinYKey.self,
+                        value: geo.frame(in: .global).minY
+                    )
+                }
+            )
+            .visualEffect { content, proxy in
+                content.offset(
+                    y: max(
+                        0,
+                        TripDetailOverlayMetrics.stickyDayHeaderTop - proxy.frame(in: .global).minY
+                    )
+                )
             }
             .id(day.id)
         }
@@ -1048,6 +1070,13 @@ private enum TripDetailOverlayMetrics {
     /// Design height of the **main** cover below the status inset (nav floats over the upper part of this band).
     static let visibleHeroHeight: CGFloat = 304
     static let heroImageLoadingBackground = Color(red: 0.12, green: 0.12, blue: 0.14)
+    /// SwiftUI pins section headers to the scroll view's top edge. The
+    /// itinerary scroll intentionally ignores the top safe area for the hero,
+    /// so day headers need a visual clamp to the app navigation bar instead.
+    static let navigationBarHeight: CGFloat = 44
+    static var stickyDayHeaderTop: CGFloat {
+        KeyWindowSafeArea.topInset + navigationBarHeight
+    }
 }
 
 // MARK: - Wave 3.3 — Flight tracking helpers

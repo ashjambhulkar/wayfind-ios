@@ -5,7 +5,7 @@
 //  Wave 1.4 — production trip documents screen. Replaces the placeholder.
 //
 //  Layout — phone:
-//      [Search bar]
+//      Native navigation search
 //      [Scrollable category chips row]
 //      Grid (2-col) of document tiles
 //      Floating "+" FAB anchored bottom-trailing.
@@ -66,6 +66,12 @@ struct TripDocumentsView: View {
         }
         .navigationTitle("Documents")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .searchable(
+            text: documentSearchText,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search documents"
+        )
         .background(AppColors.appBackground.ignoresSafeArea())
         .task {
             await ensureSession()
@@ -174,7 +180,7 @@ struct TripDocumentsView: View {
                             .padding(.horizontal, AppSpacing.md)
                         }
                     } header: {
-                        searchAndChips(service: service)
+                        categoryChipsHeader(service: service)
                     }
                 }
                 .padding(.bottom, 96) // FAB clearance
@@ -185,29 +191,16 @@ struct TripDocumentsView: View {
         }
     }
 
-    @ViewBuilder
-    private func searchAndChips(service: TripDocumentsService) -> some View {
-        VStack(spacing: AppSpacing.sm) {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(AppColors.textSecondary)
-                TextField(
-                    "Search documents",
-                    text: Binding(
-                        get: { service.searchText },
-                        set: { service.searchText = $0 }
-                    )
-                )
-                .textFieldStyle(.plain)
-            }
-            .padding(.vertical, 10)
-            .padding(.horizontal, AppSpacing.md)
-            .background(AppColors.appSurface, in: RoundedRectangle(cornerRadius: AppCornerRadius.medium))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppCornerRadius.medium)
-                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
-            )
+    private var documentSearchText: Binding<String> {
+        Binding(
+            get: { service?.searchText ?? "" },
+            set: { service?.searchText = $0 }
+        )
+    }
 
+    @ViewBuilder
+    private func categoryChipsHeader(service: TripDocumentsService) -> some View {
+        VStack(spacing: AppSpacing.sm) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: AppSpacing.xs) {
                     CategoryChip(

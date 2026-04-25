@@ -85,6 +85,7 @@ struct TripNotesView: View {
         .background(AppColors.appBackground)
         .navigationTitle("Notes")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if collaborationStore.canEditNotes {

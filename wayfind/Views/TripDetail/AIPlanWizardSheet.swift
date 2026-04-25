@@ -216,8 +216,12 @@ struct AIPlanWizardSheet: View {
     //     is safe.
     private func warmAppleTravelTimesAfterApply() async {
         let trip = vm.trip
-        guard let destinationPlaceId = trip.destinationPlaceId,
-              !destinationPlaceId.isEmpty else { return }
+        // Trip must have a destination Google place_id at all — without
+        // it `upload-travel-leg` has no contextual anchor to attribute
+        // legs to. We don't actually use the value here because the new
+        // resolver pulls the city profile from slug + coords first, but
+        // the presence check stays as a sanity gate.
+        guard let pid = trip.destinationPlaceId, !pid.isEmpty else { return }
 
         let inserts = vm.previewOps
             .compactMap { $0.row }
@@ -246,8 +250,13 @@ struct AIPlanWizardSheet: View {
         }
         guard !legs.isEmpty else { return }
 
-        guard let cityProfileId = await dataService.fetchCityProfileId(
-            googlePlaceId: destinationPlaceId
+        // Use the robust resolver (slug → geo → place_id) so trips
+        // whose destinationPlaceId is a locality (not a seeded POI in
+        // city_places) still find their city_profile and warm
+        // travel-time caches against the right city row.
+        _ = pid // anchor — kept around so future call sites can read it
+        guard let cityProfileId = await dataService.resolveCityProfileId(
+            forTrip: trip
         ) else { return }
 
         await MainActor.run {

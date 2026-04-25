@@ -31,6 +31,7 @@ struct TripMapView: View {
     @State private var selectedPlace: Place?
     @State private var showAddPlace = false
     @State private var scheduledDays: [ItineraryDay] = []
+    @State private var wishlistDayIds: Set<UUID> = []
     @State private var wishlistPlaces: [Place] = []
     @State private var activeCategoryFilter: String?
 
@@ -62,12 +63,28 @@ struct TripMapView: View {
     @State private var showSearchOverlay = false
     @State private var showAddToDay = false
     @State private var addToDayPreview: MapSearchPreview?
+    @State private var pendingAddToDayPresentation = false
+    @State private var showSuggestedPlacesBrowser = false
+    @State private var returnToSuggestedPlacesBrowser = false
+    @State private var pendingSuggestedPlacesPreview: MapSearchPreview?
     @State private var resolvedCityProfileId: UUID?
     @State private var lastCategoryRegion: MKCoordinateRegion?
     @State private var lastPickedCategory: CategoryPill?
     @State private var lastSubmittedMapSearchQuery: String?
     @State private var tabSearchText = ""
     @State private var isTabSearchPresented = false
+    @State private var searchPreviewDetent: PresentationDetent = .medium
+
+    // MARK: - Transport mode (Phase J.4 polylines)
+
+    /// Per-trip preference, persisted via AppStorage. Defaults to `.auto`
+    /// so users get smart per-leg mode selection without a single tap.
+    @AppStorage private var transportModeRaw: String
+    @State private var showTransportPicker = false
+    /// Bumped after a server-seed completes so `routeSegments` recomputes
+    /// with the freshly-loaded polylines without us needing to mutate
+    /// `places` or any other published state.
+    @State private var polylineCacheVersion = 0
 
     private var mappablePlaces: [Place] {
         places.filter { place in
@@ -93,10 +110,21 @@ struct TripMapView: View {
         }
     }
 
+    /// Day-ordered route segments rendered as polylines. The chosen
+    /// `transportMode` (with `.auto` resolved per-leg) picks which
+    /// cached polyline + minutes we surface; if no cached polyline is
+    /// available for that leg + mode, we fall back through the other
+    /// modes, and finally to a straight haversine line.
+    ///
+    /// `polylineCacheVersion` is read so SwiftUI re-evaluates this
+    /// computed property after a server-seed completes.
     private var routeSegments: [TripRouteSegment] {
+        _ = polylineCacheVersion  // dependency for SwiftUI invalidation
         let ordered = mapDisplayedPlaces.sorted { $0.sortOrder < $1.sortOrder }
         guard ordered.count >= 2 else { return [] }
+        let svc = AppleTravelTimesService.shared
         var out: [TripRouteSegment] = []
+
         for i in 0 ..< ordered.count - 1 {
             let from = ordered[i]
             let to = ordered[i + 1]
@@ -108,40 +136,156 @@ struct TripMapView: View {
             let toCoord = CLLocationCoordinate2D(latitude: toLat, longitude: toLng)
             let id = "\(from.id)→\(to.id)"
 
-            // Prefer the Apple-cached polyline (walking is the most useful
-            // when the user is exploring the map). Falls back to driving
-            // and transit before giving up to a straight haversine line.
+            // Per-leg color matches the day pin/dot color of the
+            // *from* stop. Cross-day legs (rare — only when ordered
+            // happens to span days) inherit the earlier day so the
+            // visual handoff feels natural. Defaults to day 1 when
+            // the place has no day mapping (shouldn't normally fire).
+            let legDayNumber = dayNumberByDayId[from.itineraryDayId] ?? 1
+            let legStrokeColor = UIColor(AppColors.dayColor(for: legDayNumber))
+
+            // Look up the per-leg available modes so the auto resolver
+            // never picks one we don't actually have data for.
+            // Place_id keyed cache (preferred — shareable, server-backed)
+            // unioned with the coord cache (legacy / manual trips).
+            var availability: Set<AppleTravelTimesService.Mode> = []
+            if let fromPid = from.googlePlaceId, let toPid = to.googlePlaceId {
+                availability = svc.cachedAvailableModes(
+                    fromPlaceId: fromPid, toPlaceId: toPid
+                )
+            }
+            let coordAvailability = svc.cachedCoordAvailableModes(
+                from: fromCoord, to: toCoord
+            )
+            availability.formUnion(coordAvailability)
+
+            let preferred: AppleTravelTimesService.Mode = {
+                if let concrete = transportMode.concreteMode {
+                    return concrete
+                }
+                let dist: Double
+                if let fromPid = from.googlePlaceId,
+                   let toPid = to.googlePlaceId,
+                   let cached = svc.cachedDistanceMetersForAnyScope(
+                    fromPlaceId: fromPid, toPlaceId: toPid
+                   ) {
+                    dist = Double(cached)
+                } else if let cached = svc.cachedCoordDistance(
+                    from: fromCoord, to: toCoord
+                ) {
+                    dist = Double(cached)
+                } else {
+                    // Haversine in km → meters
+                    dist = HaversineDistance.distance(from: fromCoord, to: toCoord) * 1_000
+                }
+                return TripTransportMode.resolveAuto(
+                    distanceMeters: dist,
+                    availability: availability
+                )
+            }()
+
+            // 1. Place_id keyed (shared, server-cached) polyline.
             if let fromPid = from.googlePlaceId,
                let toPid = to.googlePlaceId,
-               let encoded = bestCachedPolyline(fromPid: fromPid, toPid: toPid) {
+               let (chosenMode, encoded) = pickCachedPolyline(
+                fromPid: fromPid,
+                toPid: toPid,
+                preferred: preferred
+               )
+            {
                 let coords = PolylineEncoder.decode(encoded)
                 if coords.count >= 2 {
-                    out.append(TripRouteSegment(id: id, coordinates: coords, isApple: true))
+                    let minutes = svc.cachedMinutesForAnyScope(
+                        fromPlaceId: fromPid,
+                        toPlaceId: toPid,
+                        mode: chosenMode
+                    )
+                    out.append(TripRouteSegment(
+                        id: id,
+                        coordinates: coords,
+                        isApple: true,
+                        mode: chosenMode,
+                        minutes: minutes,
+                        strokeColor: legStrokeColor
+                    ))
                     continue
                 }
             }
 
+            // 2. Coordinate-keyed cache — covers legacy trips whose
+            // places lack google place_ids. Falls back through modes
+            // in the same priority order.
+            if let (chosenMode, encoded) = pickCachedCoordPolyline(
+                from: fromCoord, to: toCoord, preferred: preferred
+            ) {
+                let coords = PolylineEncoder.decode(encoded)
+                if coords.count >= 2 {
+                    let minutes = svc.cachedCoordMinutes(
+                        from: fromCoord, to: toCoord, mode: chosenMode
+                    )
+                    out.append(TripRouteSegment(
+                        id: id,
+                        coordinates: coords,
+                        isApple: true,
+                        mode: chosenMode,
+                        minutes: minutes,
+                        strokeColor: legStrokeColor
+                    ))
+                    continue
+                }
+            }
+
+            // 3. Haversine fallback. We still publish the *preferred*
+            // mode so the renderer's dash pattern matches what the
+            // user picked, even when we couldn't get a real polyline.
             out.append(TripRouteSegment(
                 id: id,
                 coordinates: [fromCoord, toCoord],
-                isApple: false
+                isApple: false,
+                mode: preferred,
+                minutes: nil,
+                strokeColor: legStrokeColor
             ))
         }
         return out
     }
 
-    private func bestCachedPolyline(
+    /// Pick the best cached polyline for a leg given the preferred
+    /// mode. Falls back through the remaining modes in priority order
+    /// (walking → driving → transit, with the preferred bumped first)
+    /// so the user always sees a real route when *any* mode has one.
+    private func pickCachedPolyline(
         fromPid: String,
-        toPid: String
-    ) -> String? {
+        toPid: String,
+        preferred: AppleTravelTimesService.Mode
+    ) -> (AppleTravelTimesService.Mode, String)? {
         let svc = AppleTravelTimesService.shared
-        for mode in [AppleTravelTimesService.Mode.walking, .driving, .transit] {
+        let order = [preferred] + AppleTravelTimesService.Mode.allCases.filter { $0 != preferred }
+        for mode in order {
             if let p = svc.cachedPolylineForAnyScope(
                 fromPlaceId: fromPid,
                 toPlaceId: toPid,
                 mode: mode
             ) {
-                return p
+                return (mode, p)
+            }
+        }
+        return nil
+    }
+
+    /// Coordinate-keyed counterpart of `pickCachedPolyline` — used for
+    /// trips whose places don't carry `googlePlaceId` and therefore
+    /// can't key into `city_travel_times`.
+    private func pickCachedCoordPolyline(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D,
+        preferred: AppleTravelTimesService.Mode
+    ) -> (AppleTravelTimesService.Mode, String)? {
+        let svc = AppleTravelTimesService.shared
+        let order = [preferred] + AppleTravelTimesService.Mode.allCases.filter { $0 != preferred }
+        for mode in order {
+            if let p = svc.cachedCoordPolyline(from: from, to: to, mode: mode) {
+                return (mode, p)
             }
         }
         return nil
@@ -159,6 +303,120 @@ struct TripMapView: View {
         CLLocationCoordinate2D(
             latitude: trip.lat ?? 0,
             longitude: trip.lng ?? 0
+        )
+    }
+
+    // MARK: - Search bias / "effective search region"
+    //
+    // Search relevance dies when MapKit / city_places see a region span
+    // that is too wide — Apple stops biasing and ranks globally, and
+    // the city_places bbox stops filtering meaningfully. Pick a region
+    // that's anchored to *something useful*:
+    //
+    //   1. The user's current viewport when they've zoomed in to a
+    //      city / neighborhood scale (≤ ~55 km). This is the strongest
+    //      signal — they're looking at exactly that area.
+    //   2. Otherwise, the bbox of the selected day's places (if one
+    //      day is selected) so day-specific searches stay focused.
+    //   3. Otherwise, the bbox of all trip places.
+    //   4. Otherwise, the trip's destination with a ~25 km city span.
+    //   5. Worst case, the live viewport with the span clamped so we
+    //      never go global.
+
+    /// Span at which we consider the user "zoomed in enough" to trust
+    /// their viewport as the search bias. ~55 km — comfortable city /
+    /// neighborhood scale.
+    private static let userFocusSpanThreshold: CLLocationDegrees = 0.5
+
+    /// Largest span we will ever pass to MapKit / city_places. Anything
+    /// wider and the result quality collapses.
+    private static let maxBiasSpan: CLLocationDegrees = 0.5
+
+    /// Region we should bias *new* searches with. See doc comment above.
+    private var effectiveSearchRegion: MKCoordinateRegion {
+        let viewport = searchRegion
+        let viewportSpan = max(
+            viewport.span.latitudeDelta,
+            viewport.span.longitudeDelta
+        )
+
+        // 1. Strong user focus.
+        if viewportSpan <= Self.userFocusSpanThreshold {
+            return viewport
+        }
+
+        // 2. Selected day bbox.
+        if let dayFilter = selectedDayFilter {
+            let dayCoords = mappablePlaces
+                .filter { dayNumberByDayId[$0.itineraryDayId] == dayFilter }
+                .compactMap { Self.coordinate(from: $0) }
+            if let region = Self.region(fromCoordinates: dayCoords, minSpan: 0.05) {
+                return region
+            }
+        }
+
+        // 3. Whole-trip bbox.
+        let allCoords = mappablePlaces.compactMap { Self.coordinate(from: $0) }
+        if let region = Self.region(fromCoordinates: allCoords, minSpan: 0.05) {
+            return region
+        }
+
+        // 4. Trip destination (skip the equator fallback — if both
+        // lat and lng are 0 we treat the trip as unanchored and fall
+        // through to the clamped viewport).
+        if let lat = trip.lat, let lng = trip.lng,
+           !(lat == 0 && lng == 0)
+        {
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
+                span: MKCoordinateSpan(latitudeDelta: 0.25, longitudeDelta: 0.25)
+            )
+        }
+
+        // 5. Worst case: clamp the viewport so MapKit never sees a
+        // span big enough to fall back to global ranking.
+        return Self.clampingSpan(viewport, max: Self.maxBiasSpan)
+    }
+
+    private static func coordinate(from place: Place) -> CLLocationCoordinate2D? {
+        guard let lat = place.lat, let lng = place.lng else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    }
+
+    /// Bounding-box region from a set of coordinates, padded ~30% on
+    /// each side and floored to `minSpan` so a single coordinate or a
+    /// tightly-clustered day still has enough breathing room for
+    /// MapKit to rank against.
+    private static func region(
+        fromCoordinates coords: [CLLocationCoordinate2D],
+        minSpan: CLLocationDegrees
+    ) -> MKCoordinateRegion? {
+        guard !coords.isEmpty else { return nil }
+        let lats = coords.map(\.latitude)
+        let lngs = coords.map(\.longitude)
+        guard let minLat = lats.min(), let maxLat = lats.max(),
+              let minLng = lngs.min(), let maxLng = lngs.max()
+        else { return nil }
+
+        let centerLat = (minLat + maxLat) / 2
+        let centerLng = (minLng + maxLng) / 2
+        let spanLat = max((maxLat - minLat) * 1.6, minSpan)
+        let spanLng = max((maxLng - minLng) * 1.6, minSpan)
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLng),
+            span: MKCoordinateSpan(latitudeDelta: spanLat, longitudeDelta: spanLng)
+        )
+    }
+
+    private static func clampingSpan(
+        _ region: MKCoordinateRegion,
+        max maxSpan: CLLocationDegrees
+    ) -> MKCoordinateRegion {
+        let lat = min(region.span.latitudeDelta, maxSpan)
+        let lng = min(region.span.longitudeDelta, maxSpan)
+        return MKCoordinateRegion(
+            center: region.center,
+            span: MKCoordinateSpan(latitudeDelta: lat, longitudeDelta: lng)
         )
     }
 
@@ -207,6 +465,26 @@ struct TripMapView: View {
                 span: MKCoordinateSpan(latitudeDelta: 0.6, longitudeDelta: 0.6)
             )
         )
+
+        // Trip-scoped AppStorage so each trip remembers its own mode.
+        _transportModeRaw = AppStorage(
+            wrappedValue: TripTransportMode.auto.rawValue,
+            TripTransportMode.storageKey(forTripId: trip.id)
+        )
+    }
+
+    /// Computed wrapper around the persisted raw value so call sites
+    /// stay strongly typed. Reads/writes flow through `transportModeRaw`.
+    private var transportMode: TripTransportMode {
+        get { TripTransportMode(rawValue: transportModeRaw) ?? .auto }
+        nonmutating set { transportModeRaw = newValue.rawValue }
+    }
+
+    private var selectedSearchResultBinding: Binding<MapSearchPreview?> {
+        Binding(
+            get: { mapState.selectedSearchResult },
+            set: { mapState.selectedSearchResult = $0 }
+        )
     }
 
     var body: some View {
@@ -222,9 +500,21 @@ struct TripMapView: View {
                 prompt: "Search places"
             )
             .onChange(of: isTabSearchPresented) { _, isPresented in
+                // The Map tab uses `Tab(role: .search)`, so tapping the
+                // tab-bar search button flips `isTabSearchPresented` to
+                // true. We hand off to our richer custom overlay sheet
+                // instead — but if we let SwiftUI animate the inline
+                // `.searchable` expansion first, the user sees an
+                // unwanted "searchable rises → sheet rises" transform.
+                // Suppress the searchable's expansion animation so the
+                // dismiss is invisible and the only motion the user
+                // perceives is our overlay sheet sliding up.
                 guard isPresented else { return }
-                isTabSearchPresented = false
-                tabSearchText = ""
+                var t = Transaction()
+                t.disablesAnimations = true
+                withTransaction(t) {
+                    isTabSearchPresented = false
+                }
                 showSearchOverlay = true
             }
             .task {
@@ -237,6 +527,9 @@ struct TripMapView: View {
                 }
                 syncToSharedState()
                 recomputeExcludeSet()
+                // Refresh polylines when places change (add/remove/reorder)
+                // so the legs catch up without waiting for a re-launch.
+                Task { await refreshPolylinesForCurrentPlaces() }
             }
             .onChange(of: selectedDayFilter) { _, _ in
                 searchResultPin = nil
@@ -259,7 +552,12 @@ struct TripMapView: View {
                 syncToSharedState()
             }
             .onChange(of: sharedState?.selectedDayFilter) { _, newVal in
-                if let newVal, newVal != selectedDayFilter {
+                // `nil` is a meaningful value here ("All days" pill) — we
+                // must propagate it back so tapping All in the bottom
+                // accessory clears the local day filter. The previous
+                // `if let` swallowed nils and the All pill stopped
+                // working after the first day selection.
+                if newVal != selectedDayFilter {
                     selectedDayFilter = newVal
                 }
             }
@@ -282,132 +580,231 @@ struct TripMapView: View {
                     fitMapForCurrentMode()
                 }
             }
-            .sheet(item: $selectedPlace) { place in
-                let dayPlaces = places
-                    .filter { $0.itineraryDayId == place.itineraryDayId }
-                    .sorted { $0.sortOrder < $1.sortOrder }
-                let prevPlace = dayPlaces.first(where: { $0.sortOrder == place.sortOrder - 1 })
-
-                PlaceDetailSheet(
-                    place: place,
-                    previousPlace: prevPlace
-                )
-            }
+            .sheet(item: $selectedPlace, content: placeDetailSheet)
             .sheet(isPresented: $showMapModesSheet) {
-                TripMapModesSheet(selectedMode: $mapMode)
-                    .presentationDetents([.height(220), .medium])
-                    .presentationDragIndicator(.visible)
-                    .presentationBackground(.regularMaterial)
-                    .presentationBackgroundInteraction(.enabled)
+                mapModesSheet
             }
             .sheet(isPresented: $showAddPlace) {
                 addPlaceSheetContent
             }
-            .fullScreenCover(isPresented: $showSearchOverlay) {
-                MapSearchOverlay(
-                    country: tripCountryGuess,
-                    cityProfileId: resolvedCityProfileId,
-                    region: searchRegion,
-                    excludedPlaceIds: mapState.scheduledDayPlaceIds,
-                    onPickResult: { preview in
-                        handleOverlayPicked(preview)
-                    },
-                    onPickCategory: { pill, results in
-                        handleCategoryResults(pill: pill, results: results)
-                    },
-                    onSubmitSearch: { query, results in
-                        handleSubmittedSearch(query: query, results: results)
-                    },
-                    onCancel: {
-                        showSearchOverlay = false
-                    }
-                )
+            .sheet(isPresented: $showSearchOverlay) {
+                searchOverlaySheet
             }
-            .sheet(item: Binding(
-                get: { mapState.selectedSearchResult },
-                set: { mapState.selectedSearchResult = $0 }
-            )) { preview in
-                MapSearchPreviewSheet(
-                    preview: preview,
-                    onAddToDay: {
-                        addToDayPreview = preview
-                        showAddToDay = true
-                    },
-                    onSearchNearby: {
-                        runSearchNearby(around: preview.coordinate)
-                    },
-                    onDismiss: {
-                        mapState.selectedSearchResult = nil
+            .onChange(of: showSearchOverlay) { _, isPresented in
+                guard !isPresented, let preview = pendingSuggestedPlacesPreview else { return }
+                pendingSuggestedPlacesPreview = nil
+                Task {
+                    try? await Task.sleep(for: .milliseconds(350))
+                    await MainActor.run {
+                        presentSuggestedPlacesPreview(preview)
                     }
-                )
-                .presentationDetents([.height(220), .medium])
-                .presentationDragIndicator(.visible)
-                .presentationBackgroundInteraction(.enabled(upThrough: .height(220)))
-                .presentationBackground(.regularMaterial)
-            }
-            .sheet(isPresented: $showAddToDay) {
-                if let preview = addToDayPreview {
-                    MapAddToDaySheet(
-                        preview: preview,
-                        scheduledDays: scheduledDays,
-                        preselectedDayId: scheduledDays.first(where: { dayNumberByDayId[$0.id] == selectedDayFilter })?.id,
-                        onSave: { dayId, startTime, notes in
-                            persistAddToDay(
-                                preview: preview,
-                                dayId: dayId,
-                                startTime: startTime,
-                                notes: notes
-                            )
-                            showAddToDay = false
-                            addToDayPreview = nil
-                            mapState.selectedSearchResult = nil
-                        },
-                        onCancel: {
-                            showAddToDay = false
-                            addToDayPreview = nil
-                        }
-                    )
-                    .presentationDetents([.height(420), .large])
-                    .presentationDragIndicator(.visible)
-                    .presentationBackground(.regularMaterial)
                 }
+            }
+            .sheet(isPresented: $showSuggestedPlacesBrowser) {
+                suggestedPlacesBrowserSheet
+            }
+            .sheet(item: selectedSearchResultBinding, content: searchPreviewSheet)
+            .sheet(isPresented: $showAddToDay) {
+                addToDaySheet
             }
             .onChange(of: mapState.selectedSearchResult) { _, newVal in
                 // Single-sheet ownership: collapse the day sheet when a
                 // search preview takes the bottom region. Restore on
                 // dismiss.
-                if newVal != nil && showPlacesSheet {
+                if newVal == nil && pendingAddToDayPresentation {
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(350))
+                        await MainActor.run {
+                            guard pendingAddToDayPresentation, addToDayPreview != nil else { return }
+                            pendingAddToDayPresentation = false
+                            showAddToDay = true
+                        }
+                    }
+                } else if newVal == nil && returnToSuggestedPlacesBrowser {
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(350))
+                        await MainActor.run {
+                            guard returnToSuggestedPlacesBrowser else { return }
+                            showSuggestedPlacesBrowser = true
+                        }
+                    }
+                } else if newVal != nil && showPlacesSheet {
                     showPlacesSheet = false
+                    searchPreviewDetent = .medium
+                } else if newVal != nil {
+                    searchPreviewDetent = .medium
+                }
+            }
+            .onChange(of: showSuggestedPlacesBrowser) { _, isPresented in
+                guard !isPresented, let preview = pendingSuggestedPlacesPreview else { return }
+                pendingSuggestedPlacesPreview = nil
+                Task {
+                    try? await Task.sleep(for: .milliseconds(350))
+                    await MainActor.run {
+                        presentSuggestedPlacesPreview(preview)
+                    }
                 }
             }
     }
 
-    private var mapRoot: some View {
-        mapContent
-            .ignoresSafeArea()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                GeometryReader { geo in
-                    Color.clear
-                        .onAppear { mapContainerHeight = geo.size.height }
-                        .onChange(of: geo.size.height) { _, h in mapContainerHeight = h }
+    private func placeDetailSheet(for place: Place) -> some View {
+        let dayPlaces = places
+            .filter { $0.itineraryDayId == place.itineraryDayId }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        let prevPlace = dayPlaces.first { $0.sortOrder == place.sortOrder - 1 }
+
+        return PlaceDetailSheet(
+            place: place,
+            previousPlace: prevPlace
+        )
+    }
+
+    private var mapModesSheet: some View {
+        TripMapModesSheet(selectedMode: $mapMode)
+            .presentationDetents([.height(220), .medium])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.regularMaterial)
+            .presentationBackgroundInteraction(.enabled)
+    }
+
+    private var searchOverlaySheet: some View {
+        MapSearchOverlay(
+            country: tripCountryGuess,
+            initialQuery: tabSearchText,
+            cityProfileId: resolvedCityProfileId,
+            region: effectiveSearchRegion,
+            excludedPlaceIds: mapState.scheduledDayPlaceIds,
+            onPickResult: { preview in
+                handleOverlayPicked(preview)
+            },
+            onPickSuggestedResult: { preview in
+                handleSuggestedPlacesPicked(preview)
+            },
+            onPickCategory: { pill, results in
+                handleCategoryResults(pill: pill, results: results)
+            },
+            onSubmitSearch: { query, results in
+                handleSubmittedSearch(query: query, results: results)
+            },
+            onCancel: {
+                showSearchOverlay = false
+            }
+        )
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
+        .presentationBackground(.regularMaterial)
+    }
+
+    private var suggestedPlacesBrowserSheet: some View {
+        SuggestedPlacesAllSheet(
+            cityProfileId: resolvedCityProfileId,
+            excludedPlaceIds: mapState.scheduledDayPlaceIds
+        ) { preview in
+            pendingSuggestedPlacesPreview = preview
+            showSuggestedPlacesBrowser = false
+        } onCancel: {
+            showSuggestedPlacesBrowser = false
+            returnToSuggestedPlacesBrowser = false
+            pendingSuggestedPlacesPreview = nil
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(.regularMaterial)
+    }
+
+    private func searchPreviewSheet(for preview: MapSearchPreview) -> some View {
+        MapSearchPreviewSheet(
+            preview: preview,
+            onAddToDay: {
+                addToDayPreview = preview
+                pendingAddToDayPresentation = true
+                returnToSuggestedPlacesBrowser = false
+                mapState.selectedSearchResult = nil
+            },
+            onSearchNearby: {
+                runSearchNearby(around: preview.coordinate)
+            },
+            onDismiss: {
+                mapState.selectedSearchResult = nil
+            }
+        )
+        .presentationDetents([.height(180), .medium, .large], selection: $searchPreviewDetent)
+        .presentationDragIndicator(.visible)
+        .presentationBackgroundInteraction(.enabled(upThrough: .height(180)))
+        .presentationBackground(.regularMaterial)
+    }
+
+    @ViewBuilder
+    private var addToDaySheet: some View {
+        if let preview = addToDayPreview {
+            MapAddToDaySheet(
+                preview: preview,
+                scheduledDays: scheduledDays,
+                preselectedDayId: scheduledDays.first(where: { dayNumberByDayId[$0.id] == selectedDayFilter })?.id,
+                onSave: { dayId, startTime, notes in
+                    persistAddToDay(
+                        preview: preview,
+                        dayId: dayId,
+                        startTime: startTime,
+                        notes: notes
+                    )
+                    showAddToDay = false
+                    addToDayPreview = nil
+                    pendingAddToDayPresentation = false
+                    mapState.selectedSearchResult = nil
+                },
+                onCancel: {
+                    showAddToDay = false
+                    addToDayPreview = nil
+                    pendingAddToDayPresentation = false
                 }
             )
-            .onChange(of: showPlacesSheet) { _, _ in
-                if searchResultPin == nil && mapState.searchResults.isEmpty {
-                    fitMapForCurrentMode()
+            .presentationDetents([.height(420), .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.regularMaterial)
+        }
+    }
+
+    private var mapRoot: some View {
+        // ZStack pattern (instead of `.overlay` chained after
+        // `.ignoresSafeArea()`): the map fills edge-to-edge, but the
+        // overlays (controls + "Search this area" pill) live in the
+        // ZStack's safe-area-respecting bounds. Critically, the iOS 26
+        // `tabViewBottomAccessory` contributes to our bottom safe-area
+        // inset automatically, so a `.bottom`-aligned overlay sits
+        // *exactly* on top of the day-pill bar with zero hardcoded
+        // chrome heights.
+        ZStack(alignment: .bottom) {
+            mapContent
+                .ignoresSafeArea()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { mapContainerHeight = geo.size.height }
+                            .onChange(of: geo.size.height) { _, h in mapContainerHeight = h }
+                    }
+                )
+                .onChange(of: showPlacesSheet) { _, _ in
+                    if searchResultPin == nil && mapState.searchResults.isEmpty {
+                        fitMapForCurrentMode()
+                    }
                 }
-            }
-            .overlay(alignment: .topTrailing) {
-                mapControlStack
-            }
-            .overlay(alignment: .top) {
-                searchThisAreaOverlay
-            }
+                .overlay(alignment: .topTrailing) {
+                    mapControlStack
+                }
+
+            searchThisAreaOverlay
+                .padding(.bottom, AppSpacing.sm)
+        }
     }
 
     /// "Search this area" pill — appears once the user has panned past
     /// ~30% of the originating span after a category search.
+    /// Positioned by the parent `ZStack(alignment: .bottom)` so it
+    /// floats just above whatever bottom chrome the system inserts
+    /// (tab bar + `tabViewBottomAccessory`).
     @ViewBuilder
     private var searchThisAreaOverlay: some View {
         if shouldShowSearchThisArea {
@@ -425,8 +822,7 @@ struct TripMapView: View {
                     .foregroundStyle(AppColors.appPrimary)
             }
             .buttonStyle(.plain)
-            .padding(.top, 14)
-            .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
             .accessibilityLabel("Search this area")
             .accessibilityHint("Re-runs the last search in the current map region")
             .dynamicTypeSize(...DynamicTypeSize.accessibility1)
@@ -538,34 +934,69 @@ struct TripMapView: View {
                 centerOnUserLocation()
             } label: {
                 Image(systemName: "location.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(AppColors.appPrimary)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 44, height: 40)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Current location")
 
             Color(UIColor.separator)
-                .frame(width: 18, height: 0.5)
+                .frame(width: 24, height: 0.5)
 
             Button {
                 HapticManager.light()
                 showMapModesSheet = true
             } label: {
                 Image(systemName: mapMode == .hybrid ? "globe.americas.fill" : "map")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 44, height: 40)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Map style")
+
+            Color(UIColor.separator)
+                .frame(width: 24, height: 0.5)
+
+            Button {
+                HapticManager.light()
+                showTransportPicker = true
+            } label: {
+                Image(systemName: transportMode.sfSymbol)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 40)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Transport mode")
+            .accessibilityValue(transportMode.displayName)
+            .accessibilityHint("Changes how routes between stops are drawn")
+            .confirmationDialog(
+                "Route style",
+                isPresented: $showTransportPicker,
+                titleVisibility: .visible
+            ) {
+                ForEach(TripTransportMode.allCases) { mode in
+                    Button {
+                        HapticManager.selection()
+                        transportMode = mode
+                        polylineCacheVersion &+= 1
+                    } label: {
+                        Text("\(mode.displayName)\(transportMode == mode ? "  ✓" : "")")
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(transportMode.pickerSubtitle)
+            }
         }
         .fixedSize()
         .background(.regularMaterial)
         .clipShape(Capsule())
         .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
-        .padding(.top, 72)
-        .padding(.trailing, 10)
+        .padding(.top, KeyWindowSafeArea.topInset + 76)
+        .padding(.trailing, AppSpacing.sm)
     }
 
     // MARK: - Search result selected from autocomplete
@@ -596,6 +1027,7 @@ struct TripMapView: View {
         let sorted = days.sorted { $0.dayNumber < $1.dayNumber }
 
         scheduledDays = sorted.filter { !$0.isWishlist }
+        wishlistDayIds = Set(sorted.filter(\.isWishlist).map(\.id))
 
         var idToDay: [UUID: Int] = [:]
         for day in days {
@@ -617,6 +1049,165 @@ struct TripMapView: View {
 
         places = collected
         wishlistPlaces = wishlist
+
+        // Polylines: hydrate the in-memory cache from `city_travel_times`
+        // so the map renders real Apple-routed lines on first open
+        // (the cache used to only get populated by AI plan apply).
+        Task { await refreshPolylinesForCurrentPlaces() }
+    }
+
+    /// Hydrate cached polylines for the trip's current place pairs.
+    ///
+    /// Phases:
+    ///   1. Server seed — pulls existing rows from `city_travel_times`
+    ///      (free; needs google place_ids on both ends).
+    ///   2. Place_id warm — runs `MKDirections` for legs the seed
+    ///      didn't cover, then uploads (Phase J.3 / Phase J.4 path).
+    ///   3. Coord warm — last-ditch fallback for legs whose places
+    ///      don't have a google place_id (legacy / manually-added /
+    ///      AI-generated-without-enrichment trips). Computes via
+    ///      `MKDirections` but does NOT upload (no key to write under).
+    ///
+    /// Bumps `polylineCacheVersion` after each phase / leg so SwiftUI
+    /// recomputes `routeSegments` and the renderer redraws.
+    private func refreshPolylinesForCurrentPlaces() async {
+        let placeIdPairs = consecutivePlaceIdPairs()
+        let coordPairs = consecutiveCoordinatePairs()
+
+        // Phase 1 — server seed. Needs both Supabase client + the
+        // resolved city_profile. Skip silently if we don't have one
+        // (mock mode, unresolved city) — the warm phase still helps.
+        if !placeIdPairs.isEmpty,
+           let cityId = await ensureCityProfileResolved(),
+           let client = AuthSessionService.shared.client {
+            await AppleTravelTimesService.shared.seedFromServer(
+                cityProfileId: cityId,
+                placeIdPairs: placeIdPairs,
+                using: client
+            )
+            await MainActor.run { polylineCacheVersion &+= 1 }
+        }
+
+        // Phase 2 — opportunistic warm. Only fires for pairs still
+        // missing every mode after the seed (the service double-checks).
+        if !placeIdPairs.isEmpty, let cityId = resolvedCityProfileId {
+            let legs: [AppleTravelTimesService.LegRequest] = placeIdPairs.compactMap { pair in
+                guard let from = places.first(where: { $0.googlePlaceId == pair.from }),
+                      let to = places.first(where: { $0.googlePlaceId == pair.to }),
+                      let fromLat = from.lat, let fromLng = from.lng,
+                      let toLat = to.lat, let toLng = to.lng
+                else { return nil }
+                return AppleTravelTimesService.LegRequest(
+                    fromPlaceId: pair.from,
+                    fromCoordinate: CLLocationCoordinate2D(latitude: fromLat, longitude: fromLng),
+                    toPlaceId: pair.to,
+                    toCoordinate: CLLocationCoordinate2D(latitude: toLat, longitude: toLng)
+                )
+            }
+            AppleTravelTimesService.shared.enqueueIfMissing(
+                tripId: trip.id,
+                cityProfileId: cityId,
+                legs: legs
+            )
+        }
+
+        // Phase 3 — coordinate-keyed warm. Walks every consecutive
+        // pair (regardless of place_id) and asks the service to
+        // compute via MKDirections. The service short-circuits when
+        // the pair is already cached or in flight, so this is cheap
+        // to call on every map load.
+        //
+        // We process serially so MapKit's own throttle never trips,
+        // and bump the cache version after each so polylines appear
+        // incrementally — first leg paints in ≈ 1 s.
+        guard !coordPairs.isEmpty else { return }
+        let svc = AppleTravelTimesService.shared
+        let cap = 30  // generous; most trips have ≤ 20 ordered stops
+        for pair in coordPairs.prefix(cap) {
+            // Skip legs already covered by the place_id cache to avoid
+            // duplicate compute — the renderer prefers that path.
+            if let p = pair.placeIds,
+               !svc.cachedAvailableModes(
+                fromPlaceId: p.from, toPlaceId: p.to
+               ).isEmpty {
+                continue
+            }
+            let landed = await svc.computeAndCacheCoordLeg(
+                from: pair.from, to: pair.to
+            )
+            if landed {
+                await MainActor.run { polylineCacheVersion &+= 1 }
+            }
+        }
+    }
+
+    /// Day-ordered (from, to) place_id pairs for legs we want polylines
+    /// on. Skips legs missing a place_id on either end — the cache
+    /// keys on Google place_ids and a missing one means we can't look
+    /// the row up server-side.
+    private func consecutivePlaceIdPairs() -> [(from: String, to: String)] {
+        let ordered = mappablePlaces.sorted { $0.sortOrder < $1.sortOrder }
+        var out: [(String, String)] = []
+        for i in 0 ..< max(0, ordered.count - 1) {
+            let from = ordered[i]
+            let to = ordered[i + 1]
+            guard let f = from.googlePlaceId, !f.isEmpty,
+                  let t = to.googlePlaceId, !t.isEmpty
+            else { continue }
+            out.append((f, t))
+        }
+        return out
+    }
+
+    /// Day-ordered consecutive (from, to) coordinate pairs for every
+    /// leg with valid lat/lng — independent of `googlePlaceId`. Used
+    /// by the coord-warm fallback so legacy trips still get
+    /// polylines.
+    ///
+    /// `placeIds` is populated when both ends carry a `googlePlaceId`
+    /// so the warm step can skip pairs already covered by the
+    /// place_id-keyed cache (cheaper, server-shared).
+    private func consecutiveCoordinatePairs() -> [(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D,
+        placeIds: (from: String, to: String)?
+    )] {
+        let ordered = mappablePlaces.sorted { $0.sortOrder < $1.sortOrder }
+        var out: [(
+            from: CLLocationCoordinate2D,
+            to: CLLocationCoordinate2D,
+            placeIds: (from: String, to: String)?
+        )] = []
+        for i in 0 ..< max(0, ordered.count - 1) {
+            let from = ordered[i]
+            let to = ordered[i + 1]
+            guard let fromLat = from.lat, let fromLng = from.lng,
+                  let toLat = to.lat, let toLng = to.lng
+            else { continue }
+            let pids: (String, String)?
+            if let f = from.googlePlaceId, !f.isEmpty,
+               let t = to.googlePlaceId, !t.isEmpty {
+                pids = (f, t)
+            } else {
+                pids = nil
+            }
+            out.append((
+                CLLocationCoordinate2D(latitude: fromLat, longitude: fromLng),
+                CLLocationCoordinate2D(latitude: toLat, longitude: toLng),
+                pids
+            ))
+        }
+        return out
+    }
+
+    /// Returns the resolved `city_profile_id`, resolving it on demand
+    /// if the original `.task` hasn't completed yet. Used by the
+    /// polyline refresh path which races the trip-load.
+    private func ensureCityProfileResolved() async -> UUID? {
+        if let id = resolvedCityProfileId { return id }
+        let id = await dataService.resolveCityProfileId(forTrip: trip)
+        await MainActor.run { resolvedCityProfileId = id }
+        return id
     }
 
     /// Centers the camera on the user's current location with the same edge
@@ -723,11 +1314,9 @@ struct TripMapView: View {
     /// Maintain the trip's exclude set so city_places search never
     /// re-suggests a place already on a scheduled day.
     private func recomputeExcludeSet() {
-        let wishlistDayIds = Set(
-            scheduledDays.filter { $0.isWishlist }.map(\.id)
-        )
-        // Use ALL places (not just scheduledDays) so wishlist days are
-        // intentionally excluded by the wishlist day-id filter inside.
+        // Use ALL places, then remove wishlist day ids. This excludes
+        // places already scheduled on the itinerary while still allowing
+        // wishlist ideas to appear as suggestions.
         mapState.recomputeScheduledDayPlaceIds(
             from: places,
             wishlistDayIds: wishlistDayIds
@@ -736,9 +1325,14 @@ struct TripMapView: View {
 
     /// Resolve city_profiles.id from the trip's destinationPlaceId so
     /// city_places searches can scope to the trip's city.
+    ///
+    /// Uses the 3-tier resolver (slug → geo proximity → place_id) so
+    /// trips whose destination is a locality (the common case) still
+    /// land on the right city profile. The legacy place_id-only path
+    /// missed every locality destination and silently disabled
+    /// `city_places` features for them.
     private func resolveCityProfileId() async {
-        guard let placeId = trip.destinationPlaceId else { return }
-        let id = await dataService.fetchCityProfileId(googlePlaceId: placeId)
+        let id = await dataService.resolveCityProfileId(forTrip: trip)
         await MainActor.run { resolvedCityProfileId = id }
     }
 
@@ -750,8 +1344,23 @@ struct TripMapView: View {
         focusCamera(on: preview.coordinate, distance: 600)
     }
 
+    private func handleSuggestedPlacesPicked(_ preview: MapSearchPreview) {
+        returnToSuggestedPlacesBrowser = true
+        pendingSuggestedPlacesPreview = preview
+        showSearchOverlay = false
+    }
+
+    private func presentSuggestedPlacesPreview(_ preview: MapSearchPreview) {
+        returnToSuggestedPlacesBrowser = true
+        mapState.searchResults = [preview]
+        mapState.searchOriginRegion = searchRegion
+        mapState.selectedSearchResult = preview
+        focusCamera(on: preview.coordinate, distance: 600)
+    }
+
     private func handleCategoryResults(pill: CategoryPill, results: [MapSearchPreview]) {
         showSearchOverlay = false
+        returnToSuggestedPlacesBrowser = false
         lastPickedCategory = pill
         lastSubmittedMapSearchQuery = nil
         lastCategoryRegion = searchRegion
@@ -777,17 +1386,22 @@ struct TripMapView: View {
     /// as exploratory map pins.
     private func handleSubmittedSearch(query: String, results: [MapSearchPreview]) {
         showSearchOverlay = false
+        tabSearchText = query
         showPlacesSheet = false
         sharedState?.showPlacesSheet = false
         mapState.selectedSearchResult = nil
+        returnToSuggestedPlacesBrowser = false
         selectedPlace = nil
 
-        let region = searchRegion
+        // Stamp the region we actually biased the query against so
+        // "Search this area" can detect when the user has drifted away
+        // from the original search center.
+        let originRegion = effectiveSearchRegion
         lastPickedCategory = nil
         lastSubmittedMapSearchQuery = query
-        lastCategoryRegion = region
+        lastCategoryRegion = originRegion
         mapState.searchResults = results
-        mapState.searchOriginRegion = region
+        mapState.searchOriginRegion = originRegion
 
         if !results.isEmpty {
             cameraTargetCounter += 1
@@ -800,6 +1414,7 @@ struct TripMapView: View {
     }
 
     private func handleSearchResultTapped(_ preview: MapSearchPreview) {
+        returnToSuggestedPlacesBrowser = false
         mapState.selectedSearchResult = preview
         focusCamera(on: preview.coordinate, distance: 600)
     }
@@ -836,7 +1451,9 @@ struct TripMapView: View {
         searchResultPin = nil
         lastPickedCategory = nil
         lastSubmittedMapSearchQuery = nil
+        tabSearchText = ""
         lastCategoryRegion = nil
+        returnToSuggestedPlacesBrowser = false
         fitMapForCurrentMode()
     }
 
@@ -847,7 +1464,10 @@ struct TripMapView: View {
         let pill = lastPickedCategory
         let category = pill?.matchingPlaceCategory
         let cityId = resolvedCityProfileId
-        let region = searchRegion
+        // The user explicitly chose to refresh the *visible* region,
+        // but cap the span so an overly-zoomed-out viewport doesn't
+        // turn into a global search.
+        let region = Self.clampingSpan(searchRegion, max: Self.maxBiasSpan)
         let excluded = mapState.scheduledDayPlaceIds
         let q = pill?.id ?? lastSubmittedMapSearchQuery ?? "places"
         Task {

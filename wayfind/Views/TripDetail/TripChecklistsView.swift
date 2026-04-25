@@ -49,14 +49,21 @@ struct TripChecklistsView: View {
                     } else {
                         List {
                             ForEach(list.items) { item in
-                                Toggle(isOn: binding(for: item)) {
-                                    Text(item.title)
-                                        .font(.appBody)
-                                        .foregroundStyle(AppColors.textPrimary)
-                                        .strikethrough(item.isDone)
+                                ChecklistItemRow(
+                                    title: item.title,
+                                    isDone: isDone(item)
+                                ) {
+                                    Task {
+                                        await setDone(itemId: item.id, isDone: !isDone(item))
+                                    }
                                 }
-                                .tint(AppColors.appPrimary)
                                 .listRowBackground(AppColors.appSurface)
+                                .listRowInsets(EdgeInsets(
+                                    top: 0,
+                                    leading: AppSpacing.lg,
+                                    bottom: 0,
+                                    trailing: AppSpacing.lg
+                                ))
                             }
                         }
                         .listStyle(.plain)
@@ -74,22 +81,14 @@ struct TripChecklistsView: View {
         .background(AppColors.appBackground)
         .navigationTitle("Checklists")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .task {
             await load()
         }
     }
 
-    private func binding(for item: TripChecklistItem) -> Binding<Bool> {
-        Binding(
-            get: {
-                rows.flatMap(\.items).first(where: { $0.id == item.id })?.isDone ?? item.isDone
-            },
-            set: { newValue in
-                Task {
-                    await setDone(itemId: item.id, isDone: newValue)
-                }
-            }
-        )
+    private func isDone(_ item: TripChecklistItem) -> Bool {
+        rows.flatMap(\.items).first(where: { $0.id == item.id })?.isDone ?? item.isDone
     }
 
     @MainActor
@@ -112,6 +111,45 @@ struct TripChecklistsView: View {
            !rows.contains(where: { $0.templateKey == selectedTab.rawValue }) {
             selectedTab = key
         }
+    }
+}
+
+private struct ChecklistItemRow: View {
+    let title: String
+    let isDone: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: AppSpacing.md) {
+                Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 23, weight: .semibold))
+                    .foregroundStyle(isDone ? AppColors.appPrimary : AppColors.textTertiary)
+                    .symbolRenderingMode(.hierarchical)
+                    .accessibilityHidden(true)
+
+                Text(title)
+                    .font(.appBody)
+                    .foregroundStyle(isDone ? AppColors.textTertiary : AppColors.textPrimary)
+                    .strikethrough(isDone, color: AppColors.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(minHeight: 56)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(ChecklistRowButtonStyle())
+        .accessibilityLabel(title)
+        .accessibilityValue(isDone ? "Completed" : "Not completed")
+        .accessibilityHint("Double-tap to mark \(isDone ? "incomplete" : "complete").")
+    }
+}
+
+private struct ChecklistRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(AppSpring.snappy, value: configuration.isPressed)
     }
 }
 

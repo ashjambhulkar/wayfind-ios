@@ -217,7 +217,7 @@ struct InviteJoinResult: Identifiable, Hashable, Sendable {
 /// iOS 18+ `Tab(value:)` API and the iOS 17 fallback's `.tag`, and lets
 /// the AI Day Planner handoff route the user to `.map` after Apply.
 enum TripDetailTab: Hashable {
-    case home, map, budget, bookings
+    case home, map, budget, bookings, ai
 }
 
 private struct AppRootTabView: View {
@@ -255,6 +255,10 @@ private struct AppRootTabView: View {
     /// Bound to the trip-detail TabView so the Phase C apply-handoff can
     /// programmatically switch the user to the Map tab.
     @State private var selectedTab: TripDetailTab = .home
+    /// The AI tab is a launch affordance, not a destination. Keep track of
+    /// the real tab so tapping AI can present the sheet without leaving the
+    /// user on an empty tab.
+    @State private var lastContentTab: TripDetailTab = .home
     /// iOS 26 map accessory state is hoisted to the TabView root because
     /// `tabViewBottomAccessory` must be applied to the TabView, not inside
     /// the Map tab content.
@@ -353,6 +357,7 @@ private struct AppRootTabView: View {
                 realtimeService.unbind()
                 activeTripDetailViewModel = nil
                 activeBudgetViewModel = nil
+                lastContentTab = .home
                 isKickFading = false
             }
         }
@@ -371,6 +376,20 @@ private struct AppRootTabView: View {
         .onChange(of: collaborationStore.canViewExpenses) { _, canView in
             if !canView, selectedTab == .budget {
                 selectedTab = .home
+            }
+        }
+        .onChange(of: selectedTab) { oldValue, newValue in
+            if newValue == .ai {
+                if collaborationStore.canEdit {
+                    HapticManager.light()
+                    showAIPlanner = true
+                }
+                selectedTab = lastContentTab
+            } else {
+                lastContentTab = newValue
+                if oldValue == .ai {
+                    selectedTab = newValue
+                }
             }
         }
         .sheet(isPresented: $showAIPlanner) {
@@ -593,6 +612,12 @@ private struct AppRootTabView: View {
                         }
                     }
                 }
+
+                if collaborationStore.canEdit {
+                    Tab("AI", systemImage: "sparkles", value: TripDetailTab.ai) {
+                        Color.clear
+                    }
+                }
             }
             .modifier(ScrollDownMinimizeTabBarModifier())
             .modifier(MapTabBottomAccessoryModifier(
@@ -642,6 +667,12 @@ private struct AppRootTabView: View {
                 }
                 .tabItem { Label("Map", systemImage: "map.fill") }
                 .tag(TripDetailTab.map)
+
+                if collaborationStore.canEdit {
+                    Color.clear
+                        .tabItem { Label("AI", systemImage: "sparkles") }
+                        .tag(TripDetailTab.ai)
+                }
             }
         } else {
             TripsListView()
@@ -674,14 +705,6 @@ private struct AppRootTabView: View {
                         }
                     }
                 }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            // AI planner is a write surface (it inserts activities). Hide
-            // the FAB entirely for viewers so they don't tap into a sheet
-            // they can't apply.
-            if collaborationStore.canEdit {
-                AIPlannerLaunchButton { showAIPlanner = true }
-            }
         }
     }
 }

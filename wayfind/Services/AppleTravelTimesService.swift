@@ -171,6 +171,301 @@ final class AppleTravelTimesService {
         return nil
     }
 
+    /// Returns which of the three modes have a cached polyline for the
+    /// requested place pair, in any scope. Used by the map's "Auto"
+    /// transport-mode resolver so it can pick the best concrete mode
+    /// per leg without having to introspect cache internals.
+    func cachedAvailableModes(
+        fromPlaceId: String,
+        toPlaceId: String
+    ) -> Set<Mode> {
+        var out: Set<Mode> = []
+        for (key, leg) in cache where
+            key.fromPlaceId == fromPlaceId && key.toPlaceId == toPlaceId
+        {
+            for mode in Mode.allCases {
+                if leg.polyline(for: mode) != nil {
+                    out.insert(mode)
+                }
+            }
+        }
+        return out
+    }
+
+    /// Cached travel-distance for a leg in any scope. Used by Auto
+    /// mode bucketing when no concrete distance was passed in.
+    func cachedDistanceMetersForAnyScope(
+        fromPlaceId: String,
+        toPlaceId: String
+    ) -> Int? {
+        for (key, leg) in cache where
+            key.fromPlaceId == fromPlaceId && key.toPlaceId == toPlaceId
+        {
+            if let d = leg.distanceMeters { return d }
+        }
+        return nil
+    }
+
+    /// Unscoped minutes lookup. Mirrors `cachedPolylineForAnyScope`
+    /// for the time-readout the map's segment badges surface.
+    func cachedMinutesForAnyScope(
+        fromPlaceId: String,
+        toPlaceId: String,
+        mode: Mode
+    ) -> Int? {
+        for (key, leg) in cache where
+            key.fromPlaceId == fromPlaceId && key.toPlaceId == toPlaceId
+        {
+            if let m = leg.minutes(for: mode) { return m }
+        }
+        return nil
+    }
+
+    // MARK: – Server seed (Phase J.4 read path)
+
+    /// One row from `city_travel_times` keyed for direct cache insert.
+    /// Public so the read path can use a single typed query in the
+    /// caller without us re-encoding the columns there.
+    private struct ServerLegRow: Decodable, Sendable {
+        let from_place_id: String
+        let to_place_id: String
+        let distance_meters: Int?
+        let walking_minutes: Int?
+        let driving_minutes: Int?
+        let transit_minutes: Int?
+        let walking_polyline: String?
+        let driving_polyline: String?
+        let transit_polyline: String?
+    }
+
+    /// Hydrate the in-memory cache from `city_travel_times` for the
+    /// trip's stop pairs. Free — the table is public-read RLS, so
+    /// this is one PostgREST round-trip with no auth gating beyond
+    /// the user already being signed in.
+    ///
+    /// The map screen calls this on load so polylines render even
+    /// when the trip wasn't generated through the AI planner (which
+    /// is the only path that populated the cache historically).
+    ///
+    /// - Parameters:
+    ///   - cityProfileId: Trip's city scope.
+    ///   - placeIdPairs: Array of (from_place_id, to_place_id) tuples.
+    ///     Only the *forward* direction is queried — Apple's `MKDirections`
+    ///     produces deterministic results for direction so callers should
+    ///     pass both A→B and B→A if both are needed.
+    ///   - client: Supabase client. Pass through to avoid re-resolving.
+    func seedFromServer(
+        cityProfileId: UUID,
+        placeIdPairs: [(from: String, to: String)],
+        using client: SupabaseClient
+    ) async {
+        guard !placeIdPairs.isEmpty else { return }
+
+        // Build an OR filter of (from_place_id.eq.X,to_place_id.eq.Y)
+        // pairs. PostgREST's `or(...)` clause chains AND inside each
+        // element so we use `and(...)` per pair. Cap to a sensible
+        // batch — most trips have ≤ 60 legs.
+        let work = Array(placeIdPairs.prefix(120))
+        let pairFilters = work.map { pair in
+            "and(from_place_id.eq.\(pair.from),to_place_id.eq.\(pair.to))"
+        }
+        let orFilter = pairFilters.joined(separator: ",")
+
+        do {
+            let rows: [ServerLegRow] = try await client
+                .from("city_travel_times")
+                .select("""
+                from_place_id,to_place_id,distance_meters,\
+                walking_minutes,driving_minutes,transit_minutes,\
+                walking_polyline,driving_polyline,transit_polyline
+                """)
+                .eq("city_profile_id", value: cityProfileId.uuidString.lowercased())
+                .or(orFilter)
+                .execute()
+                .value
+
+            for row in rows {
+                let key = CacheKey(
+                    cityProfileId: cityProfileId,
+                    fromPlaceId: row.from_place_id,
+                    toPlaceId: row.to_place_id
+                )
+                var leg = cache[key] ?? CachedLeg(refreshedAt: Date())
+                if let d = row.distance_meters { leg.distanceMeters = d }
+                if let m = row.walking_minutes { leg.walkingMinutes = m }
+                if let m = row.driving_minutes { leg.drivingMinutes = m }
+                if let m = row.transit_minutes { leg.transitMinutes = m }
+                if let p = row.walking_polyline, !p.isEmpty { leg.walkingPolyline = p }
+                if let p = row.driving_polyline, !p.isEmpty { leg.drivingPolyline = p }
+                if let p = row.transit_polyline, !p.isEmpty { leg.transitPolyline = p }
+                // Use server-row arrival as the cache freshness anchor —
+                // we don't store the row's `computed_at` in CachedLeg so
+                // `now` is the safest stamp (within the throttle window).
+                leg.refreshedAt = Date()
+                cache[key] = leg
+            }
+        } catch {
+            #if DEBUG
+            print("[AppleTravelTimes] server seed failed: \(error)")
+            #endif
+        }
+    }
+
+    // MARK: – Coordinate-keyed cache (legacy / manual trips)
+    //
+    // Trips created before the Google place_id pipeline (or with
+    // manually-added places) don't carry a `googlePlaceId` on either
+    // end of a leg. `city_travel_times` is keyed by Google place_ids,
+    // so the read-and-warm path above can't help them.
+    //
+    // This parallel cache is keyed by rounded (lat, lng) pairs and
+    // populated on-the-fly via `MKDirections`. We deliberately do NOT
+    // upload these to `city_travel_times` because the row would have
+    // no usable foreign key — the server-side AI planner expects
+    // place_id-anchored rows, and writing a synthetic key would
+    // pollute the table.
+
+    private struct CoordCacheKey: Hashable {
+        let fromLat: Int  // ×10_000 — ~11 m precision
+        let fromLng: Int
+        let toLat: Int
+        let toLng: Int
+
+        init(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) {
+            fromLat = Int((from.latitude * 10_000).rounded())
+            fromLng = Int((from.longitude * 10_000).rounded())
+            toLat = Int((to.latitude * 10_000).rounded())
+            toLng = Int((to.longitude * 10_000).rounded())
+        }
+    }
+
+    private var coordCache: [CoordCacheKey: CachedLeg] = [:]
+    private var coordInFlight: Set<CoordCacheKey> = []
+
+    /// Polyline for a coordinate pair, if one was previously computed
+    /// via `computeAndCacheCoordLeg`. Returns nil when no compute has
+    /// run for this pair yet.
+    func cachedCoordPolyline(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D,
+        mode: Mode
+    ) -> String? {
+        let key = CoordCacheKey(from: from, to: to)
+        return coordCache[key]?.polyline(for: mode)
+    }
+
+    func cachedCoordMinutes(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D,
+        mode: Mode
+    ) -> Int? {
+        let key = CoordCacheKey(from: from, to: to)
+        return coordCache[key]?.minutes(for: mode)
+    }
+
+    func cachedCoordAvailableModes(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D
+    ) -> Set<Mode> {
+        let key = CoordCacheKey(from: from, to: to)
+        guard let leg = coordCache[key] else { return [] }
+        var out: Set<Mode> = []
+        for mode in Mode.allCases where leg.polyline(for: mode) != nil {
+            out.insert(mode)
+        }
+        return out
+    }
+
+    func cachedCoordDistance(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D
+    ) -> Int? {
+        let key = CoordCacheKey(from: from, to: to)
+        return coordCache[key]?.distanceMeters
+    }
+
+    /// Compute polylines for walking + driving + transit via
+    /// `MKDirections` and cache locally. Does NOT upload to
+    /// `city_travel_times` — see the section comment above for why.
+    /// Idempotent: returns immediately when the pair is already
+    /// cached or in flight.
+    ///
+    /// Returns whether new data landed in the cache so the caller can
+    /// trigger a SwiftUI refresh on success and skip the no-op.
+    @discardableResult
+    func computeAndCacheCoordLeg(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D
+    ) async -> Bool {
+        let key = CoordCacheKey(from: from, to: to)
+        if coordCache[key] != nil { return false }
+        if coordInFlight.contains(key) { return false }
+        coordInFlight.insert(key)
+        defer { coordInFlight.remove(key) }
+
+        // Reuse the existing per-mode parallel compute via a
+        // synthetic LegRequest — only the coordinates matter here;
+        // the place_ids are placeholders and we never upload.
+        let synthetic = LegRequest(
+            fromPlaceId: "coord:\(key.fromLat),\(key.fromLng)",
+            fromCoordinate: from,
+            toPlaceId: "coord:\(key.toLat),\(key.toLng)",
+            toCoordinate: to
+        )
+        let computed = await compute(leg: synthetic)
+
+        var cached = CachedLeg(refreshedAt: Date())
+        cached.distanceMeters = computed.distanceMeters
+        if let m = computed.modes[.walking] {
+            cached.walkingMinutes = m.minutes
+            cached.walkingPolyline = m.polyline
+        }
+        if let m = computed.modes[.driving] {
+            cached.drivingMinutes = m.minutes
+            cached.drivingPolyline = m.polyline
+        }
+        if let m = computed.modes[.transit] {
+            cached.transitMinutes = m.minutes
+            cached.transitPolyline = m.polyline
+        }
+        coordCache[key] = cached
+        // Treat "no modes succeeded" as failure so the caller doesn't
+        // think a refresh is warranted.
+        return cached.walkingPolyline != nil
+            || cached.drivingPolyline != nil
+            || cached.transitPolyline != nil
+    }
+
+    /// Like `enqueue` but pre-filters the legs to those that don't
+    /// already have a cached polyline for at least one mode. Matches
+    /// the read-path behaviour: if the server seed already gave us a
+    /// row, we don't burn user CPU re-computing it.
+    func enqueueIfMissing(
+        tripId: UUID,
+        cityProfileId: UUID,
+        legs: [LegRequest]
+    ) {
+        let pending = legs.filter { leg in
+            cachedPolylineForAnyScope(
+                fromPlaceId: leg.fromPlaceId,
+                toPlaceId: leg.toPlaceId,
+                mode: .walking
+            ) == nil
+            && cachedPolylineForAnyScope(
+                fromPlaceId: leg.fromPlaceId,
+                toPlaceId: leg.toPlaceId,
+                mode: .driving
+            ) == nil
+            && cachedPolylineForAnyScope(
+                fromPlaceId: leg.fromPlaceId,
+                toPlaceId: leg.toPlaceId,
+                mode: .transit
+            ) == nil
+        }
+        guard !pending.isEmpty else { return }
+        enqueue(tripId: tripId, cityProfileId: cityProfileId, legs: pending)
+    }
+
     // MARK: – Internal: pipeline
 
     private struct CacheKey: Hashable {

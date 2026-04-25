@@ -43,10 +43,10 @@ struct MapSearchPill: View {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.88))
                     Text("Search places")
                         .font(.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.92))
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
@@ -63,6 +63,7 @@ struct MapSearchPill: View {
             if hasResults {
                 Divider()
                     .frame(height: 22)
+                    .overlay(.white.opacity(0.20))
 
                 Button {
                     HapticManager.light()
@@ -71,7 +72,7 @@ struct MapSearchPill: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 18, weight: .semibold))
                         .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.88))
                         .padding(.trailing, 10)
                         .padding(.vertical, 8)
                         .contentShape(Rectangle())
@@ -80,12 +81,17 @@ struct MapSearchPill: View {
                 .accessibilityLabel("Clear results")
             }
         }
-        .background(.regularMaterial)
+        .background {
+            Capsule()
+                .fill(.ultraThinMaterial)
+            Capsule()
+                .fill(Color.black.opacity(colorScheme == .dark ? 0.42 : 0.34))
+        }
         .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 3)
+        .shadow(color: .black.opacity(0.28), radius: 12, x: 0, y: 5)
         .overlay(
             Capsule()
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
         )
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .accessibilityElement(children: .contain)

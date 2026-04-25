@@ -3,6 +3,7 @@
 //  wayfind
 //
 
+import CoreLocation
 import Foundation
 import Observation
 import Supabase
@@ -530,6 +531,12 @@ final class SupabaseManager {
     /// destination_place_id) to its `city_profiles.id`. The profile row itself
     /// does not store a Google place id; resolve through `city_places`, which
     /// carries both the Google `place_id` and owning `city_profile_id`.
+    ///
+    /// NOTE: This only matches when the destination's place_id is itself a
+    /// row in `city_places` (i.e. the destination is a known POI inside an
+    /// already-seeded city). For city / locality place_ids — which is the
+    /// common case — this returns `nil`. Use
+    /// `resolveCityProfileId(forTrip:)` instead for any new caller.
     func fetchCityProfileId(forGooglePlaceId googlePlaceId: String) async -> UUID? {
         do {
             let (client, _) = try await requireClientAndUserId()
@@ -552,6 +559,138 @@ final class SupabaseManager {
             #endif
             return nil
         }
+    }
+
+    /// Robust 3-tier `city_profile_id` resolver for a trip.
+    ///
+    /// Mirrors the server-side `matchCityProfile` ladder used by
+    /// itinerary-ai, but runs entirely against owned data (no Google
+    /// hops). Order matters — cheapest/most-likely first:
+    ///
+    ///   1. **Slug match** — `toSlug(trip.destination.firstSegment)`
+    ///      against `city_profiles.city_slug`. Single round-trip; this
+    ///      covers every city we (or auto-seed) ever populated.
+    ///   2. **Geo proximity** — bbox query on `city_profiles.center_*`
+    ///      around `trip.lat/lng`, then haversine to pick the nearest
+    ///      profile within its own `match_radius_km`. Catches the case
+    ///      where the trip label slug doesn't match (e.g. "Le Marais,
+    ///      Paris" vs slug `paris`) but coordinates clearly do.
+    ///   3. **Legacy `place_id` lookup** — re-uses
+    ///      `fetchCityProfileId(forGooglePlaceId:)` so trips whose
+    ///      destination *is* a seeded POI still resolve.
+    ///
+    /// Returns `nil` only when none of the three tiers match. Never
+    /// throws — search fan-out should never fail because of us.
+    func resolveCityProfileId(forTrip trip: Trip) async -> UUID? {
+        guard let client = AuthSessionService.shared.client else { return nil }
+
+        struct ProfileRow: Decodable {
+            let id: UUID
+            let center_lat: Double
+            let center_lng: Double
+            let match_radius_km: Double?
+        }
+
+        // Tier 1: slug match.
+        let firstSegment = trip.destination
+            .split(separator: ",", maxSplits: 1, omittingEmptySubsequences: true)
+            .first
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            ?? trip.destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        let slug = Self.cityProfileSlug(firstSegment)
+        if !slug.isEmpty {
+            do {
+                let rows: [ProfileRow] = try await client
+                    .from("city_profiles")
+                    .select("id,center_lat,center_lng,match_radius_km")
+                    .eq("city_slug", value: slug)
+                    .limit(1)
+                    .execute()
+                    .value
+                if let id = rows.first?.id {
+                    return id
+                }
+            } catch {
+                #if DEBUG
+                print("[city_profiles] slug resolve failed: \(error)")
+                #endif
+            }
+        }
+
+        // Tier 2: geo proximity. Needs trip coordinates.
+        if let lat = trip.lat, let lng = trip.lng {
+            // 0.5° ≈ 55 km in latitude — wide enough to catch any
+            // profile whose `match_radius_km` (default 50) covers us.
+            // Longitude span is widened by 1/cos(lat) so the bbox stays
+            // proportional outside the equator.
+            let latDelta = 0.55
+            let cosLat = max(0.05, cos(lat * .pi / 180))
+            let lngDelta = 0.55 / cosLat
+            do {
+                let rows: [ProfileRow] = try await client
+                    .from("city_profiles")
+                    .select("id,center_lat,center_lng,match_radius_km")
+                    .gte("center_lat", value: lat - latDelta)
+                    .lte("center_lat", value: lat + latDelta)
+                    .gte("center_lng", value: lng - lngDelta)
+                    .lte("center_lng", value: lng + lngDelta)
+                    .limit(20)
+                    .execute()
+                    .value
+                let tripCoord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+                var best: (id: UUID, distKm: Double)?
+                for row in rows {
+                    let distKm = HaversineDistance.distance(
+                        from: tripCoord,
+                        to: CLLocationCoordinate2D(latitude: row.center_lat, longitude: row.center_lng)
+                    )
+                    let radius = row.match_radius_km ?? 50
+                    if distKm <= radius {
+                        if best == nil || distKm < best!.distKm {
+                            best = (row.id, distKm)
+                        }
+                    }
+                }
+                if let best {
+                    return best.id
+                }
+            } catch {
+                #if DEBUG
+                print("[city_profiles] geo resolve failed: \(error)")
+                #endif
+            }
+        }
+
+        // Tier 3: legacy place_id lookup (cheap when destination is a
+        // seeded POI; harmless miss otherwise).
+        if let placeId = trip.destinationPlaceId {
+            return await fetchCityProfileId(forGooglePlaceId: placeId)
+        }
+
+        return nil
+    }
+
+    /// Slug derivation that mirrors the server-side `toSlug` in
+    /// `city_profile_lookup.ts` so iOS lookups land on the same row the
+    /// auto-seeder created. Strips diacritics, lowercases, collapses
+    /// non-alphanumerics into a single hyphen, and trims edge hyphens.
+    static func cityProfileSlug(_ raw: String) -> String {
+        let folded = raw.folding(options: [.diacriticInsensitive, .widthInsensitive], locale: .current)
+        let lowered = folded.lowercased()
+        var slug = ""
+        slug.reserveCapacity(lowered.count)
+        var lastWasHyphen = true // suppress leading hyphen
+        for ch in lowered {
+            if ch.isLetter || ch.isNumber {
+                slug.append(ch)
+                lastWasHyphen = false
+            } else if !lastWasHyphen {
+                slug.append("-")
+                lastWasHyphen = true
+            }
+        }
+        if slug.hasSuffix("-") { slug.removeLast() }
+        return slug
     }
 
     func fetchCityPlaceEnrichment(googlePlaceId: String) async throws -> CityPlaceEnrichmentRow? {
