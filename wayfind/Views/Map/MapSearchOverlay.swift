@@ -49,10 +49,13 @@ struct MapSearchOverlay: View {
     /// pin and open the preview sheet.
     var onPickResult: (MapSearchPreview) -> Void
 
-    /// Called when the user picks from the dedicated Suggested Places
-    /// browser. The map can use this to restore that browser after the
-    /// preview sheet is dismissed.
+    /// Called when the user picks from the inline Suggested Places section.
+    /// The map can restore this search sheet after the preview dismisses.
     var onPickSuggestedResult: (MapSearchPreview) -> Void
+
+    /// Called when the user picks from the dedicated Suggested Places
+    /// browser ("See all"). The map can restore that browser after preview.
+    var onPickSuggestedBrowserResult: (MapSearchPreview) -> Void
 
     /// Called when the user taps a category pill. Hands a list of
     /// blended Apple+DB previews back so the map can render
@@ -112,6 +115,7 @@ struct MapSearchOverlay: View {
         excludedPlaceIds: Set<String>,
         onPickResult: @escaping (MapSearchPreview) -> Void,
         onPickSuggestedResult: @escaping (MapSearchPreview) -> Void,
+        onPickSuggestedBrowserResult: @escaping (MapSearchPreview) -> Void,
         onPickCategory: @escaping (CategoryPill, [MapSearchPreview]) -> Void,
         onSubmitSearch: @escaping (_ query: String, _ results: [MapSearchPreview]) -> Void,
         onCancel: @escaping () -> Void
@@ -123,6 +127,7 @@ struct MapSearchOverlay: View {
         self.excludedPlaceIds = excludedPlaceIds
         self.onPickResult = onPickResult
         self.onPickSuggestedResult = onPickSuggestedResult
+        self.onPickSuggestedBrowserResult = onPickSuggestedBrowserResult
         self.onPickCategory = onPickCategory
         self.onSubmitSearch = onSubmitSearch
         self.onCancel = onCancel
@@ -174,6 +179,10 @@ struct MapSearchOverlay: View {
             } onCancel: {
                 showAllSuggested = false
             }
+            .presentationDetents([.large])
+            .presentationContentInteraction(.scrolls)
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.regularMaterial)
         }
         .tint(AppColors.appPrimary)
     }
@@ -374,7 +383,7 @@ struct MapSearchOverlay: View {
     @ViewBuilder
     private func suggestedPlaceRow(_ preview: MapSearchPreview) -> some View {
         Button {
-            commit(preview)
+            commitInlineSuggestedPick(preview)
         } label: {
             HStack(spacing: 12) {
                 SuggestedThumbnail(preview: preview)
@@ -441,7 +450,7 @@ struct MapSearchOverlay: View {
                         ownedRowButton(preview)
                     }
                 } header: {
-                    Text("From this city's places")
+                    typedSectionHeader("Wayfind Suggestions")
                 }
             }
 
@@ -453,7 +462,7 @@ struct MapSearchOverlay: View {
                             appleRowButton(suggestion)
                         }
                     } header: {
-                        Text("Suggestions")
+                        typedSectionHeader("Suggestions")
                     }
                 }
             case .google:
@@ -463,7 +472,7 @@ struct MapSearchOverlay: View {
                             googleRowButton(prediction)
                         }
                     } header: {
-                        Text("Suggestions")
+                        typedSectionHeader("Suggestions")
                     }
                 }
             }
@@ -487,6 +496,7 @@ struct MapSearchOverlay: View {
         .scrollContentBackground(.hidden)
         .contentMargins(.top, searchChromeHeight, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
+        .environment(\.defaultMinListRowHeight, 58)
     }
 
     /// True once we know we have nothing useful to show for the typed
@@ -511,27 +521,43 @@ struct MapSearchOverlay: View {
             HapticManager.light()
             submitCurrentQueryToMap()
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: AppSpacing.md) {
                 rowLeadingIcon(
                     symbol: "magnifyingglass",
                     family: .generic
                 )
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(query.trimmingCharacters(in: .whitespacesAndNewlines))
-                        .font(.body.weight(.medium))
+                        .font(.body.weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    Text("Search Nearby")
+                    Text("Search nearby in this map area")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Spacer()
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.right.circle.fill")
+                    .font(.title3)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(AppColors.appPrimary)
             }
+            .padding(.vertical, 2)
+            .accessibilityElement(children: .combine)
         }
         .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 8, leading: AppSpacing.lg, bottom: 8, trailing: AppSpacing.lg))
+        .listRowBackground(AppColors.appSurface)
         .accessibilityLabel("Search nearby for \(query)")
         .accessibilityHint("Finds matching places in the visible map area")
+    }
+
+    private func typedSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(nil)
+            .padding(.top, AppSpacing.xs)
     }
 
     @ViewBuilder
@@ -555,12 +581,13 @@ struct MapSearchOverlay: View {
     private func rowLeadingIcon(symbol: String, family: PlaceCategoryFamily) -> some View {
         ZStack {
             Circle()
-                .fill(family == .generic ? Color(uiColor: .systemGray4) : family.color)
+                .fill(family == .generic ? Color(uiColor: .systemGray5) : family.tint)
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(.system(size: 15, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(family == .generic ? .secondary : family.color)
         }
-        .frame(width: 30, height: 30)
+        .frame(width: 34, height: 34)
         .accessibilityHidden(true)
     }
 
@@ -569,11 +596,11 @@ struct MapSearchOverlay: View {
         return Button {
             resolveGoogleAndCommit(prediction)
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: AppSpacing.md) {
                 rowLeadingIcon(symbol: icon.symbol, family: icon.family)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(prediction.mainText)
-                        .font(.body)
+                        .font(.body.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     if !prediction.secondaryText.isEmpty {
@@ -583,11 +610,14 @@ struct MapSearchOverlay: View {
                             .lineLimit(1)
                     }
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 4, leading: AppSpacing.lg, bottom: 4, trailing: AppSpacing.lg))
+        .listRowBackground(AppColors.appSurface)
     }
 
     private func ownedRowButton(_ preview: MapSearchPreview) -> some View {
@@ -603,31 +633,32 @@ struct MapSearchOverlay: View {
         return Button {
             commit(preview)
         } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 12) {
-                    rowLeadingIcon(symbol: icon.symbol, family: icon.family)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(preview.name)
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.primary)
+            HStack(spacing: AppSpacing.md) {
+                rowLeadingIcon(symbol: icon.symbol, family: icon.family)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(preview.name)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if !preview.subtitle.isEmpty {
+                        Text(preview.subtitle)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
-                        if !preview.subtitle.isEmpty {
-                            Text(preview.subtitle)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Text("Saved in this city")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(AppColors.appPrimary)
                     }
-                    Spacer()
+                    Label("Wayfind suggestion", systemImage: "checkmark.seal.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppColors.appPrimary)
                 }
+                Spacer(minLength: 0)
             }
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
-        .accessibilityLabel("\(preview.name). Saved in this city.")
+        .listRowInsets(EdgeInsets(top: 4, leading: AppSpacing.lg, bottom: 4, trailing: AppSpacing.lg))
+        .listRowBackground(AppColors.appSurface)
+        .accessibilityLabel("\(preview.name). Wayfind suggestion.")
     }
 
     private func appleRowButton(_ suggestion: AppleMapSuggestion) -> some View {
@@ -639,11 +670,11 @@ struct MapSearchOverlay: View {
         return Button {
             resolveAndCommit(suggestion)
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: AppSpacing.md) {
                 rowLeadingIcon(symbol: icon.symbol, family: icon.family)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(suggestion.title)
-                        .font(.body)
+                        .font(.body.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     if !suggestion.subtitle.isEmpty {
@@ -653,11 +684,14 @@ struct MapSearchOverlay: View {
                             .lineLimit(1)
                     }
                 }
-                Spacer()
+                Spacer(minLength: 0)
             }
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 4, leading: AppSpacing.lg, bottom: 4, trailing: AppSpacing.lg))
+        .listRowBackground(AppColors.appSurface)
     }
 
     // MARK: - Actions
@@ -670,6 +704,13 @@ struct MapSearchOverlay: View {
     }
 
     private func commitSuggestedBrowserPick(_ preview: MapSearchPreview) {
+        rememberRecent(query)
+        HapticManager.light()
+        onPickSuggestedBrowserResult(preview)
+        dismiss()
+    }
+
+    private func commitInlineSuggestedPick(_ preview: MapSearchPreview) {
         rememberRecent(query)
         HapticManager.light()
         onPickSuggestedResult(preview)
@@ -731,6 +772,8 @@ struct MapSearchOverlay: View {
         // sees results land on the map. The map screen owns the merge
         // and will populate its `searchResults` on completion.
         let q = pill.id
+        query = pill.label
+        isQueryFocused = true
         rememberRecent(pill.label)
         let category = pill.matchingPlaceCategory
 

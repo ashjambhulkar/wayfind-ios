@@ -146,17 +146,16 @@ struct MapSearchPreviewSheet: View {
             )
             .allowsHitTesting(false)
 
-            Label(
-                lookAroundScene == nil ? "Map preview" : "Look Around",
-                systemImage: lookAroundScene == nil ? "map.fill" : "binoculars.fill"
-            )
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, AppSpacing.sm)
-            .padding(.vertical, 6)
-            .background(.ultraThinMaterial, in: Capsule())
-            .padding(AppSpacing.md)
-            .allowsHitTesting(false)
+            if lookAroundScene == nil {
+                Label("Map preview", systemImage: "map.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, AppSpacing.sm)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(AppSpacing.md)
+                    .allowsHitTesting(false)
+            }
         }
         .frame(height: 220)
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))

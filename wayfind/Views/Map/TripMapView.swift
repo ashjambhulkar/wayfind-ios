@@ -65,6 +65,7 @@ struct TripMapView: View {
     @State private var addToDayPreview: MapSearchPreview?
     @State private var pendingAddToDayPresentation = false
     @State private var showSuggestedPlacesBrowser = false
+    @State private var returnToSearchOverlay = false
     @State private var returnToSuggestedPlacesBrowser = false
     @State private var pendingSuggestedPlacesPreview: MapSearchPreview?
     @State private var resolvedCityProfileId: UUID?
@@ -628,6 +629,14 @@ struct TripMapView: View {
                             showSuggestedPlacesBrowser = true
                         }
                     }
+                } else if newVal == nil && returnToSearchOverlay {
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(350))
+                        await MainActor.run {
+                            guard returnToSearchOverlay else { return }
+                            showSearchOverlay = true
+                        }
+                    }
                 } else if newVal != nil && showPlacesSheet {
                     showPlacesSheet = false
                     searchPreviewDetent = .medium
@@ -678,6 +687,9 @@ struct TripMapView: View {
                 handleOverlayPicked(preview)
             },
             onPickSuggestedResult: { preview in
+                handleSearchSheetSuggestedPicked(preview)
+            },
+            onPickSuggestedBrowserResult: { preview in
                 handleSuggestedPlacesPicked(preview)
             },
             onPickCategory: { pill, results in
@@ -688,6 +700,7 @@ struct TripMapView: View {
             },
             onCancel: {
                 showSearchOverlay = false
+                returnToSearchOverlay = false
             }
         )
         .presentationDetents([.large])
@@ -709,6 +722,7 @@ struct TripMapView: View {
             pendingSuggestedPlacesPreview = nil
         }
         .presentationDetents([.medium, .large])
+        .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.visible)
         .presentationBackground(.regularMaterial)
     }
@@ -719,6 +733,7 @@ struct TripMapView: View {
             onAddToDay: {
                 addToDayPreview = preview
                 pendingAddToDayPresentation = true
+                returnToSearchOverlay = false
                 returnToSuggestedPlacesBrowser = false
                 mapState.selectedSearchResult = nil
             },
@@ -831,7 +846,9 @@ struct TripMapView: View {
 
     private var shouldShowSearchThisArea: Bool {
         guard !mapState.searchResults.isEmpty,
-              let origin = mapState.searchOriginRegion
+              let origin = mapState.searchOriginRegion,
+              let query = lastSubmittedMapSearchQuery?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !query.isEmpty
         else { return false }
         let dLat = abs(searchRegion.center.latitude - origin.center.latitude)
         let dLng = abs(searchRegion.center.longitude - origin.center.longitude)
@@ -1337,6 +1354,10 @@ struct TripMapView: View {
     }
 
     private func handleOverlayPicked(_ preview: MapSearchPreview) {
+        returnToSearchOverlay = false
+        returnToSuggestedPlacesBrowser = false
+        lastPickedCategory = nil
+        lastSubmittedMapSearchQuery = nil
         showSearchOverlay = false
         mapState.searchResults = [preview]
         mapState.searchOriginRegion = searchRegion
@@ -1344,14 +1365,21 @@ struct TripMapView: View {
         focusCamera(on: preview.coordinate, distance: 600)
     }
 
+    private func handleSearchSheetSuggestedPicked(_ preview: MapSearchPreview) {
+        returnToSearchOverlay = true
+        returnToSuggestedPlacesBrowser = false
+        pendingSuggestedPlacesPreview = preview
+        showSearchOverlay = false
+    }
+
     private func handleSuggestedPlacesPicked(_ preview: MapSearchPreview) {
+        returnToSearchOverlay = false
         returnToSuggestedPlacesBrowser = true
         pendingSuggestedPlacesPreview = preview
         showSearchOverlay = false
     }
 
     private func presentSuggestedPlacesPreview(_ preview: MapSearchPreview) {
-        returnToSuggestedPlacesBrowser = true
         mapState.searchResults = [preview]
         mapState.searchOriginRegion = searchRegion
         mapState.selectedSearchResult = preview
@@ -1360,6 +1388,8 @@ struct TripMapView: View {
 
     private func handleCategoryResults(pill: CategoryPill, results: [MapSearchPreview]) {
         showSearchOverlay = false
+        tabSearchText = pill.label
+        returnToSearchOverlay = false
         returnToSuggestedPlacesBrowser = false
         lastPickedCategory = pill
         lastSubmittedMapSearchQuery = nil
@@ -1390,6 +1420,7 @@ struct TripMapView: View {
         showPlacesSheet = false
         sharedState?.showPlacesSheet = false
         mapState.selectedSearchResult = nil
+        returnToSearchOverlay = false
         returnToSuggestedPlacesBrowser = false
         selectedPlace = nil
 
@@ -1414,6 +1445,7 @@ struct TripMapView: View {
     }
 
     private func handleSearchResultTapped(_ preview: MapSearchPreview) {
+        returnToSearchOverlay = false
         returnToSuggestedPlacesBrowser = false
         mapState.selectedSearchResult = preview
         focusCamera(on: preview.coordinate, distance: 600)
@@ -1453,6 +1485,7 @@ struct TripMapView: View {
         lastSubmittedMapSearchQuery = nil
         tabSearchText = ""
         lastCategoryRegion = nil
+        returnToSearchOverlay = false
         returnToSuggestedPlacesBrowser = false
         fitMapForCurrentMode()
     }
@@ -1460,7 +1493,9 @@ struct TripMapView: View {
     /// Re-runs the most recent category search in the current viewport
     /// so the user sees fresh results after panning to a new area.
     private func rerunCategoryInCurrentRegion() {
-        guard lastPickedCategory != nil || lastSubmittedMapSearchQuery != nil else { return }
+        guard let submittedQuery = lastSubmittedMapSearchQuery?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !submittedQuery.isEmpty
+        else { return }
         let pill = lastPickedCategory
         let category = pill?.matchingPlaceCategory
         let cityId = resolvedCityProfileId
@@ -1469,7 +1504,7 @@ struct TripMapView: View {
         // turn into a global search.
         let region = Self.clampingSpan(searchRegion, max: Self.maxBiasSpan)
         let excluded = mapState.scheduledDayPlaceIds
-        let q = pill?.id ?? lastSubmittedMapSearchQuery ?? "places"
+        let q = pill?.id ?? submittedQuery
         Task {
             let apple = AppleMapSearchService()
             async let appleResults = apple.searchNearbyPreviews(
@@ -1479,7 +1514,7 @@ struct TripMapView: View {
             )
             async let dbResults = CityPlacesSearchService.shared.search(
                 cityProfileId: cityId,
-                query: nil,
+                query: category == nil ? q : nil,
                 category: category,
                 region: region,
                 excluding: excluded,
