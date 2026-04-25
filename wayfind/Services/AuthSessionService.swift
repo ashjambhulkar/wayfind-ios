@@ -26,7 +26,7 @@ enum AuthSessionError: LocalizedError {
         case .missingPresenter:
             return "Could not present sign-in. Try again."
         case .missingGoogleTokens:
-            return "Google did not return a valid token."
+            return "Google sign-in didn't complete. Try again."
         }
     }
 }
@@ -85,7 +85,10 @@ final class AuthSessionService {
             supabaseKey: AppConfig.supabaseAnonKey,
             options: SupabaseClientOptions(
                 db: .init(),
-                auth: .init(redirectToURL: AppConfig.supabaseAuthRedirectURL),
+                auth: .init(
+                    redirectToURL: AppConfig.supabaseAuthRedirectURL,
+                    emitLocalSessionAsInitialSession: true
+                ),
                 global: .init(),
                 functions: .init(),
                 realtime: .init(),

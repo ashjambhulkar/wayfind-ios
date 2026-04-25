@@ -12,6 +12,7 @@ private struct TripDetailScrollOffsetKey: PreferenceKey {
 struct TripDetailView: View {
     @Environment(DataService.self) private var dataService
     @Environment(ToastManager.self) private var toastManager
+    @Environment(CollaborationStore.self) private var collaborationStore
     @State private var viewModel: TripDetailViewModel?
 
     // Sheet state
@@ -26,6 +27,8 @@ struct TripDetailView: View {
     @State private var bannerDismissed = false
     @State private var showEditTrip = false
     @State private var showDeleteConfirmation = false
+    @State private var showMembersSheet = false
+    @State private var showRecentActivitySheet = false
     @State private var placeToEdit: Place?
     @State private var placeToMove: Place?
     @State private var selectedPlace: Place?
@@ -35,6 +38,12 @@ struct TripDetailView: View {
     @State private var isNavigationOverLightContent = false
 
     let trip: Trip
+
+    /// Phase 3 — fires once the viewmodel has been instantiated so the
+    /// host (`AppRootTabView`) can hand it to `TripRealtimeService`. The
+    /// realtime service needs a direct viewmodel reference because the
+    /// kick handler refetches `loadTripData()` on a meaningful change.
+    var onViewModelCreated: ((TripDetailViewModel) -> Void)? = nil
 
     private var tripBookingCount: Int {
         viewModel?.totalBookingsCount ?? 0
@@ -153,6 +162,32 @@ struct TripDetailView: View {
                 Task { await viewModel?.refreshHeroShortcutCounts() }
             }
         }
+        // Per-surface access revocation (Phase 1.5): if the owner removes
+        // access while a member is currently in Notes or Documents, the
+        // realtime layer (Phase 3) flips the gate and we gracefully bail
+        // out of the pushed view + show an explanatory toast. The toast
+        // copy leads with what happened (not "permission error") and
+        // names the surface so the user knows exactly what's gone.
+        .onChange(of: collaborationStore.canViewNotes) { _, canView in
+            if !canView, showTripNotes {
+                showTripNotes = false
+                toastManager.show(ToastData(
+                    message: "The owner removed your access to notes",
+                    type: .warning,
+                    duration: 3
+                ))
+            }
+        }
+        .onChange(of: collaborationStore.canViewDocuments) { _, canView in
+            if !canView, showTripDocuments {
+                showTripDocuments = false
+                toastManager.show(ToastData(
+                    message: "The owner removed your access to documents",
+                    type: .warning,
+                    duration: 3
+                ))
+            }
+        }
         .navigationDestination(isPresented: $showAddBooking) {
             if let vm = viewModel, let targetDayId = vm.scheduledDays.first(where: { $0.dayNumber == addPlaceTargetDay })?.id {
                 AddBookingView(
@@ -198,10 +233,20 @@ struct TripDetailView: View {
         }
         .task {
             if viewModel == nil {
-                viewModel = TripDetailViewModel(trip: trip, dataService: dataService)
+                let created = TripDetailViewModel(trip: trip, dataService: dataService)
+                viewModel = created
+                onViewModelCreated?(created)
             }
             await viewModel?.loadTripData()
             bannerDismissed = discoveryManager.isBannerDismissed(for: trip.id)
+        }
+        // The +ai tab posts this notification after applying an AI Day Planner
+        // result. `TabView` keeps this view alive between switches, so `.task`
+        // doesn't re-run — we explicitly trigger a reload here.
+        .onReceive(NotificationCenter.default.publisher(for: .tripActivitiesDidChange)) { note in
+            guard let id = note.userInfo?[TripActivitiesNotificationKeys.tripId] as? UUID,
+                  id == trip.id else { return }
+            Task { await viewModel?.loadTripData() }
         }
     }
 
@@ -233,13 +278,24 @@ struct TripDetailView: View {
         .toolbarBackground(isNavigationOverLightContent ? .visible : .hidden, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                TripMembersAvatarStack {
+                    showMembersSheet = true
+                }
+
                 Menu {
-                    Button {
-                        showEditTrip = true
-                    } label: {
-                        Label("Edit Trip", systemImage: "pencil")
+                    if collaborationStore.canManage {
+                        // Owner-only: Edit Trip wraps a destructive cascade
+                        // (it can shrink the date range and drop activities
+                        // on those days). Editors can change activities
+                        // through the inline UI but not the trip itself in
+                        // Phase 1.
+                        Button {
+                            showEditTrip = true
+                        } label: {
+                            Label("Edit Trip", systemImage: "pencil")
+                        }
+                        Divider()
                     }
-                    Divider()
                     Button {
                         viewModel?.expandAll()
                     } label: {
@@ -250,11 +306,23 @@ struct TripDetailView: View {
                     } label: {
                         Label("Collapse All Days", systemImage: "arrow.down.right.and.arrow.up.left")
                     }
+                    // Recent activity feed (Phase 4) — secondary surface,
+                    // intentionally lives in the menu rather than the
+                    // toolbar avatar slot which is reserved for Members.
                     Divider()
-                    Button(role: .destructive) {
-                        showDeleteConfirmation = true
+                    Button {
+                        HapticManager.light()
+                        showRecentActivitySheet = true
                     } label: {
-                        Label("Delete Trip", systemImage: "trash")
+                        Label("Recent activity", systemImage: "clock.arrow.circlepath")
+                    }
+                    if collaborationStore.canManage {
+                        Divider()
+                        Button(role: .destructive) {
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Delete Trip", systemImage: "trash")
+                        }
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -263,6 +331,12 @@ struct TripDetailView: View {
                 }
                 .accessibilityLabel("Trip actions")
             }
+        }
+        .sheet(isPresented: $showMembersSheet) {
+            TripMembersSheet(trip: viewModel?.trip ?? trip)
+        }
+        .sheet(isPresented: $showRecentActivitySheet) {
+            RecentActivitySheet(trip: viewModel?.trip ?? trip)
         }
     }
 
@@ -391,23 +465,32 @@ struct TripDetailView: View {
                     HapticManager.light()
                     showTripChecklists = true
                 }
-                PillButtonView(
-                    sfSymbol: "note.text",
-                    label: "Notes",
-                    trailingDetail: viewModel.noteCount > 0 ? " \(viewModel.noteCount)" : nil,
-                    isActive: true
-                ) {
-                    HapticManager.light()
-                    showTripNotes = true
+                // Per-surface access (Phase 1.5): the owner can revoke a
+                // member's view of Notes / Documents independently of the
+                // member's edit role. When revoked the pill disappears
+                // entirely so the member doesn't tap into a screen they
+                // can't open. Owners always see all pills.
+                if collaborationStore.canViewNotes {
+                    PillButtonView(
+                        sfSymbol: "note.text",
+                        label: "Notes",
+                        trailingDetail: viewModel.noteCount > 0 ? " \(viewModel.noteCount)" : nil,
+                        isActive: true
+                    ) {
+                        HapticManager.light()
+                        showTripNotes = true
+                    }
                 }
-                PillButtonView(
-                    sfSymbol: "doc.text",
-                    label: "Documents",
-                    trailingDetail: nil,
-                    isActive: true
-                ) {
-                    HapticManager.light()
-                    showTripDocuments = true
+                if collaborationStore.canViewDocuments {
+                    PillButtonView(
+                        sfSymbol: "doc.text",
+                        label: "Documents",
+                        trailingDetail: nil,
+                        isActive: true
+                    ) {
+                        HapticManager.light()
+                        showTripDocuments = true
+                    }
                 }
             }
             .padding(.horizontal, AppSpacing.lg)
@@ -494,15 +577,21 @@ struct TripDetailView: View {
                         }
                     }
 
-                    InlineAddButtonView(
-                        dayNumber: day.dayNumber
-                    ) {
-                        addPlaceTargetDay = day.dayNumber
-                        showAddPlace = true
+                    if collaborationStore.canEdit {
+                        InlineAddButtonView(
+                            dayNumber: day.dayNumber
+                        ) {
+                            addPlaceTargetDay = day.dayNumber
+                            showAddPlace = true
+                        }
+                        .padding(.horizontal, AppSpacing.lg)
+                        .padding(.top, AppSpacing.xs)
+                        .padding(.bottom, AppSpacing.lg)
+                    } else {
+                        // Viewers see normal trailing breathing room without
+                        // an add-affordance they can't act on.
+                        Spacer().frame(height: AppSpacing.lg)
                     }
-                    .padding(.horizontal, AppSpacing.lg)
-                    .padding(.top, AppSpacing.xs)
-                    .padding(.bottom, AppSpacing.lg)
                 }
             }
         } header: {

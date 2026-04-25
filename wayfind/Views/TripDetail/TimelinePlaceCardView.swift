@@ -13,6 +13,11 @@ struct TimelinePlaceCardView: View {
     var onMoveToIdeas: () -> Void = {}
     var onDelete: () -> Void = {}
 
+    /// Phase 3 — pulled from the environment so cards in the wishlist
+    /// section pick up flashes too, not just cards in scheduled days.
+    /// Optional in mock-mode where the realtime layer never fires.
+    @Environment(TripCollaborationUiStore.self) private var collaborationUi
+
     private var familyColor: Color {
         place.categoryEnum.color
     }
@@ -21,10 +26,15 @@ struct TimelinePlaceCardView: View {
         place.categoryEnum.sfSymbol
     }
 
+    private var flash: TripCollaborationUiStore.ChangeFlash? {
+        collaborationUi.flash(for: place.id)
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: AppSpacing.xs) {
             leadingMarker
             cardSurface
+                .cardPulse(flashID: flash?.id)
         }
         .contextMenu {
             Button("Edit", action: onEdit)
@@ -73,6 +83,18 @@ struct TimelinePlaceCardView: View {
                     .font(.appCaption)
                     .foregroundStyle(AppColors.textSecondary)
                     .lineLimit(1)
+            }
+
+            // Phase 3 — only renders when a recent realtime change has
+            // landed for this card. Layout-stable: the row collapses
+            // back to nothing once the flash expires (no border, no
+            // sized placeholder) so neighbours don't shift.
+            if let flash {
+                CollaborativeAttributionPill(
+                    actorDisplayName: flash.displayActor,
+                    actorUserId: flash.actorUserId,
+                    kind: flash.kind
+                )
             }
         }
         .timelineCardChassis(stripeColor: familyColor)

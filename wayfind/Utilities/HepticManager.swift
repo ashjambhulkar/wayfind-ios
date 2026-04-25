@@ -14,17 +14,28 @@ enum HapticManager {
     private static let notificationGenerator = UINotificationFeedbackGenerator()
     private static let selectionGenerator = UISelectionFeedbackGenerator()
 
+    /// Decorative impacts and selection ticks are silenced when the user has
+    /// asked the system to dampen non-essential motion/animations. Notification
+    /// feedback (success / warning / error) carries critical safety information
+    /// for destructive actions and stays on regardless.
+    private static var shouldSuppressDecorativeHaptics: Bool {
+        UIAccessibility.isReduceMotionEnabled
+    }
+
     static func light() {
+        guard !shouldSuppressDecorativeHaptics else { return }
         lightGenerator.prepare()
         lightGenerator.impactOccurred()
     }
 
     static func medium() {
+        guard !shouldSuppressDecorativeHaptics else { return }
         mediumGenerator.prepare()
         mediumGenerator.impactOccurred()
     }
 
     static func heavy() {
+        guard !shouldSuppressDecorativeHaptics else { return }
         heavyGenerator.prepare()
         heavyGenerator.impactOccurred()
     }
@@ -45,6 +56,7 @@ enum HapticManager {
     }
 
     static func selection() {
+        guard !shouldSuppressDecorativeHaptics else { return }
         selectionGenerator.prepare()
         selectionGenerator.selectionChanged()
     }

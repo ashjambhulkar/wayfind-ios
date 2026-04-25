@@ -12,6 +12,8 @@ struct Trip: Identifiable, Codable, Hashable {
     var userId: UUID
     var title: String
     var destination: String
+    /// Google place_id for the trip destination (used by AI day planner as stay-area anchor).
+    var destinationPlaceId: String?
     var lat: Double?
     var lng: Double?
     var startDate: Date

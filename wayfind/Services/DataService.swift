@@ -164,7 +164,9 @@ final class DataService {
     }
 
     /// Counts for trip detail hero pills (Expo `TripDetailHero` checklist + notes chips).
-    func tripHeroShortcutCounts(tripId: UUID) async -> (checklistDone: Int, checklistTotal: Int, noteCount: Int) {
+    /// Returns nil on network/RLS failure so callers can preserve the last
+    /// visible counts instead of flashing them back to zero.
+    func tripHeroShortcutCounts(tripId: UUID) async -> (checklistDone: Int, checklistTotal: Int, noteCount: Int)? {
         guard let real else { return (0, 0, 0) }
         do {
             try? await real.ensureTripChecklistTemplates(tripId: tripId)
@@ -172,7 +174,7 @@ final class DataService {
             let notes = try await real.fetchTripNoteCount(tripId: tripId)
             return (progress.done, progress.total, notes)
         } catch {
-            return (0, 0, 0)
+            return nil
         }
     }
 

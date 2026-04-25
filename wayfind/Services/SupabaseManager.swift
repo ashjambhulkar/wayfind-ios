@@ -225,15 +225,23 @@ final class SupabaseManager {
             updated_at: nowIso
         )
 
+        // NOTE: filter on `id` only. RLS already enforces who can update —
+        // for the owner via `is_trip_owner`, and for accepted editors via
+        // `can_edit_trip`. Filtering on `user_id` here would silently drop
+        // edits made by editor-collaborators, since the trip row's
+        // `user_id` is the owner's id, not the caller's.
         try await client
             .from("trips")
             .update(payload)
             .eq("id", value: trip.id.uuidString)
-            .eq("user_id", value: userId.uuidString)
             .execute()
     }
 
     func deleteTrip(id: UUID) async throws {
+        // Deleting a trip is owner-only; keep the explicit `user_id` filter
+        // so editors can't accidentally trigger a destructive call. RLS on
+        // `trips` would also block this for non-owners, but defense in depth
+        // is cheap here.
         let (client, userId) = try await requireClientAndUserId()
         try await client
             .from("trips")
@@ -267,11 +275,12 @@ final class SupabaseManager {
     /// `trip_bookings` fetch in `tripDetailStore`.
     func fetchTripTimeline(for tripId: UUID) async throws -> (days: [ItineraryDay], placesByDayId: [UUID: [Place]]) {
         let (client, _) = try await requireClientAndUserId()
+        let tripIdString = tripId.uuidString.lowercased()
 
         async let daysTask: [TripDayRow] = client
             .from("trip_days")
             .select()
-            .eq("trip_id", value: tripId.uuidString)
+            .eq("trip_id", value: tripIdString)
             .order("day_number", ascending: true)
             .execute()
             .value
@@ -279,7 +288,7 @@ final class SupabaseManager {
         async let activitiesTask: [TripActivityRow] = client
             .from("trip_activities")
             .select()
-            .eq("trip_id", value: tripId.uuidString)
+            .eq("trip_id", value: tripIdString)
             .order("sort_order", ascending: true)
             .execute()
             .value
@@ -287,7 +296,7 @@ final class SupabaseManager {
         async let bookingsTask: [TripBookingRow] = client
             .from("trip_bookings")
             .select()
-            .eq("trip_id", value: tripId.uuidString)
+            .eq("trip_id", value: tripIdString)
             .order("sort_order", ascending: true)
             .execute()
             .value
@@ -303,30 +312,51 @@ final class SupabaseManager {
         let enrichments = try await Self.fetchCityPlaceEnrichments(client: client, placeIds: placeIds)
 
         let days = dayRows.map { Self.mapDayRow($0, tripId: tripId) }
+            .sorted { $0.dayNumber < $1.dayNumber }
 
         // Seed the map so every day has an entry even when it has no places yet.
         var placesByDayId: [UUID: [Place]] = Dictionary(
             uniqueKeysWithValues: days.map { ($0.id, [Place]()) }
         )
 
+        // Bookings are rendered from `trip_bookings` below. Some backend
+        // flows also create a linked `trip_activities` shadow row with
+        // `booking_id`; rendering both makes the row flip between activity
+        // and booking presentations as realtime refreshes race. Treat
+        // `trip_bookings` as canonical and skip those shadows here.
+        let canonicalBookingIds = Set(bookingRows.map(\.id))
+
         // Activities already carry their day_id directly.
         for row in activityRows {
+            if let bookingId = row.booking_id, canonicalBookingIds.contains(bookingId) {
+                continue
+            }
             let enrichment = row.place_id.flatMap { enrichments[$0] }
             let place = Self.mapActivityRow(row, dayId: row.day_id, enrichment: enrichment)
             placesByDayId[row.day_id, default: []].append(place)
         }
 
         // Bookings have no day_id — match by calendar date of starts_at.
+        // If a sync race ever lands two trip_days rows for the same date,
+        // we keep the first day_id rather than crashing. Bookings will
+        // resolve to that day deterministically.
         let calendar = Calendar.current
         let daysByDateKey: [String: UUID] = Dictionary(
-            uniqueKeysWithValues: days.compactMap { day -> (String, UUID)? in
+            days.compactMap { day -> (String, UUID)? in
                 guard let date = day.date else { return nil }
                 let key = SupabaseModelMapping.calendarDateOnlyString(from: date, calendar: calendar)
                 return (key, day.id)
-            }
+            },
+            uniquingKeysWith: { existing, _ in existing }
         )
+        let fallbackBookingDayId = days.first(where: { !$0.isWishlist })?.id ?? days.first?.id
         for row in bookingRows {
-            guard let dayId = Self.resolveDayId(for: row, daysByDateKey: daysByDateKey, calendar: calendar) else { continue }
+            guard let dayId = Self.resolveDayId(
+                for: row,
+                daysByDateKey: daysByDateKey,
+                fallbackDayId: fallbackBookingDayId,
+                calendar: calendar
+            ) else { continue }
             let place = Self.mapBookingRow(row, dayId: dayId)
             placesByDayId[dayId, default: []].append(place)
         }
@@ -391,12 +421,29 @@ final class SupabaseManager {
                 .in("place_id", values: placeIds)
                 .execute()
                 .value
-            return Dictionary(uniqueKeysWithValues: rows.map { ($0.place_id, $0) })
+            // city_places has no unique index on place_id (the same Google
+            // place can be cached under multiple city profiles, and seeding
+            // bugs can produce intra-city dupes), so we MUST resolve
+            // collisions instead of using `uniqueKeysWithValues:` which
+            // hard-traps in production. We keep the first row encountered;
+            // per-row debug logging is intentionally avoided because this
+            // enrichment runs during timeline refreshes and console spam can
+            // make open SwiftUI menus appear to flicker.
+            return Dictionary(rows.map { ($0.place_id, $0) }, uniquingKeysWith: { existing, _ in
+                return existing
+            })
+        } catch is CancellationError {
+            // Task was cancelled (tab switch, sheet dismissed, view torn down).
+            // Enrichment is non-essential; return no enrichment rather than
+            // surfacing a debug fatal while the timeline itself can still render.
+            return [:]
         } catch {
-            // Enrichment is non-essential — log via assertion in DEBUG, swallow
-            // in RELEASE so the timeline still renders even if city_places
-            // RLS or schema changes break this query.
-            assertionFailure("city_places enrichment failed: \(error)")
+            // Enrichment is non-essential — print in DEBUG so the data-quality
+            // issue stays visible, but never trap. The timeline must still
+            // render if city_places RLS / schema / network breaks this query.
+            #if DEBUG
+            print("[city_places] enrichment failed: \(error)")
+            #endif
             return [:]
         }
     }
@@ -470,11 +517,6 @@ final class SupabaseManager {
     func fetchParsedBookings(for tripId: UUID) async throws -> [ParsedBooking] {
         _ = tripId
         return [ParsedBooking]()
-    }
-
-    func registerDeviceToken(_ token: String, userId: UUID) async throws {
-        _ = token
-        _ = userId
     }
 
     /// Uploads JPEG bytes to Storage (path matches Expo: `{userId}/trip-covers/{tripId}/cover.jpg`).
@@ -950,6 +992,7 @@ final class SupabaseManager {
             userId: row.user_id,
             title: row.name,
             destination: row.destination,
+            destinationPlaceId: row.destination_place_id,
             lat: nil,
             lng: nil,
             startDate: start,
@@ -1135,19 +1178,23 @@ final class SupabaseManager {
     }
 
     /// Finds which day a booking belongs to by matching the calendar-date of
-    /// `starts_at` against the `trip_days.date` strings. Falls back to the
-    /// first day when no match is found.
+    /// `starts_at` (or `ends_at` when start is absent) against `trip_days.date`.
+    /// Falls back to the first scheduled day deterministically; using
+    /// `Dictionary.values.first` here made date-less bookings jump between
+    /// sections on repeated refreshes.
     private static func resolveDayId(
         for booking: TripBookingRow,
         daysByDateKey: [String: UUID],
+        fallbackDayId: UUID?,
         calendar: Calendar
     ) -> UUID? {
-        guard let raw = booking.starts_at,
-              let date = SupabaseModelMapping.parsePostgresTimestamp(raw) else {
-            return daysByDateKey.values.first
+        let rawDate = booking.starts_at ?? booking.ends_at
+        guard let rawDate,
+              let date = SupabaseModelMapping.parsePostgresTimestamp(rawDate) else {
+            return fallbackDayId
         }
         let key = SupabaseModelMapping.calendarDateOnlyString(from: date, calendar: calendar)
-        return daysByDateKey[key] ?? daysByDateKey.values.first
+        return daysByDateKey[key] ?? fallbackDayId
     }
 
     private static func activityCategory(for place: Place) -> String {

@@ -94,7 +94,13 @@ enum SupabaseTripDayCascade {
         }
 
         let scheduled = sortScheduledByDate(existingDays.filter { $0.day_number > 0 })
-        var byDate = Dictionary(uniqueKeysWithValues: scheduled.map { ($0.date, $0) })
+        // Defensive: if a sync race ever produced two scheduled rows for
+        // the same date, keep the first (lowest day_number after sort) so
+        // cascade reconciliation doesn't crash on a duplicate-key fault.
+        var byDate = Dictionary(
+            scheduled.map { ($0.date, $0) },
+            uniquingKeysWith: { existing, _ in existing }
+        )
         let desiredSet = Set(desired)
 
         let activityRows: [ActivityDayCountRow] = try await client

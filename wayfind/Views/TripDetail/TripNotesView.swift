@@ -16,6 +16,7 @@ struct TripNotesView: View {
     let trip: Trip
 
     @Environment(DataService.self) private var dataService
+    @Environment(CollaborationStore.self) private var collaborationStore
     @State private var notes: [TripNote] = []
     @State private var isLoading = true
     @State private var loadError: String?
@@ -33,14 +34,29 @@ struct TripNotesView: View {
                     .multilineTextAlignment(.center)
                     .padding(AppSpacing.xl)
             } else if notes.isEmpty {
-                EmptyStateView(
-                    sfSymbol: "note.text",
-                    title: "No notes yet",
-                    subtitle: "Capture ideas, links, and reminders for this trip.",
-                    buttonTitle: "+ New note",
-                    buttonAction: { Task { await createNoteAndOpen() } }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The empty-state CTA is the same write surface as the
+                // toolbar's "New note" button — both gated together by
+                // `canEditNotes`. Viewers see the empty state messaging
+                // without an action so the surface still explains itself.
+                if collaborationStore.canEditNotes {
+                    EmptyStateView(
+                        sfSymbol: "note.text",
+                        title: "No notes yet",
+                        subtitle: "Capture ideas, links, and reminders for this trip.",
+                        buttonTitle: "+ New note",
+                        buttonAction: { Task { await createNoteAndOpen() } }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    EmptyStateView(
+                        sfSymbol: "note.text",
+                        title: "No notes yet",
+                        subtitle: "When the owner adds notes, they'll show up here.",
+                        buttonTitle: nil,
+                        buttonAction: nil
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 List {
                     ForEach(notes) { note in
@@ -71,13 +87,15 @@ struct TripNotesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task { await createNoteAndOpen() }
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                        .foregroundStyle(AppColors.appPrimary)
+                if collaborationStore.canEditNotes {
+                    Button {
+                        Task { await createNoteAndOpen() }
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                            .foregroundStyle(AppColors.appPrimary)
+                    }
+                    .accessibilityLabel("New note")
                 }
-                .accessibilityLabel("New note")
             }
         }
         .navigationDestination(item: $noteToEdit) { note in

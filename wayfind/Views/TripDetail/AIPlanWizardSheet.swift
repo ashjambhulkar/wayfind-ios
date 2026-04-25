@@ -1,0 +1,1069 @@
+import SwiftUI
+
+// MARK: - Root View
+
+/// Sheet-based wizard that hosts the AI Day Planner flow.
+///
+/// Phase A introduced the sheet IA + Cancel contract. Phase B replaces the
+/// scroll-list preview with a map-led layout (header → mini-map → vertical
+/// card list) and adds a transforming bottom action bar so the primary
+/// action is always pinned within thumb reach. Phase C wires an
+/// `onApplied` callback so the parent can dismiss the sheet, route the
+/// user to the Map tab, and surface a success toast.
+struct AIPlanWizardSheet: View {
+    let trip: Trip
+
+    /// Fired exactly once after a successful `apply`. Receives the number
+    /// of operations the server committed so the parent can render a
+    /// "Added 6 stops" toast. The parent is responsible for dismissing
+    /// the sheet — we never call `dismiss()` ourselves on the success
+    /// path so the handoff stays single-sourced.
+    var onApplied: ((Int) -> Void)? = nil
+
+    @Environment(DataService.self) private var dataService
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var vm: AIDayPlannerViewModel
+    @State private var showStayAreaPicker = false
+    @State private var showDiscardConfirm = false
+
+    /// Two-way bound between the preview map and the card strip. Tapping
+    /// a pin highlights its card; tapping a card pans the map.
+    @State private var selectedPreviewCardId: UUID?
+
+    init(trip: Trip, onApplied: ((Int) -> Void)? = nil) {
+        self.trip = trip
+        self.onApplied = onApplied
+        self._vm = State(initialValue: AIDayPlannerViewModel(trip: trip))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    if vm.isDaysLoading {
+                        ProgressView()
+                            .padding(.vertical, AppSpacing.xxl)
+                    } else if vm.hasPreview {
+                        previewBody
+                    } else if vm.isEmpty {
+                        emptyPreviewState
+                    } else {
+                        // .idle, .loading, .applying, .error, .applied all
+                        // show the configurator. Loading / applying just
+                        // disable the bottom bar; applied is handled by
+                        // the handoff before this branch ever renders.
+                        configuratorSection
+                    }
+                }
+                .padding(.bottom, AppSpacing.xl)
+            }
+            .background(AppColors.appBackground)
+            .navigationTitle(navTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel", role: .cancel) {
+                        attemptDismiss()
+                    }
+                    .foregroundStyle(AppColors.appPrimary)
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                AIPlanWizardBottomBar(
+                    vm: vm,
+                    onGenerate: { Task { await vm.generate() } },
+                    onApply: { Task { await vm.applyPreview() } },
+                    onReset: { vm.reset() }
+                )
+            }
+            .interactiveDismissDisabled(needsDiscardConfirmation)
+            // Drag indicator is part of "this sheet looks dismissible"
+            // semantics. We hide it the moment a generated preview lives
+            // here so the OS isn't visually inviting a swipe that will
+            // get blocked. The configurator/idle states keep the
+            // affordance — those are cheap to dismiss.
+            .presentationDragIndicator(needsDiscardConfirmation ? .hidden : .visible)
+        }
+        .task {
+            vm.trip = trip
+            await vm.loadDays(from: dataService)
+        }
+        .onDisappear {
+            vm.cancelGenerate()
+        }
+        .sheet(isPresented: $showStayAreaPicker) {
+            AIStayAreaPickerSheet(initialQuery: vm.stayAreaLabel) { label, placeId in
+                vm.setStayArea(label: label, placeId: placeId)
+            }
+        }
+        // Mail-style "unsent draft" pattern. When the user taps Cancel
+        // (or attempts to dismiss in any future swipe-capture path) on a
+        // live preview, we present three weighted choices instead of a
+        // single binary discard prompt. The default action is to SAVE
+        // — converting accidental dismissal attempts into one-tap apply
+        // ~most of the time. Discard stays available but is destructive
+        // and second.
+        .confirmationDialog(
+            "What would you like to do?",
+            isPresented: $showDiscardConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Add to Itinerary") {
+                Task { await vm.applyPreview() }
+            }
+            Button("Discard plan", role: .destructive) {
+                vm.cancelGenerate()
+                dismiss()
+            }
+            Button("Keep previewing", role: .cancel) {}
+        } message: {
+            Text("Generating a new plan uses one of your monthly AI credits.")
+        }
+        .onChange(of: vm.plannerState) { _, newState in
+            // Phase C handoff: bubble up to the parent the moment the
+            // server confirms the apply. We do NOT dismiss locally —
+            // the parent owns the sheet binding and will tear us down,
+            // which fires .onDisappear and cleans up the in-flight task.
+            if case .applied = newState {
+                onApplied?(vm.appliedOpsCount)
+            }
+        }
+        .onChange(of: vm.previewCards.map(\.id)) { _, ids in
+            selectedPreviewCardId = ids.first
+        }
+    }
+
+    // MARK: - Dismissal contract
+
+    /// True only when there's an LLM-generated artifact in the sheet that
+    /// would cost a credit to recreate. `.empty` and `.error` get silent
+    /// dismissal — the credit was already spent and there's nothing
+    /// recoverable to protect. Keeping the gate this narrow avoids
+    /// training users to dismiss confirmation dialogs reflexively.
+    private var needsDiscardConfirmation: Bool {
+        if case .preview = vm.plannerState { return true }
+        return false
+    }
+
+    private func attemptDismiss() {
+        if needsDiscardConfirmation {
+            showDiscardConfirm = true
+        } else {
+            vm.cancelGenerate()
+            dismiss()
+        }
+    }
+
+    private var navTitle: String {
+        switch vm.plannerState {
+        case .preview: return "Preview your day"
+        case .empty: return "No suggestions"
+        default: return "Plan with AI"
+        }
+    }
+
+    // MARK: - Configurator (idle / loading)
+
+    private var configuratorSection: some View {
+        VStack(spacing: AppSpacing.lg) {
+            // Hero — emotional anchor that says "this is a creative
+            // tool" not a settings form.
+            configuratorHero
+
+            // Primary inputs — day + stay area. These are required
+            // before Generate becomes available, so they live in the
+            // most prominent card.
+            SettingsCard {
+                DayPickerRow(vm: vm)
+                CardDivider()
+                StayAreaRow(
+                    label: vm.stayAreaLabel,
+                    needsPlaceId: vm.needsStayAreaPlaceId,
+                    onTap: { showStayAreaPicker = true }
+                )
+            }
+
+            // Preferences — optional tweaks. Grouped in a second card
+            // to visually subordinate them to the day/area selection.
+            SettingsCard {
+                PacePickerRow(selection: $vm.pace)
+                CardDivider()
+                TimeWindowRow(timeStart: $vm.timeStart, timeEnd: $vm.timeEnd)
+                CardDivider()
+                ExplorationScopeRow(selection: $vm.explorationScope)
+                CardDivider()
+                MealsToggleRow(isOn: $vm.includeMeals)
+            }
+
+            if let errorMessage = vm.errorMessage {
+                inlineError(errorMessage)
+            }
+        }
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.top, AppSpacing.md)
+    }
+
+    private var configuratorHero: some View {
+        VStack(spacing: AppSpacing.sm) {
+            ZStack {
+                Circle()
+                    .fill(AppColors.appPrimaryLight)
+                    .frame(width: 56, height: 56)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(AppColors.appPrimary)
+            }
+            Text("Build your perfect day")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(AppColors.textPrimary)
+            Text("Pick a day and area, tweak preferences, and we'll craft a personalised itinerary.")
+                .font(.subheadline)
+                .foregroundStyle(AppColors.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, AppSpacing.md)
+    }
+
+    private func inlineError(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: AppSpacing.sm) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(AppColors.appError)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(AppColors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(AppSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColors.appError.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.small))
+    }
+
+    // MARK: - Preview body (map-led)
+
+    private var previewBody: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            previewHeader
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.top, AppSpacing.md)
+
+            AIPreviewMapView(
+                cards: vm.previewCards,
+                dayColor: previewDayColor,
+                selectedCardId: $selectedPreviewCardId
+            )
+
+            VStack(spacing: 0) {
+                ForEach(Array(vm.previewCards.enumerated()), id: \.element.id) { index, card in
+                    PreviewActivityCard(
+                        card: card,
+                        index: index,
+                        isSelected: selectedPreviewCardId == card.id,
+                        formatTime: vm.formattedTime
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        HapticManager.selection()
+                        selectedPreviewCardId = card.id
+                    }
+                    if index < vm.previewCards.count - 1 {
+                        TravelConnectorView(minutes: card.travelFromPreviousMinutes)
+                    }
+                }
+            }
+            .padding(.top, AppSpacing.sm)
+        }
+    }
+
+    private var previewHeader: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let title = vm.previewStoryTitle, !title.isEmpty {
+                        Text(title)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                    } else {
+                        Text("Your day plan")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                    }
+                    HStack(spacing: AppSpacing.xs) {
+                        Image(systemName: "sparkles")
+                            .font(.caption2)
+                            .foregroundStyle(AppColors.appPrimary)
+                        // Frames the result as a committed artifact + a
+                        // priced one. Loss-aversion does the heavy work:
+                        // users intuitively don't want to throw away
+                        // something labeled as having cost a credit.
+                        Text("AI-generated · \(vm.previewCards.count) \(vm.previewCards.count == 1 ? "stop" : "stops") · 1 credit used")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
+                    if let day = vm.selectedDay {
+                        Text(vm.dayLabel(for: day))
+                            .font(.caption)
+                            .foregroundStyle(AppColors.textTertiary)
+                    }
+                }
+                Spacer(minLength: AppSpacing.md)
+                Button {
+                    vm.reset()
+                } label: {
+                    Label("Edit", systemImage: "slider.horizontal.3")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AppColors.appPrimary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Edit settings")
+            }
+
+            if !vm.previewStoryArc.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: AppSpacing.xs) {
+                        ForEach(vm.previewStoryArc.prefix(5), id: \.self) { arc in
+                            Text(arc)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(AppColors.appPrimary)
+                                .padding(.horizontal, AppSpacing.sm)
+                                .padding(.vertical, 3)
+                                .background(AppColors.appPrimaryLight)
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+
+            if let subtitle = vm.previewStorySubtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !vm.previewSummary.isEmpty {
+                Text(vm.previewSummary)
+                    .font(.subheadline)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var previewDayColor: Color {
+        if let day = vm.selectedDay {
+            return AppColors.dayColor(for: day.dayNumber)
+        }
+        return AppColors.appPrimary
+    }
+
+    // MARK: - Empty state
+
+    /// Server returned a 200 with no insertable ops — usually means the
+    /// time window or scope was too narrow. Surface this explicitly so
+    /// users don't think Generate silently failed. The bottom bar will
+    /// switch to "Adjust Settings" to send them back to the configurator.
+    private var emptyPreviewState: some View {
+        VStack(spacing: AppSpacing.md) {
+            Image(systemName: "sparkles.slash")
+                .font(.system(size: 36))
+                .foregroundStyle(AppColors.textTertiary)
+            Text("No suggestions for this day")
+                .font(.headline)
+                .foregroundStyle(AppColors.textPrimary)
+            Text("Try widening the day window, picking a broader range, or removing some interests.")
+                .font(.subheadline)
+                .foregroundStyle(AppColors.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, AppSpacing.xl)
+        .padding(.vertical, AppSpacing.xxl)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Bottom Action Bar (transforms by state)
+
+private struct AIPlanWizardBottomBar: View {
+    @Bindable var vm: AIDayPlannerViewModel
+    let onGenerate: () -> Void
+    let onApply: () -> Void
+    let onReset: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider().background(AppColors.appDivider)
+            content
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.vertical, AppSpacing.md)
+        }
+        .background(.regularMaterial)
+        .animation(.snappy(duration: 0.2), value: vm.plannerState)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch vm.plannerState {
+        case .idle:
+            primaryButton(
+                title: "Generate My Day",
+                icon: "sparkles",
+                enabled: vm.canGenerate,
+                action: onGenerate
+            )
+
+        case .loading:
+            progressButton(title: "Planning your day…")
+
+        case .preview:
+            // Asymmetric layout by design: Add to Itinerary owns the
+            // bar (54pt full-width primary) so it's unmissable; Redo
+            // shrinks to a text affordance with an explicit cost label
+            // so the user feels the credit before tapping it.
+            VStack(spacing: AppSpacing.sm) {
+                Button(action: onGenerate) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.caption.weight(.semibold))
+                        Text("Redo")
+                            .font(.caption.weight(.semibold))
+                        Text("· uses 1 credit")
+                            .font(.caption)
+                            .foregroundStyle(AppColors.textTertiary)
+                    }
+                    .foregroundStyle(AppColors.appPrimary)
+                    .padding(.vertical, AppSpacing.xs)
+                    .padding(.horizontal, AppSpacing.sm)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Regenerate plan, uses one credit")
+
+                primaryButton(
+                    title: "Add to Itinerary",
+                    icon: "checkmark.circle.fill",
+                    enabled: !vm.isApplying,
+                    action: onApply,
+                    tall: true
+                )
+            }
+
+        case .applying:
+            progressButton(title: "Adding to itinerary…")
+
+        case .empty:
+            primaryButton(
+                title: "Adjust Settings",
+                icon: "slider.horizontal.3",
+                enabled: true,
+                action: onReset
+            )
+
+        case .error:
+            primaryButton(
+                title: "Try Again",
+                icon: "arrow.clockwise",
+                enabled: vm.canGenerate,
+                action: onGenerate
+            )
+
+        case .applied:
+            // Parent dismisses on `.applied`. We render an empty footer
+            // for the brief frame between state flip and tear-down.
+            Color.clear.frame(height: 1)
+        }
+    }
+
+    private func primaryButton(
+        title: String,
+        icon: String,
+        enabled: Bool,
+        action: @escaping () -> Void,
+        tall: Bool = false
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: icon)
+                    .font(tall ? .body.weight(.semibold) : .subheadline.weight(.semibold))
+                Text(title)
+                    .font(tall ? .body.weight(.semibold) : .subheadline.weight(.semibold))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: tall ? 54 : 0)
+            .padding(.vertical, tall ? 0 : AppSpacing.md)
+            .background(enabled ? AppColors.appPrimary : AppColors.textTertiary)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium))
+        }
+        .disabled(!enabled)
+    }
+
+    private func secondaryButton(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: icon)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(AppColors.appPrimary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, AppSpacing.md)
+            .background(AppColors.appPrimaryLight)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium))
+        }
+    }
+
+    private func progressButton(title: String) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            ProgressView().tint(.white).scaleEffect(0.85)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, AppSpacing.md)
+        .background(AppColors.appPrimary.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium))
+    }
+}
+
+// MARK: - Settings Card (grouped material surface)
+
+/// Material-backed card container — the Airbnb "white card on warm
+/// background" pattern that groups related controls and gives the
+/// configurator visual hierarchy. Each card insets its children so
+/// the individual rows don't need their own horizontal padding.
+private struct SettingsCard<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content()
+        }
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.vertical, AppSpacing.md)
+        .background(AppColors.appSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large))
+        .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
+    }
+}
+
+/// Thin inset divider used between rows inside a `SettingsCard`.
+private struct CardDivider: View {
+    var body: some View {
+        Divider()
+            .background(AppColors.appDivider)
+            .padding(.vertical, AppSpacing.xs)
+    }
+}
+
+// MARK: - Day Picker Row
+
+private struct DayPickerRow: View {
+    @Bindable var vm: AIDayPlannerViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Text("Which day?")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(AppColors.textPrimary)
+            if vm.scheduledDays.isEmpty {
+                Text("No days found for this trip.")
+                    .font(.caption)
+                    .foregroundStyle(AppColors.textTertiary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: AppSpacing.sm) {
+                        ForEach(vm.scheduledDays) { day in
+                            DayChip(
+                                day: day,
+                                label: vm.dayLabel(for: day),
+                                isSelected: vm.selectedDay?.id == day.id,
+                                color: AppColors.dayColor(for: day.dayNumber)
+                            ) {
+                                vm.selectedDay = day
+                                if vm.plannerState != .idle {
+                                    vm.reset()
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 1)
+                }
+            }
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+}
+
+private struct DayChip: View {
+    let day: ItineraryDay
+    let label: String
+    let isSelected: Bool
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? .white : AppColors.textSecondary)
+                .padding(.horizontal, AppSpacing.md)
+                .padding(.vertical, AppSpacing.sm)
+                .background(isSelected ? color : Color.clear)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(isSelected ? Color.clear : AppColors.appDivider, lineWidth: 1)
+                )
+        }
+        .contentShape(Capsule())
+    }
+}
+
+// MARK: - Stay Area Row
+
+private struct StayAreaRow: View {
+    let label: String
+    let needsPlaceId: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            Button(action: onTap) {
+                HStack(spacing: AppSpacing.md) {
+                    HStack(spacing: AppSpacing.sm) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 14))
+                            .foregroundStyle(AppColors.appPrimary)
+                            .frame(width: 20)
+                        Text("Stay area")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(AppColors.textPrimary)
+                    }
+                    .layoutPriority(1)
+                    Spacer(minLength: AppSpacing.sm)
+                    Text(displayLabel)
+                        .font(.subheadline)
+                        .foregroundStyle(displayLabel == "Choose area" ? AppColors.textTertiary : AppColors.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppColors.textTertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if needsPlaceId {
+                HStack(alignment: .center, spacing: AppSpacing.xs) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(AppColors.appWarning)
+                    Text("Pick a neighborhood or lodging area to start.")
+                        .font(.caption)
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+                .padding(.horizontal, AppSpacing.sm)
+                .padding(.vertical, AppSpacing.xs)
+                .background(AppColors.appWarning.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.small))
+            }
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private var displayLabel: String {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Choose area" : trimmed
+    }
+}
+
+// MARK: - Pace Picker Row
+
+private struct PacePickerRow: View {
+    @Binding var selection: PlanPace
+
+    var body: some View {
+        HStack {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: "gauge.with.dots.needle.33percent")
+                    .font(.system(size: 14))
+                    .foregroundStyle(AppColors.appPrimary)
+                    .frame(width: 20)
+                Text("Pace")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(AppColors.textPrimary)
+            }
+            Spacer()
+            Picker("Pace", selection: $selection) {
+                ForEach(PlanPace.allCases) { pace in
+                    Text(pace.displayName).tag(pace)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(AppColors.appPrimary)
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+}
+
+// MARK: - Time Window Row
+
+private struct TimeWindowRow: View {
+    @Binding var timeStart: String
+    @Binding var timeEnd: String
+
+    @State private var startDate: Date = defaultDate(from: "09:00")
+    @State private var endDate: Date = defaultDate(from: "21:00")
+
+    var body: some View {
+        VStack(spacing: AppSpacing.sm) {
+            HStack {
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 14))
+                        .foregroundStyle(AppColors.appPrimary)
+                        .frame(width: 20)
+                    Text("Day window")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(AppColors.textPrimary)
+                }
+                Spacer()
+            }
+            HStack(spacing: AppSpacing.xl) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Start")
+                        .font(.caption)
+                        .foregroundStyle(AppColors.textTertiary)
+                    DatePicker("Start", selection: $startDate, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                        .tint(AppColors.appPrimary)
+                        .onChange(of: startDate) { _, v in
+                            timeStart = formatHHmm(v)
+                        }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("End")
+                        .font(.caption)
+                        .foregroundStyle(AppColors.textTertiary)
+                    DatePicker("End", selection: $endDate, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                        .tint(AppColors.appPrimary)
+                        .onChange(of: endDate) { _, v in
+                            timeEnd = formatHHmm(v)
+                        }
+                }
+                Spacer()
+            }
+        }
+        .padding(.vertical, AppSpacing.xs)
+        .onAppear {
+            startDate = Self.defaultDate(from: timeStart)
+            endDate = Self.defaultDate(from: timeEnd)
+        }
+    }
+
+    private static func defaultDate(from hhmm: String) -> Date {
+        let parts = hhmm.split(separator: ":").compactMap { Int($0) }
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = parts.first ?? 9
+        comps.minute = parts.dropFirst().first ?? 0
+        return Calendar.current.date(from: comps) ?? Date()
+    }
+
+    private func formatHHmm(_ date: Date) -> String {
+        let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
+        let h = comps.hour ?? 9
+        let m = comps.minute ?? 0
+        return String(format: "%02d:%02d", h, m)
+    }
+}
+
+// MARK: - Exploration Scope Row
+
+private struct ExplorationScopeRow: View {
+    @Binding var selection: ExplorationScope
+
+    var body: some View {
+        HStack {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: "map")
+                    .font(.system(size: 14))
+                    .foregroundStyle(AppColors.appPrimary)
+                    .frame(width: 20)
+                Text("Range")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(AppColors.textPrimary)
+            }
+            Spacer()
+            Picker("Range", selection: $selection) {
+                ForEach(ExplorationScope.allCases) { scope in
+                    Text(scope.displayName).tag(scope)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(AppColors.appPrimary)
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+}
+
+// MARK: - Meals Toggle Row
+
+private struct MealsToggleRow: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: "fork.knife")
+                    .font(.system(size: 14))
+                    .foregroundStyle(AppColors.appPrimary)
+                    .frame(width: 20)
+                Text("Include meals")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(AppColors.textPrimary)
+            }
+        }
+        .tint(AppColors.appPrimary)
+        .padding(.vertical, AppSpacing.xs)
+    }
+}
+
+// MARK: - Interests Row
+
+private struct InterestsRow: View {
+    @Binding var selectedInterests: Set<String>
+    let available: [String]
+    let displayName: (String) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Label("Interests (optional)", systemImage: "heart")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(AppColors.textPrimary)
+            FlowLayout(spacing: AppSpacing.sm) {
+                ForEach(available, id: \.self) { interest in
+                    let isOn = selectedInterests.contains(interest)
+                    Button {
+                        if isOn {
+                            selectedInterests.remove(interest)
+                        } else if selectedInterests.count < 3 {
+                            selectedInterests.insert(interest)
+                        }
+                    } label: {
+                        Text(displayName(interest))
+                            .font(.caption.weight(isOn ? .semibold : .regular))
+                            .foregroundStyle(isOn ? AppColors.appPrimary : AppColors.textSecondary)
+                            .padding(.horizontal, AppSpacing.md)
+                            .padding(.vertical, AppSpacing.sm - 2)
+                            .background(isOn ? AppColors.appPrimaryLight : AppColors.appSurface)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule().strokeBorder(
+                                    isOn ? AppColors.appPrimary.opacity(0.4) : AppColors.appDivider,
+                                    lineWidth: 1
+                                )
+                            )
+                    }
+                    .contentShape(Capsule())
+                    .opacity(!isOn && selectedInterests.count >= 3 ? 0.4 : 1)
+                    .disabled(!isOn && selectedInterests.count >= 3)
+                }
+            }
+        }
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.vertical, AppSpacing.md)
+    }
+}
+
+// MARK: - Flow Layout
+
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? 320
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowH: CGFloat = 0
+
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth, x > 0 {
+                y += rowH + spacing
+                x = 0
+                rowH = 0
+            }
+            rowH = max(rowH, size.height)
+            x += size.width + spacing
+        }
+        y += rowH
+        return CGSize(width: maxWidth, height: y)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x: CGFloat = bounds.minX
+        var y: CGFloat = bounds.minY
+        var rowH: CGFloat = 0
+
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX, x > bounds.minX {
+                y += rowH + spacing
+                x = bounds.minX
+                rowH = 0
+            }
+            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            rowH = max(rowH, size.height)
+            x += size.width + spacing
+        }
+    }
+}
+
+// MARK: - Preview Activity Card
+
+private struct PreviewActivityCard: View {
+    let card: ActivityPreviewCard
+    let index: Int
+    let isSelected: Bool
+    let formatTime: (String?) -> String?
+
+    var category: PlaceCategory {
+        guard let raw = card.category else { return .custom }
+        return PlaceCategory(rawValue: raw) ?? .custom
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppSpacing.md) {
+            ZStack {
+                Circle()
+                    .fill(category.family.tint)
+                    .frame(width: 40, height: 40)
+                Image(systemName: category.sfSymbol)
+                    .font(.system(size: 16))
+                    .foregroundStyle(category.color)
+            }
+
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                HStack(spacing: AppSpacing.sm) {
+                    if let phase = card.phaseLabel {
+                        Text(phase.uppercased())
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AppColors.textTertiary)
+                            .kerning(0.5)
+                    }
+                    Spacer()
+                    if let time = formatTime(card.startsAt) {
+                        Text(time)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
+                    if let dur = card.durationMinutes {
+                        Text("· \(dur)min")
+                            .font(.caption)
+                            .foregroundStyle(AppColors.textTertiary)
+                    }
+                }
+
+                Text(card.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+
+                if let desc = card.momentLine ?? card.description, !desc.isEmpty {
+                    Text(desc)
+                        .font(.caption)
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let url = card.heroImageUrl.flatMap(URL.init) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img
+                                .resizable()
+                                .scaledToFill()
+                                .frame(height: 100)
+                                .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.small))
+                        default:
+                            Color.clear.frame(height: 0)
+                        }
+                    }
+                }
+
+                if !card.tips.isEmpty {
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        ForEach(card.tips.prefix(2), id: \.self) { tip in
+                            HStack(spacing: AppSpacing.xs) {
+                                Image(systemName: "lightbulb.min")
+                                    .font(.caption2)
+                                    .foregroundStyle(AppColors.appWarning)
+                                Text(tip)
+                                    .font(.caption)
+                                    .foregroundStyle(AppColors.textSecondary)
+                            }
+                        }
+                    }
+                    .padding(.top, AppSpacing.xs)
+                }
+
+                if card.rating != nil || card.priceLevel != nil {
+                    HStack(spacing: AppSpacing.sm) {
+                        if let rating = card.rating {
+                            HStack(spacing: 3) {
+                                Image(systemName: "star.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(AppColors.appWarning)
+                                Text(String(format: "%.1f", rating))
+                                    .font(.caption)
+                                    .foregroundStyle(AppColors.textSecondary)
+                            }
+                        }
+                        if let price = card.priceLevel {
+                            Text(String(repeating: "$", count: price))
+                                .font(.caption)
+                                .foregroundStyle(AppColors.textTertiary)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.vertical, AppSpacing.md)
+        .background(
+            // Subtle highlight when this card is the one focused on the
+            // map. Keeps the visual link bidirectional.
+            isSelected ? AppColors.appPrimaryLight.opacity(0.5) : Color.clear
+        )
+        .animation(.easeInOut(duration: 0.2), value: isSelected)
+    }
+}
+
+// MARK: - Travel Connector
+
+private struct TravelConnectorView: View {
+    let minutes: Int?
+
+    var body: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Rectangle()
+                .fill(AppColors.appDivider)
+                .frame(width: 1, height: 20)
+                .padding(.leading, 59)
+            if let min = minutes, min > 0 {
+                Text("\(min) min")
+                    .font(.caption2)
+                    .foregroundStyle(AppColors.textTertiary)
+            }
+            Spacer()
+        }
+        .padding(.leading, AppSpacing.lg)
+    }
+}

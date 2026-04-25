@@ -26,6 +26,9 @@ final class TripDetailViewModel {
 
     private var placesByDayId: [UUID: [Place]] = [:]
     private var collapsedDayIds: Set<UUID> = []
+    private var timelineLoadGeneration = 0
+    private var shortcutCountsLoadGeneration = 0
+    private var hasLoadedShortcutCounts = false
 
     init(trip: Trip, dataService: DataService) {
         self.trip = trip
@@ -66,32 +69,80 @@ final class TripDetailViewModel {
     }
 
     func loadTripData() async {
-        isLoading = true
-        defer { isLoading = false }
+        timelineLoadGeneration += 1
+        let generation = timelineLoadGeneration
+        let shouldShowLoading = scheduledDays.isEmpty && wishlistPlaces.isEmpty
+        if shouldShowLoading {
+            isLoading = true
+        }
+        defer {
+            if shouldShowLoading, generation == timelineLoadGeneration {
+                isLoading = false
+            }
+        }
 
         // Parallel fetch: trip_days + all trip_activities + all trip_bookings
         // in three concurrent queries, merged by day. Mirrors the web app's
         // fetchTripTimelineEnriched + tripDetailStore booking fetch pattern.
         let (days, fetched) = await dataService.fetchTripTimeline(for: trip.id)
+        guard generation == timelineLoadGeneration else { return }
         let sorted = days.sorted { $0.dayNumber < $1.dayNumber }
-        scheduledDays = sorted.filter { !$0.isWishlist }
-        wishlistDayId = sorted.first(where: { $0.isWishlist })?.id
-        placesByDayId = fetched
 
-        if let wishlistDay = sorted.first(where: { $0.isWishlist }) {
-            wishlistPlaces = fetched[wishlistDay.id] ?? []
-        } else {
-            wishlistPlaces = []
+        // `DataService` intentionally soft-fails network errors to empty
+        // collections. During background realtime refreshes, preserving the
+        // last known timeline is less disruptive than briefly blanking the
+        // screen and invalidating any open Menu.
+        if sorted.isEmpty && (!scheduledDays.isEmpty || !wishlistPlaces.isEmpty) {
+            return
         }
 
-        await refreshHeroShortcutCounts()
+        let nextScheduledDays = sorted.filter { !$0.isWishlist }
+        let nextWishlistDayId = sorted.first(where: { $0.isWishlist })?.id
+        let nextWishlistPlaces: [Place]
+        if let wishlistDay = sorted.first(where: { $0.isWishlist }) {
+            nextWishlistPlaces = fetched[wishlistDay.id] ?? []
+        } else {
+            nextWishlistPlaces = []
+        }
+
+        if scheduledDays != nextScheduledDays {
+            scheduledDays = nextScheduledDays
+        }
+        if wishlistDayId != nextWishlistDayId {
+            wishlistDayId = nextWishlistDayId
+        }
+        if placesByDayId != fetched {
+            placesByDayId = fetched
+        }
+        if wishlistPlaces != nextWishlistPlaces {
+            wishlistPlaces = nextWishlistPlaces
+        }
+
+        // Shortcut counts are independent from the activity/booking timeline.
+        // Load them for the initial render, then refresh explicitly when the
+        // Notes/Checklists screens close. This keeps realtime timeline events
+        // from visually churning the pill row.
+        if !hasLoadedShortcutCounts {
+            await refreshHeroShortcutCounts()
+        }
     }
 
     func refreshHeroShortcutCounts() async {
-        let counts = await dataService.tripHeroShortcutCounts(tripId: trip.id)
-        checklistDoneCount = counts.checklistDone
-        checklistTotalCount = counts.checklistTotal
-        noteCount = counts.noteCount
+        shortcutCountsLoadGeneration += 1
+        let generation = shortcutCountsLoadGeneration
+        guard let counts = await dataService.tripHeroShortcutCounts(tripId: trip.id) else { return }
+        guard generation == shortcutCountsLoadGeneration else { return }
+
+        if checklistDoneCount != counts.checklistDone {
+            checklistDoneCount = counts.checklistDone
+        }
+        if checklistTotalCount != counts.checklistTotal {
+            checklistTotalCount = counts.checklistTotal
+        }
+        if noteCount != counts.noteCount {
+            noteCount = counts.noteCount
+        }
+        hasLoadedShortcutCounts = true
     }
 
     func expandAll() {

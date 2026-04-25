@@ -29,6 +29,21 @@ final class AuthViewModel {
 
     private var currentNonce: String?
 
+    /// Phase 5 — invoked just before the auth session is dropped on
+    /// `signOut()`. The host (`WayfindApp`) installs a closure here that
+    /// drops the FCM token row, tears down the realtime channel, clears
+    /// the collaboration store, and resets in-memory deep-link state in
+    /// the order specified by the implementation plan:
+    ///   1. clearTokenForCurrentDevice (server-side row deletion needs
+    ///      the auth session to still be alive for RLS)
+    ///   2. realtimeService.unbind
+    ///   3. collaborationStore.clear
+    ///   4. then auth signOut (this method)
+    ///   5. host navigates back to the sign-in surface
+    /// `PendingInviteStorage` is intentionally NOT cleared so a pending
+    /// invite token survives a sign-out → fresh sign-in cycle.
+    var preSignOutCleanup: (() async -> Void)?
+
     init() {
         AuthSessionService.shared.configure()
         if AppConfig.useRealBackend {
@@ -174,6 +189,15 @@ final class AuthViewModel {
 
     func signOut() async {
         errorMessage = nil
+        // Run the host-installed cleanup BEFORE we tear down the auth
+        // session — `clearTokenForCurrentDevice` needs RLS to still
+        // pass for the row delete, and the realtime channel close needs
+        // a live websocket. Failure of any individual step is caught
+        // and ignored inside the closure (push token cleanup is a
+        // best-effort concern, not blocking).
+        if let preSignOutCleanup {
+            await preSignOutCleanup()
+        }
         if AppConfig.useRealBackend {
             do {
                 try await AuthSessionService.shared.signOut()
