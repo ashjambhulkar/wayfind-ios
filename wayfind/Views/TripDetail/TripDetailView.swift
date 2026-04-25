@@ -33,6 +33,16 @@ struct TripDetailView: View {
     @State private var placeToMove: Place?
     @State private var selectedPlace: Place?
     @State private var selectedPlacePrevious: Place?
+    /// Wave 1.2 — when non-nil, presents `BookingAttachmentsSheet` for
+    /// the booking row encoded in this `Place`.
+    @State private var bookingForAttachments: Place?
+    /// Wave 2.1 — calendar sync onboarding + status.
+    @State private var showCalendarOnboarding: Bool = false
+    @State private var calendarSyncService: CalendarSyncService = CalendarSyncService()
+    @State private var calendarSyncInFlight: Bool = false
+    /// Wave 3.3 — live-updating flight status cache for this trip's
+    /// flight bookings. Bound on `.task`; unbound on `.onDisappear`.
+    @State private var flightTracking: FlightTrackingService = FlightTrackingService()
 
     @Environment(\.dismiss) private var dismiss
     @State private var isNavigationOverLightContent = false
@@ -44,6 +54,14 @@ struct TripDetailView: View {
     /// realtime service needs a direct viewmodel reference because the
     /// kick handler refetches `loadTripData()` on a meaningful change.
     var onViewModelCreated: ((TripDetailViewModel) -> Void)? = nil
+    /// Optional handle from the parent tab view used by the Budget pill in
+    /// the pills row to switch to the dedicated Budget tab. When `nil` the
+    /// pill is hidden — keeps this view standalone-renderable in previews.
+    var onOpenBudgetTab: (() -> Void)? = nil
+    /// Owned by `AppRootTabView` so the Budget tab and the pill on the home
+    /// tab read from the same snapshot. The pill shows the current trip
+    /// total when present; on a fresh trip we just show "Add Expense".
+    var budgetViewModel: BudgetViewModel? = nil
 
     private var tripBookingCount: Int {
         viewModel?.totalBookingsCount ?? 0
@@ -80,12 +98,13 @@ struct TripDetailView: View {
                 NavigationStack {
                     AddBookingView(
                         editingPlace: place,
-                        onSave: { updatedPlace in
+                        onSave: { updatedPlace, cost in
                             Task {
                                 await dataService.updatePlace(updatedPlace)
                                 await viewModel?.loadTripData()
+                                await trackBookingExpenseIfNeeded(place: updatedPlace, cost: cost)
                             }
-                            toastManager.show(ToastData(message: "Updated", type: .success))
+                            toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: true))
                         },
                         targetDayId: place.itineraryDayId
                     )
@@ -133,6 +152,7 @@ struct TripDetailView: View {
             PlaceDetailSheet(
                 place: place,
                 previousPlace: selectedPlacePrevious,
+                tripId: viewModel?.trip.id ?? trip.id,
                 onEdit: { placeToEdit = place; selectedPlace = nil },
                 onMove: { placeToMove = place; selectedPlace = nil },
                 onDelete: {
@@ -141,6 +161,13 @@ struct TripDetailView: View {
                     }
                     selectedPlace = nil
                 }
+            )
+        }
+        .sheet(item: $bookingForAttachments) { place in
+            BookingAttachmentsSheet(
+                bookingId: place.id,
+                tripId: viewModel?.trip.id ?? trip.id,
+                bookingTitle: place.name
             )
         }
         .navigationDestination(isPresented: $showTripNotes) {
@@ -191,7 +218,13 @@ struct TripDetailView: View {
         .navigationDestination(isPresented: $showAddBooking) {
             if let vm = viewModel, let targetDayId = vm.scheduledDays.first(where: { $0.dayNumber == addPlaceTargetDay })?.id {
                 AddBookingView(
-                    onSave: { _ in Task { await vm.loadTripData() } },
+                    onSave: { savedPlace, cost in
+                        Task {
+                            await vm.loadTripData()
+                            await trackBookingExpenseIfNeeded(place: savedPlace, cost: cost)
+                        }
+                        toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: false))
+                    },
                     targetDayId: targetDayId
                 )
                             }
@@ -239,6 +272,12 @@ struct TripDetailView: View {
             }
             await viewModel?.loadTripData()
             bannerDismissed = discoveryManager.isBannerDismissed(for: trip.id)
+            await flightTracking.bind(tripId: trip.id)
+        }
+        .onDisappear {
+            // Drop the realtime channel so a backgrounded session
+            // doesn't keep eating realtime quota.
+            Task { await flightTracking.unbind() }
         }
         // The +ai tab posts this notification after applying an AI Day Planner
         // result. `TabView` keeps this view alive between switches, so `.task`
@@ -316,6 +355,29 @@ struct TripDetailView: View {
                     } label: {
                         Label("Recent activity", systemImage: "clock.arrow.circlepath")
                     }
+                    Divider()
+                    if CalendarSyncService.isEnabled(tripId: (viewModel?.trip.id ?? trip.id)) {
+                        Button {
+                            HapticManager.light()
+                            Task { await runCalendarSync() }
+                        } label: {
+                            Label("Resync to Calendar", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .disabled(calendarSyncInFlight)
+                        Button(role: .destructive) {
+                            HapticManager.light()
+                            Task { await stopCalendarSync() }
+                        } label: {
+                            Label("Stop syncing to Calendar", systemImage: "calendar.badge.minus")
+                        }
+                    } else {
+                        Button {
+                            HapticManager.light()
+                            showCalendarOnboarding = true
+                        } label: {
+                            Label("Sync to Apple Calendar", systemImage: "calendar.badge.plus")
+                        }
+                    }
                     if collaborationStore.canManage {
                         Divider()
                         Button(role: .destructive) {
@@ -338,6 +400,54 @@ struct TripDetailView: View {
         .sheet(isPresented: $showRecentActivitySheet) {
             RecentActivitySheet(trip: viewModel?.trip ?? trip)
         }
+        .sheet(isPresented: $showCalendarOnboarding) {
+            CalendarSyncOnboardingView(trip: viewModel?.trip ?? trip) {
+                Task { await runCalendarSync() }
+            }
+        }
+    }
+
+    // MARK: - Calendar sync helpers (Wave 2.1)
+
+    private func runCalendarSync() async {
+        guard let viewModel else { return }
+        calendarSyncInFlight = true
+        defer { calendarSyncInFlight = false }
+        let trip = viewModel.trip
+        let days = viewModel.scheduledDays
+        var placesByDayId: [UUID: [Place]] = [:]
+        var bookings: [Place] = []
+        for day in days {
+            let dayPlaces = viewModel.places(for: day)
+            placesByDayId[day.id] = dayPlaces
+            bookings.append(contentsOf: dayPlaces.filter { $0.isBooking })
+        }
+        bookings.append(contentsOf: viewModel.wishlistPlaces.filter { $0.isBooking })
+        await calendarSyncService.sync(
+            trip: trip,
+            days: days,
+            placesByDayId: placesByDayId,
+            bookings: bookings
+        )
+        switch calendarSyncService.status {
+        case .completed(let count):
+            toastManager.show(ToastData(
+                message: "Synced \(count) events to Calendar",
+                type: .success
+            ))
+        case .failed(let m):
+            toastManager.show(ToastData(message: m, type: .error))
+        default:
+            break
+        }
+    }
+
+    private func stopCalendarSync() async {
+        guard let viewModel else { return }
+        calendarSyncInFlight = true
+        defer { calendarSyncInFlight = false }
+        await calendarSyncService.unsync(trip: viewModel.trip)
+        toastManager.show(ToastData(message: "Stopped syncing to Calendar", type: .success))
     }
 
     // MARK: - Itinerary Content
@@ -556,7 +666,13 @@ struct TripDetailView: View {
                                     dayNumber: day.dayNumber,
                                     onEdit: { placeToEdit = place },
                                     onMoveToDay: { placeToMove = place },
-                                    onDelete: { deletePlace(place, viewModel: viewModel) }
+                                    onDelete: { deletePlace(place, viewModel: viewModel) },
+                                    onAttachments: { bookingForAttachments = place },
+                                    flightStatus: flightStatus(for: place),
+                                    isFlightStale: flightStaleness(for: place),
+                                    flightTint: flightTint(for: place),
+                                    isProUser: isProUserForFlightTracking,
+                                    onUpgradeTap: { presentFlightPaywall() }
                                 )
                             } else {
                                 TimelinePlaceCardView(
@@ -677,6 +793,78 @@ struct TripDetailView: View {
         ))
     }
 
+    /// Phase 7 — when the booking form supplies a non-zero amount we mirror
+    /// it into a tracked `trip_expense` so the budget hub picks it up
+    /// immediately. The DB trigger `tg_sync_booking_expense` already does
+    /// this for backend-imported bookings on `trip_bookings` insert/update;
+    /// the iOS add-booking path writes to `trip_activities` (no trigger
+    /// fires there), so we run the equivalent insert here. We default to a
+    /// `full` split so the user's own ledger reflects the cost without
+    /// surprising other collaborators with an unsolicited share — they can
+    /// open the new expense in the budget tab and switch to Equal/Exact if
+    /// they want to divide it.
+    private func trackBookingExpenseIfNeeded(place: Place, cost: BookingCost?) async {
+        guard let cost else { return }
+        guard let userId = budgetViewModel?.currentUserId ?? collaborationStore.currentUserId else { return }
+        let expense = TripExpense(
+            id: UUID(),
+            tripId: trip.id,
+            userId: userId,
+            payerUserId: userId,
+            bookingId: place.isBooking ? place.id : nil,
+            title: place.name,
+            amount: cost.amount,
+            currencyCode: cost.currency,
+            category: ExpenseCategory.fromBookingKind(place.bookingType),
+            splitType: .full,
+            expenseDate: place.startTime ?? Date(),
+            notes: nil,
+            isAutoSynced: false,
+            createdAt: nil,
+            updatedAt: nil
+        )
+        let split = ExpenseSplit(
+            id: UUID(),
+            expenseId: expense.id,
+            tripId: trip.id,
+            userId: userId,
+            amount: cost.amount,
+            currencyCode: cost.currency,
+            isAccepted: true,
+            createdAt: nil,
+            updatedAt: nil
+        )
+        if let budgetVM = budgetViewModel {
+            _ = await budgetVM.addExpense(expense, splits: [split])
+        } else {
+            _ = await dataService.addExpense(expense, splits: [split])
+        }
+    }
+
+    /// Builds the post-save toast for the booking form. When a cost was
+    /// supplied we surface the tracked-as-expense confirmation with a "View"
+    /// affordance to jump into the budget tab; otherwise we fall back to the
+    /// generic "Booking added / updated" message so the toast still
+    /// confirms the save.
+    private func makeBookingSavedToast(cost: BookingCost?, isUpdate: Bool) -> ToastData {
+        let saveMessage = isUpdate ? "Booking updated" : "Booking added"
+        guard let cost else {
+            return ToastData(message: saveMessage, type: .success)
+        }
+        let formattedAmount = MoneyFormatter.string(cost.amount, currency: cost.currency)
+        let message = "\(saveMessage) · Tracked as \(formattedAmount) expense"
+        if let openBudget = onOpenBudgetTab {
+            return ToastData(
+                message: message,
+                type: .success,
+                duration: 5,
+                actionLabel: "View",
+                actionHandler: { openBudget() }
+            )
+        }
+        return ToastData(message: message, type: .success, duration: 5)
+    }
+
     // MARK: - Wishlist Section
 
     @ViewBuilder
@@ -694,7 +882,13 @@ struct TripDetailView: View {
                                 dayNumber: 0,
                                 onEdit: { placeToEdit = place },
                                 onMoveToDay: { placeToMove = place },
-                                onDelete: { deletePlace(place, viewModel: viewModel) }
+                                onDelete: { deletePlace(place, viewModel: viewModel) },
+                                onAttachments: { bookingForAttachments = place },
+                                flightStatus: flightStatus(for: place),
+                                isFlightStale: flightStaleness(for: place),
+                                flightTint: flightTint(for: place),
+                                isProUser: isProUserForFlightTracking,
+                                onUpgradeTap: { presentFlightPaywall() }
                             )
                         } else {
                             TimelinePlaceCardView(
@@ -854,6 +1048,49 @@ private enum TripDetailOverlayMetrics {
     /// Design height of the **main** cover below the status inset (nav floats over the upper part of this band).
     static let visibleHeroHeight: CGFloat = 304
     static let heroImageLoadingBackground = Color(red: 0.12, green: 0.12, blue: 0.14)
+}
+
+// MARK: - Wave 3.3 — Flight tracking helpers
+
+extension TripDetailView {
+    /// Look up a `FlightStatus` for the given booking row, if we have
+    /// one cached. Booking IDs come from `Place.id` for booking rows
+    /// (see `placeFromBooking` in the viewmodel).
+    fileprivate func flightStatus(for place: Place) -> FlightStatus? {
+        flightTracking.statusesByBookingId[place.id]
+    }
+
+    fileprivate func flightStaleness(for place: Place) -> Bool {
+        guard let status = flightStatus(for: place) else { return false }
+        return flightTracking.staleness(of: status)
+    }
+
+    fileprivate func flightTint(for place: Place) -> FlightStatus.DisplayState.Tint {
+        guard let status = flightStatus(for: place) else { return .neutral }
+        return flightTracking.tint(of: status)
+    }
+
+    /// Wave 4.5 — real entitlement check. Free users see the static
+    /// badge with a lock chip; Pro users see the live status pill that
+    /// pulses on update. Realtime fan-out is filtered server-side so
+    /// free clients don't receive frames they aren't allowed to render.
+    fileprivate var isProUserForFlightTracking: Bool {
+        EntitlementService.shared.isPro
+    }
+
+    /// Wave 4.5 — central paywall presentation for flight tracking.
+    /// Routes through `PaywallPresenter` so the analytics shape and
+    /// the offering selection match every other gate in the app.
+    fileprivate func presentFlightPaywall() {
+        PaywallPresenter.shared.present(
+            .flightTracking,
+            dataService: dataService,
+            metadata: [
+                "trip_id": trip.id.uuidString,
+                "trigger": "flight_badge_tap",
+            ]
+        )
+    }
 }
 
 

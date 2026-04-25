@@ -6,6 +6,7 @@
 import Foundation
 import Observation
 import Supabase
+import UIKit
 
 /// Uses ``AuthSessionService/shared`` as the single `SupabaseClient` (session + PostgREST auth headers).
 @Observable @MainActor
@@ -44,7 +45,7 @@ final class SupabaseManager {
         let (client, userId) = try await requireClientAndUserId()
         let rows: [ProfileHeroRow] = try await client
             .from("profiles")
-            .select("id,username,display_name,avatar_url,bio,created_at,preferred_airport,preferred_currency")
+            .select("id,username,display_name,avatar_url,bio,created_at,preferred_airport,preferred_currency,venmo_username,paypal_username")
             .eq("id", value: userId.uuidString)
             .limit(1)
             .execute()
@@ -58,7 +59,9 @@ final class SupabaseManager {
         bio: String?,
         preferredAirport: String?,
         preferredCurrency: String?,
-        avatarURL: String?
+        avatarURL: String?,
+        venmoUsername: String?,
+        paypalUsername: String?
     ) async throws {
         let (client, userId) = try await requireClientAndUserId()
         let nowIso = ISO8601DateFormatter().string(from: Date())
@@ -69,6 +72,8 @@ final class SupabaseManager {
             preferred_airport: preferredAirport,
             preferred_currency: preferredCurrency,
             avatar_url: avatarURL,
+            venmo_username: venmoUsername,
+            paypal_username: paypalUsername,
             updated_at: nowIso
         )
         try await client
@@ -153,8 +158,8 @@ final class SupabaseManager {
             cover_image_url: trip.coverImageUrl,
             cover_attribution: trip.coverImageAttribution,
             privacy: "private",
-            total_budget: 0,
-            budget_currency: "USD"
+            total_budget: trip.totalBudget.map(DecimalCodec.init),
+            budget_currency: trip.budgetCurrencyCode
         )
 
         let created: TripRow = try await client
@@ -379,10 +384,17 @@ final class SupabaseManager {
 
     // MARK: - city_places enrichment
 
-    /// Subset of `city_places` columns we care about for timeline rendering.
+    /// Subset of `city_places` columns we care about for timeline rendering
+    /// and the rich Place Detail sheet.
     /// All optional — any single field can be null in the database depending
     /// on enrichment status.
-    private struct CityPlaceEnrichmentRow: Decodable, Sendable {
+    ///
+    /// Phase D.1 of the places-cost plan extended this with website / phone /
+    /// hours / ai_editorial_summary / ai_review_summary / ai_why_go /
+    /// ai_know_before_you_go so the Place Detail sheet can render rich data
+    /// fully from owned `city_places` rather than firing a Google Place
+    /// Details (the legacy expensive SKU) at sheet-open time.
+    struct CityPlaceEnrichmentRow: Decodable, Sendable {
         let place_id: String
         let rating: Double?
         let user_ratings_total: Int?
@@ -392,6 +404,58 @@ final class SupabaseManager {
         let subtypes: [String]?
         let time_spent_min: Int?
         let time_spent_max: Int?
+
+        // Phase D.1 — rich detail fields backing PlaceDetailSheet.
+        let website: String?
+        let formatted_phone_number: String?
+        /// Google opening_hours-style payload. Decoded lazily as JSONValue
+        /// so callers can pluck `weekday_text` / `open_now` without us
+        /// committing to a schema here (the column is jsonb).
+        let opening_hours: JSONValue?
+        let ai_editorial_summary: String?
+        let ai_review_summary: String?
+        let ai_why_go: [String]?
+        let ai_know_before_you_go: [String]?
+        let details_enriched_at: String?
+        let ai_enriched_at: String?
+
+        // Phase H.1 — image provenance + refresh tracking. `image_source`
+        // is one of 'google' | 'serpapi' | 'wikimedia' | 'user' | 'unknown';
+        // PlaceDetailSheet uses it to badge user-uploaded photos and to
+        // decide whether to surface a CC attribution caption.
+        let image_source: String?
+        let images_refreshed_at: String?
+        let thumbnail_attribution: String?
+
+        // Phase I.1 — per-field attribution payload (CC license + DSA
+        // compliance). Shape: `{ "summary": { "sources": [...] }, ... }`.
+        // Decoded as JSONValue so we don't have to lock down the schema
+        // on the iOS side every time the ingest function evolves.
+        let ai_source_attribution: JSONValue?
+    }
+
+    /// Type-erased JSON value used by `CityPlaceEnrichmentRow.opening_hours`.
+    /// Keeps the schema flexible: Google's `opening_hours` payload changes
+    /// shape between Place Details API versions and we don't want to break
+    /// decode the moment a new field appears.
+    enum JSONValue: Decodable, Sendable {
+        case string(String)
+        case number(Double)
+        case bool(Bool)
+        case array([JSONValue])
+        case object([String: JSONValue])
+        case null
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            if c.decodeNil() { self = .null; return }
+            if let v = try? c.decode(Bool.self) { self = .bool(v); return }
+            if let v = try? c.decode(Double.self) { self = .number(v); return }
+            if let v = try? c.decode(String.self) { self = .string(v); return }
+            if let v = try? c.decode([JSONValue].self) { self = .array(v); return }
+            if let v = try? c.decode([String: JSONValue].self) { self = .object(v); return }
+            self = .null
+        }
     }
 
     /// Pulls distinct, non-empty Google `place_id`s from the activity rows so
@@ -417,7 +481,17 @@ final class SupabaseManager {
         do {
             let rows: [CityPlaceEnrichmentRow] = try await client
                 .from("city_places")
-                .select("place_id,rating,user_ratings_total,price_level,thumbnail_url,ai_short_summary,subtypes,time_spent_min,time_spent_max")
+                .select(
+                    """
+                    place_id,rating,user_ratings_total,price_level,thumbnail_url,\
+                    ai_short_summary,subtypes,time_spent_min,time_spent_max,\
+                    website,formatted_phone_number,opening_hours,\
+                    ai_editorial_summary,ai_review_summary,ai_why_go,ai_know_before_you_go,\
+                    details_enriched_at,ai_enriched_at,\
+                    image_source,images_refreshed_at,thumbnail_attribution,\
+                    ai_source_attribution
+                    """
+                )
                 .in("place_id", values: placeIds)
                 .execute()
                 .value
@@ -445,6 +519,628 @@ final class SupabaseManager {
             print("[city_places] enrichment failed: \(error)")
             #endif
             return [:]
+        }
+    }
+
+    /// Fetches a single `city_places` enrichment row by Google `place_id`.
+    /// Returns `nil` if no row exists yet — the caller should consider that a
+    /// "not enriched" state and may want to call
+    /// `requestCityPlaceEnrichment(forGooglePlaceId:)` to enqueue one.
+    /// Phase J.6 — Resolve a Google `place_id` (the trip's
+    /// destination_place_id) to its `city_profiles.id`. The profile row itself
+    /// does not store a Google place id; resolve through `city_places`, which
+    /// carries both the Google `place_id` and owning `city_profile_id`.
+    func fetchCityProfileId(forGooglePlaceId googlePlaceId: String) async -> UUID? {
+        do {
+            let (client, _) = try await requireClientAndUserId()
+
+            struct CityPlaceRow: Decodable { let city_profile_id: UUID? }
+            let cityPlaceRows: [CityPlaceRow] = try await client
+                .from("city_places")
+                .select("city_profile_id")
+                .eq("place_id", value: googlePlaceId)
+                .limit(1)
+                .execute()
+                .value
+            if let id = cityPlaceRows.first?.city_profile_id {
+                return id
+            }
+            return nil
+        } catch {
+            #if DEBUG
+            print("[city_profiles] resolve failed: \(error)")
+            #endif
+            return nil
+        }
+    }
+
+    func fetchCityPlaceEnrichment(googlePlaceId: String) async throws -> CityPlaceEnrichmentRow? {
+        let (client, _) = try await requireClientAndUserId()
+        let rows: [CityPlaceEnrichmentRow] = try await client
+            .from("city_places")
+            .select(
+                """
+                place_id,rating,user_ratings_total,price_level,thumbnail_url,\
+                ai_short_summary,subtypes,time_spent_min,time_spent_max,\
+                website,formatted_phone_number,opening_hours,\
+                ai_editorial_summary,ai_review_summary,ai_why_go,ai_know_before_you_go,\
+                details_enriched_at,ai_enriched_at,\
+                image_source,images_refreshed_at,thumbnail_attribution,\
+                ai_source_attribution
+                """
+            )
+            .eq("place_id", value: googlePlaceId)
+            .limit(1)
+            .execute()
+            .value
+        return rows.first
+    }
+
+    // MARK: - Phase F (user photos)
+
+    private static let placePhotosQuarantineBucket = "place-photos-quarantine"
+
+    /// Pre-flight gate. Returns the structured verdict the upload UI uses
+    /// to render the right error copy. Server enforces; this is for UX,
+    /// not security.
+    func checkPhotoUploadQuota(cityPlaceId: UUID) async -> DataService.PhotoUploadQuotaVerdict {
+        do {
+            let (client, _) = try await requireClientAndUserId()
+            // Phase F.4 — `nonisolated` because Swift 6 strict
+            // concurrency demands the Encodable conformance on RPC
+            // params be sendable; declaring the struct inside a
+            // `@MainActor` method otherwise marks the conformance
+            // as MainActor-isolated.
+            nonisolated struct Body: Encodable, Sendable { let p_city_place_id: String }
+            struct Row: Decodable {
+                let allowed: Bool
+                let reason: String
+                let remaining: Int
+            }
+            let rows: [Row] = try await client
+                .rpc("check_photo_upload_quota",
+                     params: Body(p_city_place_id: cityPlaceId.uuidString.lowercased()))
+                .execute()
+                .value
+            if let r = rows.first {
+                return .init(allowed: r.allowed, reason: r.reason, remaining: r.remaining)
+            }
+            return .init(allowed: false, reason: "unknown", remaining: 0)
+        } catch {
+            #if DEBUG
+            print("[place_user_photos] quota check failed: \(error)")
+            #endif
+            return .init(allowed: false, reason: "unknown", remaining: 0)
+        }
+    }
+
+    /// Uploads JPEG bytes to the quarantine bucket and inserts a
+    /// `pending_moderation` row in `place_user_photos`. The path is
+    /// namespaced by the uploader's auth UID to satisfy the storage RLS
+    /// policy from migration `20260601160000_place_user_photos.sql`.
+    func uploadQuarantinedPlacePhoto(
+        cityPlaceId: UUID,
+        imageData: Data,
+        exifLat: Double?,
+        exifLng: Double?,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async -> Result<DataService.UploadedPhotoStub, PlacePhotoUploadError> {
+        do {
+            let (client, userId) = try await requireClientAndUserId()
+            guard !imageData.isEmpty else { return .failure(.couldNotReadImage) }
+
+            let photoId = UUID()
+            let storagePath =
+                "\(userId.uuidString.lowercased())/\(photoId.uuidString.lowercased()).jpg"
+
+            // Supabase-swift's `upload` doesn't expose progress directly;
+            // we report two synthetic checkpoints so the UI moves rather
+            // than spinning silently. Phase G.4 will replace with real
+            // background-URLSession progress.
+            progress(0.1)
+            try await client.storage
+                .from(Self.placePhotosQuarantineBucket)
+                .upload(
+                    storagePath,
+                    data: imageData,
+                    options: FileOptions(contentType: "image/jpeg", upsert: false)
+                )
+            progress(0.85)
+
+            // Decode the image once for width/height/bytes, best-effort.
+            let (w, h) = Self.imageDimensions(from: imageData)
+
+            struct Insert: Encodable {
+                let id: String
+                let city_place_id: String
+                let uploader_user_id: String
+                let storage_path: String
+                let exif_lat: Double?
+                let exif_lng: Double?
+                let width: Int?
+                let height: Int?
+                let bytes: Int?
+            }
+            try await client
+                .from("place_user_photos")
+                .insert(Insert(
+                    id: photoId.uuidString.lowercased(),
+                    city_place_id: cityPlaceId.uuidString.lowercased(),
+                    uploader_user_id: userId.uuidString.lowercased(),
+                    storage_path: storagePath,
+                    exif_lat: exifLat,
+                    exif_lng: exifLng,
+                    width: w,
+                    height: h,
+                    bytes: imageData.count
+                ))
+                .execute()
+            progress(1.0)
+            return .success(.init(photoId: photoId, storagePath: storagePath))
+        } catch {
+            return .failure(.uploadFailed(error.localizedDescription))
+        }
+    }
+
+    /// Calls the `moderate-place-photo` Edge Function. Returns the
+    /// resolved client-side outcome — server-side state has already been
+    /// written by the time this returns.
+    ///
+    /// Uses raw URLRequest rather than the SDK's `client.functions.invoke`
+    /// to mirror `ItineraryAIService.invoke()`'s 401-refresh retry shape
+    /// and to keep the JSON parsing under our control (the function
+    /// returns flexible status payloads).
+    func invokeModeratePlacePhoto(photoId: UUID) async -> DataService.ModerationOutcome {
+        do {
+            let (_, _) = try await requireClientAndUserId()
+            guard let token = try await sessionAccessToken() else {
+                return .failure("Sign in to upload photos.")
+            }
+            let url = URL(string: "\(AppConfig.supabaseURL)/functions/v1/moderate-place-photo")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+            request.timeoutInterval = 90
+            struct Body: Encodable { let photo_id: String }
+            request.httpBody = try JSONEncoder().encode(
+                Body(photo_id: photoId.uuidString.lowercased())
+            )
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, http.statusCode >= 500 {
+                return .failure("Moderation service is unavailable.")
+            }
+            struct R: Decodable {
+                let ok: Bool?
+                let status: String?
+                let public_url: String?
+                let reason: String?
+                let detail: String?
+                let error: String?
+            }
+            guard let parsed = try? JSONDecoder().decode(R.self, from: data) else {
+                return .failure("Moderation didn't return a usable response.")
+            }
+            if let err = parsed.error {
+                return .failure(err)
+            }
+            switch parsed.status {
+            case "approved":
+                if let s = parsed.public_url, let url = URL(string: s) {
+                    return .approved(url)
+                }
+                return .pendingReview(nil)
+            case "pending_review", "pending_moderation":
+                return .pendingReview(parsed.reason)
+            case "rejected":
+                return .rejected(parsed.reason ?? "rejected", parsed.detail)
+            default:
+                return .failure("Unexpected moderation status.")
+            }
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Phase F.7 (lifecycle events + DSA appeals)
+
+    /// Pulls all unacknowledged `place_user_photo_events` rows for the
+    /// signed-in user. Sorted oldest-first so badges show the most
+    /// recent verdict on top once reversed for display.
+    func fetchUnacknowledgedPhotoEvents() async throws -> [PhotoLifecycleEvent] {
+        guard let client = AuthSessionService.shared.client else { return [] }
+        struct Row: Decodable {
+            let id: Int64
+            let photo_id: String
+            let status: String
+            let reason: String?
+            let detail: String?
+            let created_at: String
+        }
+        let rows: [Row] = try await client
+            .from("place_user_photo_events")
+            .select("id, photo_id, status, reason, detail, created_at")
+            .filter("acknowledged_at", operator: "is", value: "null")
+            .order("created_at", ascending: true)
+            .limit(50)
+            .execute()
+            .value
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallback = ISO8601DateFormatter()
+        fallback.formatOptions = [.withInternetDateTime]
+        return rows.compactMap { row -> PhotoLifecycleEvent? in
+            guard let photoId = UUID(uuidString: row.photo_id) else { return nil }
+            let date = formatter.date(from: row.created_at)
+                ?? fallback.date(from: row.created_at)
+                ?? Date()
+            return PhotoLifecycleEvent(
+                id: row.id,
+                photoId: photoId,
+                status: row.status,
+                reason: row.reason,
+                detail: row.detail,
+                createdAt: date
+            )
+        }
+    }
+
+    /// Marks an event as acknowledged. Failures are silent — the badge
+    /// will simply re-appear on the next fetch.
+    func acknowledgePhotoEvent(id: Int64) async {
+        guard let client = AuthSessionService.shared.client else { return }
+        nonisolated struct Args: Encodable, Sendable { let p_event_id: Int64 }
+        do {
+            try await client
+                .rpc("acknowledge_photo_event", params: Args(p_event_id: id))
+                .execute()
+        } catch {
+            #if DEBUG
+            print("acknowledgePhotoEvent failed: \(error)")
+            #endif
+        }
+    }
+
+    /// Files a DSA Article 20 internal complaint against a moderation
+    /// decision. RLS + the RPC body itself enforces uploader-only
+    /// access. Returns `true` when the row was inserted.
+    func submitDsaAppeal(photoId: UUID, appealText: String) async -> Bool {
+        guard let client = AuthSessionService.shared.client else { return false }
+        nonisolated struct Args: Encodable, Sendable {
+            let p_photo_id: String
+            let p_appeal_text: String
+        }
+        do {
+            try await client
+                .rpc("submit_dsa_appeal", params: Args(
+                    p_photo_id: photoId.uuidString.lowercased(),
+                    p_appeal_text: appealText
+                ))
+                .execute()
+            return true
+        } catch {
+            #if DEBUG
+            print("submitDsaAppeal failed: \(error)")
+            #endif
+            return false
+        }
+    }
+
+    // MARK: - Phase F.8 (per-photo community reports)
+
+    /// Calls `report_user_photo`. Maps known SQL error codes back into
+    /// human-readable messages so the report sheet can show inline
+    /// guidance instead of a generic failure.
+    func reportUserPhoto(
+        photoId: UUID,
+        reason: String,
+        details: String?
+    ) async -> DataService.PhotoReportOutcome {
+        guard let client = AuthSessionService.shared.client else {
+            return .failure(message: "Sign in to report photos.")
+        }
+        nonisolated struct Args: Encodable, Sendable {
+            let p_photo_id: String
+            let p_reason: String
+            let p_details: String?
+        }
+        struct Row: Decodable {
+            let report_count: Int
+            let escalated: Bool
+        }
+        do {
+            let rows: [Row] = try await client
+                .rpc("report_user_photo", params: Args(
+                    p_photo_id: photoId.uuidString.lowercased(),
+                    p_reason: reason,
+                    p_details: details?.isEmpty == true ? nil : details
+                ))
+                .execute()
+                .value
+            return .success(escalated: rows.first?.escalated ?? false)
+        } catch {
+            let message = Self.userFacingPhotoReportError(error)
+            #if DEBUG
+            print("reportUserPhoto failed: \(error)")
+            #endif
+            return .failure(message: message)
+        }
+    }
+
+    private static func userFacingPhotoReportError(_ error: Error) -> String {
+        let s = String(describing: error)
+        if s.contains("cannot_report_own_photo") {
+            return "You can't report your own photo."
+        }
+        if s.contains("photo_not_found") {
+            return "This photo no longer exists."
+        }
+        if s.contains("invalid_reason") {
+            return "Please choose a valid reason."
+        }
+        if s.contains("unauthenticated") {
+            return "Sign in to report photos."
+        }
+        return "Couldn't send your report. Try again in a moment."
+    }
+
+    /// Returns the current Supabase session access token, refreshing
+    /// once on expiry. Returns nil if the user is signed out.
+    private func sessionAccessToken() async throws -> String? {
+        guard let client = AuthSessionService.shared.client else { return nil }
+        let session = try await client.auth.session
+        return session.accessToken
+    }
+
+    // MARK: - Wave 0 — commit-attachment + pro_gate analytics
+
+    /// Calls the `commit-attachment` Edge Function. Returns the row id +
+    /// signed upload URL the caller streams bytes to. See
+    /// `BackgroundUploader` for the full pipeline.
+    func commitAttachment(descriptor: AttachmentUploadDescriptor) async throws -> AttachmentCommitResult {
+        guard let token = try await sessionAccessToken() else {
+            throw BackgroundUploaderError.notSignedIn
+        }
+        let url = URL(string: "\(AppConfig.supabaseURL)/functions/v1/commit-attachment")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.timeoutInterval = 30
+
+        struct Body: Encodable {
+            let kind: String
+            let trip_id: String
+            let parent_id: String
+            let file_name: String
+            let mime_type: String
+            let byte_size: Int
+            let attachment_type: String?
+            let is_cover: Bool?
+            let title: String?
+            let category: String?
+        }
+        let body = Body(
+            kind: descriptor.surface.rawValue,
+            trip_id: descriptor.tripId.uuidString.lowercased(),
+            parent_id: descriptor.parentId.uuidString.lowercased(),
+            file_name: descriptor.fileName,
+            mime_type: descriptor.mimeType,
+            byte_size: descriptor.bytes.count,
+            attachment_type: descriptor.attachmentType,
+            is_cover: descriptor.isCover,
+            title: descriptor.title,
+            category: descriptor.category
+        )
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? 0
+        if status >= 400 {
+            let detail = String(data: data, encoding: .utf8) ?? "HTTP \(status)"
+            throw BackgroundUploaderError.serverError(detail)
+        }
+
+        struct Response: Decodable {
+            let row_id: String
+            let bucket: String
+            let storage_path: String
+            let signed_upload_url: String
+        }
+        let parsed = try JSONDecoder().decode(Response.self, from: data)
+        guard let rowId = UUID(uuidString: parsed.row_id),
+              let signed = URL(string: parsed.signed_upload_url) else {
+            throw BackgroundUploaderError.serverError("Server returned an unparseable response.")
+        }
+        return AttachmentCommitResult(
+            rowId: rowId,
+            storagePath: parsed.storage_path,
+            bucket: parsed.bucket,
+            signedUploadURL: signed
+        )
+    }
+
+    /// Calls the `record_pro_gate_attempt` Postgres RPC. Throws on RLS /
+    /// network failure; callers fire-and-forget via `try?`.
+    func recordProGateAttempt(
+        gateName: String,
+        surface: String?,
+        metadata: [String: String]
+    ) async throws {
+        let (client, _) = try await requireClientAndUserId()
+        // Swift 6 — declare the Encodable params struct as `nonisolated`
+        // so the synthesised conformance isn't @MainActor-locked. Same
+        // pattern as `checkPhotoUploadQuota` above.
+        nonisolated struct Params: Encodable, Sendable {
+            let p_gate_name: String
+            let p_surface: String?
+            let p_metadata: [String: String]
+        }
+        try await client
+            .rpc(
+                "record_pro_gate_attempt",
+                params: Params(
+                    p_gate_name: gateName,
+                    p_surface: surface,
+                    p_metadata: metadata
+                )
+            )
+            .execute()
+    }
+
+    private static func imageDimensions(from data: Data) -> (Int?, Int?) {
+        if let img = UIImage(data: data) {
+            return (Int(img.size.width), Int(img.size.height))
+        }
+        return (nil, nil)
+    }
+
+    /// Phase E.2 — submit a user report against a `city_places` row by its
+    /// Google `place_id`. Idempotent per (place, user, reason) on the
+    /// server. Returns `true` once at least one row was reported (i.e. the
+    /// place exists in our pool). Failures are logged in DEBUG and surfaced
+    /// as `false`.
+    ///
+    /// `reason` must be one of: `closed`, `incorrect`, `inappropriate`,
+    /// `other` (matches the CHECK constraint on `city_place_reports`).
+    func reportCityPlace(
+        forGooglePlaceId placeId: String,
+        reason: String,
+        details: String? = nil
+    ) async -> Bool {
+        guard !placeId.isEmpty else { return false }
+        do {
+            let (client, _) = try await requireClientAndUserId()
+            struct IdRow: Decodable { let id: UUID }
+            let rows: [IdRow] = try await client
+                .from("city_places")
+                .select("id")
+                .eq("place_id", value: placeId)
+                .execute()
+                .value
+            if rows.isEmpty { return false }
+            for r in rows {
+                nonisolated struct Body: Encodable, Sendable {
+                    let p_city_place_id: String
+                    let p_reason: String
+                    let p_details: String?
+                }
+                _ = try? await client
+                    .rpc(
+                        "report_city_place",
+                        params: Body(
+                            p_city_place_id: r.id.uuidString.lowercased(),
+                            p_reason: reason,
+                            p_details: details
+                        )
+                    )
+                    .execute()
+            }
+            return true
+        } catch {
+            #if DEBUG
+            print("[city_places] reportCityPlace failed: \(error)")
+            #endif
+            return false
+        }
+    }
+
+    /// Phase H.3 — TTL-driven lazy refresh. Calls
+    /// `refresh_city_place_if_stale` server-side, which reads the data &
+    /// image TTL flags and enqueues focused enrichment jobs. Returns the
+    /// number of jobs enqueued (0, 1, or 2). Best-effort, never throws.
+    @discardableResult
+    func refreshCityPlaceIfStale(
+        forGooglePlaceId placeId: String,
+        priority: String = "background"
+    ) async -> Int {
+        guard !placeId.isEmpty else { return 0 }
+        do {
+            let (client, _) = try await requireClientAndUserId()
+            struct IdRow: Decodable { let id: UUID }
+            let rows: [IdRow] = try await client
+                .from("city_places")
+                .select("id")
+                .eq("place_id", value: placeId)
+                .execute()
+                .value
+            if rows.isEmpty { return 0 }
+            var totalEnqueued = 0
+            for r in rows {
+                nonisolated struct Body: Encodable, Sendable {
+                    let p_city_place_id: String
+                    let p_priority: String
+                }
+                let response = try? await client
+                    .rpc(
+                        "refresh_city_place_if_stale",
+                        params: Body(
+                            p_city_place_id: r.id.uuidString.lowercased(),
+                            p_priority: priority
+                        )
+                    )
+                    .execute()
+                if let data = response?.data,
+                   let n = (try? JSONDecoder().decode(Int.self, from: data)) {
+                    totalEnqueued += n
+                }
+            }
+            return totalEnqueued
+        } catch {
+            #if DEBUG
+            print("[city_places] refreshIfStale failed: \(error)")
+            #endif
+            return 0
+        }
+    }
+
+    /// Phase D.2 — enqueue a foreground enrichment job for a `city_places`
+    /// row identified by its Google `place_id`. Stampede-deduped server-side
+    /// (`request_city_place_enrichment` RPC). Best-effort, never throws —
+    /// enrichment is opportunistic and the sheet must still render without
+    /// it.
+    @discardableResult
+    func requestCityPlaceEnrichment(
+        forGooglePlaceId placeId: String,
+        priority: String = "foreground"
+    ) async -> Bool {
+        guard !placeId.isEmpty else { return false }
+        do {
+            let (client, _) = try await requireClientAndUserId()
+            // Look up the city_places row(s) — there may be multiple
+            // (one per city profile) so we enqueue all of them.
+            struct IdRow: Decodable { let id: UUID }
+            let rows: [IdRow] = try await client
+                .from("city_places")
+                .select("id")
+                .eq("place_id", value: placeId)
+                .execute()
+                .value
+            if rows.isEmpty { return false }
+            for r in rows {
+                nonisolated struct RPCBody: Encodable, Sendable {
+                    let p_city_place_id: String
+                    let p_priority: String
+                }
+                _ = try? await client
+                    .rpc(
+                        "request_city_place_enrichment",
+                        params: RPCBody(
+                            p_city_place_id: r.id.uuidString.lowercased(),
+                            p_priority: priority
+                        )
+                    )
+                    .execute()
+            }
+            return true
+        } catch {
+            #if DEBUG
+            print("[city_places] requestEnrichment failed: \(error)")
+            #endif
+            return false
         }
     }
 
@@ -796,6 +1492,8 @@ final class SupabaseManager {
         let preferred_airport: String?
         let preferred_currency: String?
         let avatar_url: String?
+        let venmo_username: String?
+        let paypal_username: String?
         let updated_at: String
     }
 
@@ -808,6 +1506,8 @@ final class SupabaseManager {
         let created_at: String?
         let preferred_airport: String?
         let preferred_currency: String?
+        let venmo_username: String?
+        let paypal_username: String?
 
         var userProfileDetail: UserProfileDetail {
             UserProfileDetail(
@@ -818,7 +1518,9 @@ final class SupabaseManager {
                 bio: bio,
                 preferredAirport: preferred_airport,
                 preferredCurrency: preferred_currency,
-                createdAt: SupabaseModelMapping.parsePostgresTimestamp(created_at)
+                createdAt: SupabaseModelMapping.parsePostgresTimestamp(created_at),
+                venmoUsername: venmo_username,
+                paypalUsername: paypal_username
             )
         }
     }
@@ -838,6 +1540,10 @@ final class SupabaseManager {
         let updated_at: String?
         let status: String
         let is_active: Bool
+        // Phase 1 of collaborative budget: trip-level planned spend, optional
+        // (NULL = not set). Decoded via DecimalCodec to preserve precision.
+        let total_budget: DecimalCodec?
+        let budget_currency: String?
     }
 
     private struct TripInsert: Encodable, Sendable {
@@ -853,7 +1559,7 @@ final class SupabaseManager {
         let cover_image_url: String?
         let cover_attribution: String?
         let privacy: String
-        let total_budget: Int
+        let total_budget: DecimalCodec?
         let budget_currency: String
     }
 
@@ -938,6 +1644,11 @@ final class SupabaseManager {
         let start_lng: Double?
         let sort_order: Int
         let details_json: BookingJSONDetails?
+        // Phase 1 of collaborative budget: optional booking total + ISO 4217
+        // currency. The DB trigger reads these to mirror the booking into
+        // `trip_expenses` automatically.
+        let amount: DecimalCodec?
+        let currency: String?
     }
 
     private struct TripActivityInsert: Encodable, Sendable {
@@ -1003,7 +1714,9 @@ final class SupabaseManager {
             createdAt: created,
             updatedAt: updated,
             databaseStatus: row.status,
-            isMarkedActiveOnServer: row.is_active
+            isMarkedActiveOnServer: row.is_active,
+            totalBudget: row.total_budget?.value,
+            budgetCurrencyCode: row.budget_currency ?? "USD"
         )
     }
 
@@ -1092,7 +1805,9 @@ final class SupabaseManager {
             bookingType: category?.rawValue ?? row.kind,
             confirmationNumber: row.confirmation_code,
             bookingDetails: details,
-            googlePlaceId: nil
+            googlePlaceId: nil,
+            bookingAmount: row.amount?.value,
+            bookingCurrencyCode: row.currency
         )
     }
 

@@ -48,6 +48,10 @@ final class TripRealtimeService {
     private weak var toastManager: ToastManager?
     private var navigateAfterKick: (() -> Void)?
     private var tripTitleProvider: (() -> String)?
+    /// Optional — set when the user has the Budget tab on screen. We do not
+    /// require it on bind so a build that hasn't shown the budget yet still
+    /// gets a clean realtime channel.
+    private weak var budgetViewModel: BudgetViewModel?
 
     // MARK: - Channel + tasks
 
@@ -64,6 +68,7 @@ final class TripRealtimeService {
         case timeline           // trip_activities + trip_days + trip_bookings
         case trip               // trips row
         case collaborators      // trip_collaborators
+        case budget             // trip_expenses + expense_splits + trip_budgets + expense_settlements
         case reconnect          // backoff after CHANNEL_ERROR / TIMED_OUT
     }
 
@@ -124,6 +129,22 @@ final class TripRealtimeService {
         startSubscription(tripId: tripId)
     }
 
+    /// Hooks the Budget tab's view-model into the realtime channel so each
+    /// `trip_expenses` / `expense_splits` / `trip_budgets` /
+    /// `expense_settlements` event triggers a debounced reload. Safe to call
+    /// before or after `bind(to:)` — the realtime channel itself already
+    /// listens for those tables; this just installs the reload target.
+    func bindBudget(_ viewModel: BudgetViewModel) {
+        budgetViewModel = viewModel
+    }
+
+    /// Drops the budget reload target without tearing down the channel. The
+    /// budget subscriptions keep firing (they're cheap), but the no-op
+    /// debounce body is a single nil-check.
+    func unbindBudget() {
+        budgetViewModel = nil
+    }
+
     /// Tear down the channel and cancel every in-flight task. Safe to call
     /// from sign-out, trip-list return, or test cleanup.
     func unbind() {
@@ -150,6 +171,7 @@ final class TripRealtimeService {
         toastManager = nil
         navigateAfterKick = nil
         tripTitleProvider = nil
+        budgetViewModel = nil
         connectionState = .unbound
     }
 
@@ -247,6 +269,28 @@ final class TripRealtimeService {
                 }
             }
         )
+
+        // ===== Collaborative budget tables =====
+        // Each event collapses into one debounced `BudgetViewModel.reload`
+        // (300 ms — matches the spec). `trip_expenses` and `trip_budgets`
+        // already have `trip_id`; `expense_splits` carries a denormalised
+        // `trip_id` column populated by the `tg_expense_splits_set_trip_id`
+        // trigger so we can filter by it without joining. `expense_settlements`
+        // is a fresh table with `trip_id` from day one.
+        for table in ["trip_expenses", "expense_splits", "trip_budgets", "expense_settlements"] {
+            subscriptions.append(
+                newChannel.onPostgresChange(
+                    AnyAction.self,
+                    schema: "public",
+                    table: table,
+                    filter: filter
+                ) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.scheduleBudgetRefetch()
+                    }
+                }
+            )
+        }
 
         // ===== trips =====
         // Filter by `id=eq.<tripId>` here because `trips` doesn't have a
@@ -354,6 +398,7 @@ final class TripRealtimeService {
                 hasDrainedCurrentSubscription = true
                 scheduleTimelineRefetch()
                 scheduleCollaboratorRefetch()
+                scheduleBudgetRefetch()
             }
         case .subscribing:
             connectionState = .connecting
@@ -398,6 +443,17 @@ final class TripRealtimeService {
         scheduleDebounce(.collaborators, delayMs: 280) { [weak self] in
             guard let self else { return }
             self.collaborationStore?.refresh()
+        }
+    }
+
+    /// Coalesces every budget-table event into one `BudgetViewModel.reload`.
+    /// 300 ms matches `phase4_realtime` in the implementation plan and lines
+    /// up with how a sensible burst (insert expense → insert N splits) looks
+    /// on the wire — they all arrive within ~50ms.
+    private func scheduleBudgetRefetch() {
+        scheduleDebounce(.budget, delayMs: 300) { [weak self] in
+            guard let self, let viewModel = self.budgetViewModel else { return }
+            await viewModel.reload()
         }
     }
 
@@ -528,14 +584,16 @@ final class TripRealtimeService {
               rowUserId == currentUserId
         else { return }
 
-        // Phase 1.5 surfaces — once the backend ships these columns, the
-        // UPDATE event will include them and we'll detect a true→false
-        // flip. Until then `bool(...)` returns nil and the loop is a
-        // no-op (no toast fires for a missing column, by design).
+        // Real DB columns are `can_see_*` — Phase 1 of collaborative budget
+        // (`20260501120000_collaborative_budget_v1.sql`) backfills existing
+        // rows to `true` and defaults new ones to `false`, so a bool here
+        // is always present. We still default the read to `true` so a
+        // missing column on a transient older replica doesn't false-trip
+        // the warning.
         let scopes: [(key: String, label: String)] = [
-            ("can_access_documents", "documents"),
-            ("can_access_expenses", "expenses"),
-            ("can_access_notes", "notes")
+            ("can_see_documents", "documents"),
+            ("can_see_expenses", "expenses"),
+            ("can_see_notes", "notes")
         ]
         for scope in scopes {
             let oldValue = RealtimeRowDecoder.bool(scope.key, in: action.oldRecord) ?? true
@@ -548,8 +606,6 @@ final class TripRealtimeService {
                         duration: 3
                     )
                 )
-                // Only one toast per event even if multiple flags flip in
-                // the same update — avoid stacking three warnings.
                 break
             }
         }

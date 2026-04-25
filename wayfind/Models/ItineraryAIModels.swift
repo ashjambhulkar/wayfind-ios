@@ -186,6 +186,11 @@ enum ItineraryAIError: LocalizedError {
     case missingPlaceId
     case serverError(String)
     case quotaExceeded
+    /// Wave 4.4b — anti-abuse / runaway-loop ceiling that applies
+    /// to **every** account regardless of Pro status. Surfaces a
+    /// "try again tomorrow" message instead of an upsell paywall;
+    /// don't conflate with the free monthly cap.
+    case dailySafetyCapReached
     case planFailed(String)
     case decodingError(String)
 
@@ -197,8 +202,16 @@ enum ItineraryAIError: LocalizedError {
             return "Trip destination is missing location data. Try editing the trip and re-selecting the destination."
         case .serverError(let msg):
             return msg
-        case .quotaExceeded:
-            return "You've reached your monthly AI planning limit. Upgrade to plan more days."
+                case .quotaExceeded:
+                    return String(
+                        localized: "You've reached your monthly AI planning limit. Upgrade to plan more days.",
+                        comment: "Free-tier AI Day Planner quota exhaustion message. Free monthly cap is 3 generations — adjust copy if the cap changes."
+                    )
+                case .dailySafetyCapReached:
+                    return String(
+                        localized: "You've hit today's safety limit for AI planning. This protects against runaway charges — please try again tomorrow.",
+                        comment: "Daily anti-abuse cap message. Applies to both Pro and Free tiers — do NOT mention pricing or upgrade in this string."
+                    )
         case .planFailed(let msg):
             return "Couldn't generate a plan. \(msg)"
         case .decodingError(let msg):

@@ -49,6 +49,13 @@ struct ActivityLogEntry: Identifiable, Hashable, Sendable {
         /// Phase 1.5 forward-compat — backend trigger to be added in a
         /// follow-up migration. Renders cleanly today; just no rows yet.
         case collaboratorAccessChanged = "collaborator_access_changed"
+        case pendingInviteDeclined = "pending_invite_declined"
+        // Budget v1
+        case expenseAdded = "expense_added"
+        case expenseUpdated = "expense_updated"
+        case expenseDeleted = "expense_deleted"
+        case expenseSettled = "expense_settled"
+        case budgetUpdated = "budget_updated"
         case unknown = ""
 
         static func from(rawValue raw: String?) -> Action {
@@ -62,11 +69,11 @@ struct ActivityLogEntry: Identifiable, Hashable, Sendable {
         /// deletes, etc.
         var systemImage: String {
             switch self {
-            case .activityAdded, .bookingAdded, .noteAdded, .checklistAdded:
+            case .activityAdded, .bookingAdded, .noteAdded, .checklistAdded, .expenseAdded:
                 return "plus.circle"
-            case .activityUpdated, .bookingUpdated, .noteUpdated, .tripUpdated:
+            case .activityUpdated, .bookingUpdated, .noteUpdated, .tripUpdated, .expenseUpdated:
                 return "pencil"
-            case .activityDeleted, .bookingDeleted:
+            case .activityDeleted, .bookingDeleted, .expenseDeleted:
                 return "trash"
             case .checklistItemToggled:
                 return "checkmark.circle"
@@ -74,12 +81,16 @@ struct ActivityLogEntry: Identifiable, Hashable, Sendable {
                 return "arrow.left.arrow.right"
             case .collaboratorJoined:
                 return "person.crop.circle.badge.plus"
-            case .collaboratorLeft:
+            case .collaboratorLeft, .pendingInviteDeclined:
                 return "person.crop.circle.badge.minus"
             case .collaboratorRoleChanged:
                 return "person.crop.circle.badge.questionmark"
             case .collaboratorAccessChanged:
                 return "lock.shield"
+            case .expenseSettled:
+                return "checkmark.seal"
+            case .budgetUpdated:
+                return "creditcard"
             case .unknown:
                 return "circle"
             }
@@ -126,9 +137,70 @@ struct ActivityLogEntry: Identifiable, Hashable, Sendable {
             return collaboratorAccessChangedDescription(actor: actor)
         case .tripUpdated:
             return "\(actor) updated the trip"
+        case .pendingInviteDeclined:
+            return "\(actor) declined the invite"
+        case .expenseAdded:
+            return expenseAddedDescription(actor: actor, name: safeName)
+        case .expenseUpdated:
+            return "\(actor) updated \(safeName ?? "an expense")"
+        case .expenseDeleted:
+            return "\(actor) removed \(safeName ?? "an expense")"
+        case .expenseSettled:
+            return expenseSettledDescription(actor: actor)
+        case .budgetUpdated:
+            return budgetUpdatedDescription(actor: actor)
         case .unknown:
             return "\(actor) made a change"
         }
+    }
+
+    /// "Alex added a $42 dinner expense" — the amount + category if available,
+    /// falling back to the entity name. Auto-synced rows read more naturally
+    /// as "Alex added a booking — Hotel Indigo (auto-tracked)" to set the
+    /// expectation that this is the booking integration, not a manual entry.
+    private func expenseAddedDescription(actor: String, name: String?) -> String {
+        let amount = formattedMetadataAmount()
+        let category = metadata?["category"].flatMap { ExpenseCategory(rawValue: $0)?.displayLabel.lowercased() }
+        let auto = (metadata?["auto"] == "true")
+        if auto, let name {
+            return "\(actor) added a tracked expense — \(name)"
+        }
+        if let amount, let category {
+            return "\(actor) added a \(amount) \(category) expense"
+        }
+        if let amount {
+            return "\(actor) added a \(amount) expense"
+        }
+        return "\(actor) added \(name ?? "an expense")"
+    }
+
+    private func expenseSettledDescription(actor: String) -> String {
+        let amount = formattedMetadataAmount()
+        if let amount {
+            return "\(actor) settled \(amount)"
+        }
+        return "\(actor) settled up"
+    }
+
+    private func budgetUpdatedDescription(actor: String) -> String {
+        if let scope = metadata?["scope"], scope == "trip_total" {
+            return "\(actor) updated the trip budget"
+        }
+        if let category = metadata?["category"].flatMap({ ExpenseCategory(rawValue: $0)?.displayLabel.lowercased() }) {
+            return "\(actor) updated the \(category) budget"
+        }
+        return "\(actor) updated a budget"
+    }
+
+    /// Build a "$42.00" string from the trigger metadata. The trigger writes
+    /// amounts as `numeric::text` so we round-trip through `Decimal` to keep
+    /// trailing-zero formatting consistent with the rest of the app.
+    private func formattedMetadataAmount() -> String? {
+        guard let raw = metadata?["amount"], let value = Decimal(string: raw) else {
+            return nil
+        }
+        let code = metadata?["currency"] ?? "USD"
+        return value.formatted(.currency(code: code))
     }
 
     private var displayActor: String {

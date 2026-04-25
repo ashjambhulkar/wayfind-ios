@@ -9,6 +9,11 @@ enum AIPlannerState: Equatable {
     case applied
     case empty
     case error(String)
+    /// Wave 4.2 — server returned `free_limit_reached` (HTTP 429). The
+    /// wizard renders an upgrade nudge instead of the generic error
+    /// banner so the user understands the path forward is "go Pro",
+    /// not "try again later".
+    case quotaExhausted
 }
 
 @Observable
@@ -71,10 +76,34 @@ final class AIDayPlannerViewModel {
     var hasPreview: Bool { plannerState == .preview && !previewCards.isEmpty }
     var isApplied: Bool { plannerState == .applied }
     var isEmpty: Bool { plannerState == .empty }
+    /// Wave 4.2 — true iff the server told us the free user has burned
+    /// their monthly quota. The bottom bar uses this to swap "Try Again"
+    /// for "Upgrade to Pro".
+    var isQuotaExhausted: Bool { plannerState == .quotaExhausted }
 
     var errorMessage: String? {
         if case .error(let msg) = plannerState { return msg }
         return nil
+    }
+
+    // MARK: - Pro / quota badge (Wave 4.2)
+
+    /// Mirrors `EntitlementService.shared.isPro` at the moment the
+    /// wizard reads it. Re-read on every render via the @Observable
+    /// machinery, so flipping Pro mid-session updates the badge
+    /// without us having to re-bind anything here.
+    var isProUser: Bool { EntitlementService.shared.isPro }
+
+    /// String to render in the wizard's quota badge. Pro users get
+    /// "Unlimited"; Free users get "X of N free remaining" with the
+    /// limit pulled from EntitlementService so a server-side cap
+    /// change (Wave 4.4b moves 7 → 3) lights up without an app
+    /// release.
+    var quotaBadgeText: String {
+        if isProUser { return "Unlimited" }
+        let limit = EntitlementService.shared.aiFreeMonthlyLimit
+        let remaining = EntitlementService.shared.aiRemainingForFree
+        return "\(remaining) of \(limit) free remaining"
     }
 
     var canGenerate: Bool {
@@ -196,8 +225,31 @@ final class AIDayPlannerViewModel {
 
                 try Task.checkCancellation()
                 await self?.applyPlanResponse(response)
+                // Wave 4.2 — successful generation consumed one AI call
+                // server-side. Refresh the cached count so the wizard
+                // badge ("X of 3 free remaining") decrements without
+                // waiting for the next mount.
+                await EntitlementService.shared.refreshAIUsage()
             } catch is CancellationError {
                 // No-op: a newer generate() superseded this task.
+            } catch ItineraryAIError.quotaExceeded {
+                // Wave 4.2 — drop into the dedicated "out of free
+                // generations" state so the bottom bar can swap "Try
+                // Again" for "Upgrade to Pro" instead of letting the
+                // generic error banner stand. Also reconcile the local
+                // count to the cap so the badge stops lying.
+                await self?.setStateIfActive(.quotaExhausted)
+                await EntitlementService.shared.refreshAIUsage()
+            } catch ItineraryAIError.dailySafetyCapReached {
+                // Wave 4.4b — distinct from the free monthly cap. This
+                // is a hard ceiling that applies to Pro users too,
+                // so we present an error message rather than the
+                // upgrade paywall (no remediation = no pretending the
+                // user can pay their way out of this one).
+                await self?.setStateIfActive(
+                    .error(ItineraryAIError.dailySafetyCapReached.errorDescription
+                        ?? "Daily safety cap reached.")
+                )
             } catch let err as ItineraryAIError {
                 await self?.setStateIfActive(.error(err.errorDescription ?? "Unknown error"))
             } catch {

@@ -70,40 +70,45 @@ final class CollaboratorService {
         // `null` (jsonb null) when the caller cannot view the trip; we
         // tolerate that and fall back to "Trip owner".
         if let ownerId {
-            members.append(
-                TripCollaborator(
-                    id: nil,
-                    tripId: tripId,
-                    userId: ownerId,
-                    role: .owner,
-                    status: .accepted,
-                    invitedEmail: nil,
-                    displayName: ownerSnippet?.displayName,
-                    username: ownerSnippet?.username,
-                    avatarURLString: ownerSnippet?.avatarURLString,
-                    email: nil
-                )
+            var owner = TripCollaborator(
+                id: nil,
+                tripId: tripId,
+                userId: ownerId,
+                role: .owner,
+                status: .accepted,
+                invitedEmail: nil,
+                displayName: ownerSnippet?.displayName,
+                username: ownerSnippet?.username,
+                avatarURLString: ownerSnippet?.avatarURLString,
+                email: nil
             )
+            owner.venmoUsername = ownerSnippet?.venmoUsername
+            owner.paypalUsername = ownerSnippet?.paypalUsername
+            members.append(owner)
         }
 
         for row in collaboratorRows {
             let role = TripRole(rawValue: row.role) ?? .viewer
             let status = CollaboratorStatus(rawValue: row.status) ?? .accepted
             let snippet = row.userId.flatMap { snippetByUserId[$0] }
-            members.append(
-                TripCollaborator(
-                    id: row.id,
-                    tripId: tripId,
-                    userId: row.userId,
-                    role: role,
-                    status: status,
-                    invitedEmail: row.invitedEmail,
-                    displayName: snippet?.displayName,
-                    username: snippet?.username,
-                    avatarURLString: snippet?.avatarURLString,
-                    email: snippet?.email
-                )
+            var member = TripCollaborator(
+                id: row.id,
+                tripId: tripId,
+                userId: row.userId,
+                role: role,
+                status: status,
+                invitedEmail: row.invitedEmail,
+                displayName: snippet?.displayName,
+                username: snippet?.username,
+                avatarURLString: snippet?.avatarURLString,
+                email: snippet?.email
             )
+            member.canAccessDocuments = row.canSeeDocuments ?? false
+            member.canAccessExpenses = row.canSeeExpenses ?? false
+            member.canAccessNotes = row.canSeeNotes ?? false
+            member.venmoUsername = snippet?.venmoUsername
+            member.paypalUsername = snippet?.paypalUsername
+            members.append(member)
         }
 
         return members
@@ -136,9 +141,9 @@ final class CollaboratorService {
     ) async throws {
         guard let client else { throw SupabaseManagerError.notConfigured }
         let payload = AccessFlagsUpdatePayload(
-            canAccessDocuments: canAccessDocuments,
-            canAccessExpenses: canAccessExpenses,
-            canAccessNotes: canAccessNotes
+            canSeeDocuments: canAccessDocuments,
+            canSeeExpenses: canAccessExpenses,
+            canSeeNotes: canAccessNotes
         )
         try await client
             .from("trip_collaborators")
@@ -239,20 +244,9 @@ final class CollaboratorService {
     }
 
     private func fetchCollaboratorRows(client: SupabaseClient, tripId: String) async throws -> [TripCollaboratorRow] {
-        // Phase 1.5 backend follow-up: once the migration adds the three
-        // `can_access_documents` / `can_access_expenses` / `can_access_notes`
-        // columns to `trip_collaborators`, append them to this select list
-        // and decode them in `TripCollaboratorRow` (defaulting to `true`
-        // for safety). Today we can't ask for those columns yet — PostgREST
-        // returns 400 on unknown columns, so requesting them eagerly would
-        // break the entire members fetch. The model already defaults to
-        // `true` for every flag, which means the iOS-side per-surface
-        // gates fall through to "owner-and-editor-only" semantics — the
-        // exact behaviour we want until the migration ships and the owner
-        // can explicitly revoke a surface.
         let rows: [TripCollaboratorRow] = try await client
             .from("trip_collaborators")
-            .select("id,trip_id,user_id,role,status,invited_email,created_at")
+            .select("id,trip_id,user_id,role,status,invited_email,created_at,can_see_documents,can_see_expenses,can_see_notes")
             .eq("trip_id", value: tripId)
             .order("created_at", ascending: true)
             .execute()
@@ -283,6 +277,8 @@ final class CollaboratorService {
             let display_name: String?
             let avatar_url: String?
             let username: String?
+            let venmo_username: String?
+            let paypal_username: String?
         }
         let row = try JSONDecoder().decode(OwnerSnippetJSON.self, from: data)
         return CollaboratorProfileSnippet(
@@ -290,7 +286,9 @@ final class CollaboratorService {
             displayName: row.display_name,
             username: row.username,
             avatarURLString: row.avatar_url,
-            email: nil
+            email: nil,
+            venmoUsername: row.venmo_username,
+            paypalUsername: row.paypal_username
         )
     }
 
@@ -305,6 +303,8 @@ final class CollaboratorService {
             let username: String?
             let avatar_url: String?
             let email: String?
+            let venmo_username: String?
+            let paypal_username: String?
         }
         guard let rows = try? JSONDecoder().decode([CollaboratorSnippetJSON].self, from: data) else { return [] }
         return rows.map { row in
@@ -313,7 +313,9 @@ final class CollaboratorService {
                 displayName: row.display_name,
                 username: row.username,
                 avatarURLString: row.avatar_url,
-                email: row.email
+                email: row.email,
+                venmoUsername: row.venmo_username,
+                paypalUsername: row.paypal_username
             )
         }
     }
@@ -327,6 +329,8 @@ private struct CollaboratorProfileSnippet: Sendable {
     let username: String?
     let avatarURLString: String?
     let email: String?
+    let venmoUsername: String?
+    let paypalUsername: String?
 }
 
 private struct TripCollaboratorRow: Decodable, Sendable {
@@ -337,6 +341,9 @@ private struct TripCollaboratorRow: Decodable, Sendable {
     let status: String
     let invitedEmail: String?
     let createdAt: Date?
+    let canSeeDocuments: Bool?
+    let canSeeExpenses: Bool?
+    let canSeeNotes: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -346,6 +353,9 @@ private struct TripCollaboratorRow: Decodable, Sendable {
         case status
         case invitedEmail = "invited_email"
         case createdAt = "created_at"
+        case canSeeDocuments = "can_see_documents"
+        case canSeeExpenses = "can_see_expenses"
+        case canSeeNotes = "can_see_notes"
     }
 }
 
@@ -364,13 +374,13 @@ private struct RoleUpdatePayload: Encodable, Sendable {
 }
 
 private struct AccessFlagsUpdatePayload: Encodable, Sendable {
-    let canAccessDocuments: Bool
-    let canAccessExpenses: Bool
-    let canAccessNotes: Bool
+    let canSeeDocuments: Bool
+    let canSeeExpenses: Bool
+    let canSeeNotes: Bool
     enum CodingKeys: String, CodingKey {
-        case canAccessDocuments = "can_access_documents"
-        case canAccessExpenses = "can_access_expenses"
-        case canAccessNotes = "can_access_notes"
+        case canSeeDocuments = "can_see_documents"
+        case canSeeExpenses = "can_see_expenses"
+        case canSeeNotes = "can_see_notes"
     }
 }
 

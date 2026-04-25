@@ -28,6 +28,15 @@ struct Trip: Identifiable, Codable, Hashable {
     var databaseStatus: String? = nil
     /// `trips.is_active` when loaded from Supabase.
     var isMarkedActiveOnServer: Bool = false
+    /// Owner-controlled trip-level budget. `nil` means the owner has not set
+    /// one yet (the migration converts the legacy `0` default to NULL so the
+    /// budget UI can distinguish "not set" from "$0"). Decimal so currency
+    /// math through PostgREST never round-trips through Double.
+    var totalBudget: Decimal? = nil
+    /// ISO 4217 code for `totalBudget`. Defaults to "USD" everywhere the field
+    /// hasn't been customised. Per-row expenses carry their own currency, so
+    /// this is the headline display currency only.
+    var budgetCurrencyCode: String = "USD"
 
     var dayCount: Int {
         let days = Calendar.current.dateComponents([.day], from: startDate, to: endDate).day ?? 0

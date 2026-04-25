@@ -1,3 +1,4 @@
+import CoreLocation
 import SwiftUI
 
 // MARK: - Root View
@@ -74,7 +75,8 @@ struct AIPlanWizardSheet: View {
                     vm: vm,
                     onGenerate: { Task { await vm.generate() } },
                     onApply: { Task { await vm.applyPreview() } },
-                    onReset: { vm.reset() }
+                    onReset: { vm.reset() },
+                    onUpgradeTap: { presentAIUpsell(surface: "quota_exhausted_cta") }
                 )
             }
             .interactiveDismissDisabled(needsDiscardConfirmation)
@@ -88,6 +90,10 @@ struct AIPlanWizardSheet: View {
         .task {
             vm.trip = trip
             await vm.loadDays(from: dataService)
+            // Wave 4.2 — keep the "X of 3 free remaining" badge honest
+            // even when a sibling device burned a credit while this
+            // sheet was off-screen. Cheap COUNT(*) PostgREST call.
+            await EntitlementService.shared.refreshAIUsage()
         }
         .onDisappear {
             vm.cancelGenerate()
@@ -97,6 +103,11 @@ struct AIPlanWizardSheet: View {
                 vm.setStayArea(label: label, placeId: placeId)
             }
         }
+        // Wave 4.3 — paywall presentation lives at the scene root via
+        // `.paywallSurface()` so we don't stack a paywall sheet inside
+        // this wizard sheet. The wizard remains visible underneath the
+        // paywall so the user keeps the context they were trying to
+        // unlock.
         // Mail-style "unsent draft" pattern. When the user taps Cancel
         // (or attempts to dismiss in any future swipe-capture path) on a
         // live preview, we present three weighted choices instead of a
@@ -127,6 +138,13 @@ struct AIPlanWizardSheet: View {
             // which fires .onDisappear and cleans up the in-flight task.
             if case .applied = newState {
                 onApplied?(vm.appliedOpsCount)
+                // Phase J.6 — warm `city_travel_times` for the day's
+                // legs we just committed. Fire-and-forget; the service
+                // throttles per-trip and dedupes against its in-memory
+                // cache, so spamming this is safe.
+                Task {
+                    await warmAppleTravelTimesAfterApply()
+                }
             }
         }
         .onChange(of: vm.previewCards.map(\.id)) { _, ids in
@@ -152,6 +170,92 @@ struct AIPlanWizardSheet: View {
         } else {
             vm.cancelGenerate()
             dismiss()
+        }
+    }
+
+    /// Wave 4.3 — routes the upsell tap through the central
+    /// `PaywallPresenter` so the analytics call site, the placement id
+    /// (used by RevenueCat for A/B'd offerings), and the eventual
+    /// purchase flow all share one shape across the app. The `surface`
+    /// distinguishes "configurator badge" from "quota exhausted CTA"
+    /// for funnel breakdown purposes.
+    private func presentAIUpsell(surface: String) {
+        let placement: PaywallPlacement = surface == "quota_exhausted_cta"
+            ? .aiQuotaExhausted
+            : .aiBadgeSoftGate
+        PaywallPresenter.shared.present(
+            placement,
+            dataService: dataService,
+            metadata: [
+                "remaining": String(EntitlementService.shared.aiRemainingForFree),
+                "limit": String(EntitlementService.shared.aiFreeMonthlyLimit),
+                "trigger": surface,
+            ]
+        )
+    }
+
+    // MARK: - Phase J.6: Apple travel-times warm-up
+    //
+    // After AI apply succeeds, we have a fresh sequence of stops in
+    // `vm.previewOps`. Each consecutive (prev → cur) pair becomes a
+    // leg request the user is *very* likely to query soon (the map
+    // tab will draw a polyline; the next AI generation will read
+    // travel minutes). MapKit walks/drives/transits each leg in the
+    // background and the result is uploaded to `city_travel_times`
+    // via `upload-travel-leg`, so the next planner call gets a free
+    // cache hit instead of a Google Routes charge.
+    //
+    // Guards:
+    //   • Need a Google `place_id` for both endpoints — otherwise
+    //     `city_travel_times` has nothing to key on.
+    //   • Need lat/lng — `MKDirections` requires real coordinates.
+    //   • Need a resolved `city_profiles.id` — the upload function
+    //     scopes rows by it.
+    //   • The service itself throttles per-tripId and dedupes by
+    //     (cityProfileId, from, to), so calling this on every apply
+    //     is safe.
+    private func warmAppleTravelTimesAfterApply() async {
+        let trip = vm.trip
+        guard let destinationPlaceId = trip.destinationPlaceId,
+              !destinationPlaceId.isEmpty else { return }
+
+        let inserts = vm.previewOps
+            .compactMap { $0.row }
+            .filter { ($0.place_id?.isEmpty == false)
+                      && $0.latitude != nil
+                      && $0.longitude != nil }
+            .sorted { (lhs, rhs) in
+                (lhs.sort_order ?? Int.max) < (rhs.sort_order ?? Int.max)
+            }
+        guard inserts.count >= 2 else { return }
+
+        var legs: [AppleTravelTimesService.LegRequest] = []
+        legs.reserveCapacity(inserts.count - 1)
+        for i in 1..<inserts.count {
+            let prev = inserts[i - 1]
+            let cur = inserts[i]
+            guard let pid = prev.place_id, let cid = cur.place_id,
+                  let plat = prev.latitude, let plng = prev.longitude,
+                  let clat = cur.latitude, let clng = cur.longitude else { continue }
+            legs.append(.init(
+                fromPlaceId: pid,
+                fromCoordinate: CLLocationCoordinate2D(latitude: plat, longitude: plng),
+                toPlaceId: cid,
+                toCoordinate: CLLocationCoordinate2D(latitude: clat, longitude: clng)
+            ))
+        }
+        guard !legs.isEmpty else { return }
+
+        guard let cityProfileId = await dataService.fetchCityProfileId(
+            googlePlaceId: destinationPlaceId
+        ) else { return }
+
+        await MainActor.run {
+            AppleTravelTimesService.shared.enqueue(
+                tripId: trip.id,
+                cityProfileId: cityProfileId,
+                legs: legs
+            )
         }
     }
 
@@ -222,9 +326,59 @@ struct AIPlanWizardSheet: View {
                 .foregroundStyle(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+            // Wave 4.2 — quota badge. Free users see "X of 3 free
+            // remaining" and the badge doubles as a soft upsell tap
+            // target that fires `pro_gate_attempted`. Pro users see
+            // "Unlimited" with no tap affordance.
+            quotaBadge
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, AppSpacing.md)
+    }
+
+    /// Wave 4.2 — the remaining-credits chip rendered under the hero.
+    /// Free users get a tappable variant that surfaces the upsell sheet
+    /// and logs intent; Pro users see a static "Unlimited" pill so the
+    /// value of the entitlement stays visible.
+    @ViewBuilder
+    private var quotaBadge: some View {
+        let isPro = vm.isProUser
+        let label = vm.quotaBadgeText
+
+        Group {
+            if isPro {
+                HStack(spacing: 4) {
+                    Image(systemName: "infinity")
+                        .font(.caption2.weight(.semibold))
+                    Text(label)
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(AppColors.appPrimary)
+                .padding(.horizontal, AppSpacing.sm)
+                .padding(.vertical, 4)
+                .background(AppColors.appPrimaryLight, in: Capsule())
+            } else {
+                Button {
+                    presentAIUpsell(surface: "configurator_badge")
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                            .font(.caption2.weight(.semibold))
+                        Text(label)
+                            .font(.caption.weight(.semibold))
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(AppColors.appPrimary)
+                    .padding(.horizontal, AppSpacing.sm)
+                    .padding(.vertical, 4)
+                    .background(AppColors.appPrimaryLight, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Upgrade to Pro for unlimited AI day plans")
+            }
+        }
+        .padding(.top, 4)
     }
 
     private func inlineError(_ message: String) -> some View {
@@ -392,6 +546,10 @@ private struct AIPlanWizardBottomBar: View {
     let onGenerate: () -> Void
     let onApply: () -> Void
     let onReset: () -> Void
+    /// Wave 4.2 — fired when the user taps the upgrade CTA after
+    /// `free_limit_reached`. The parent surfaces the paywall sheet so
+    /// this view stays presentation-free.
+    var onUpgradeTap: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 0) {
@@ -468,6 +626,20 @@ private struct AIPlanWizardBottomBar: View {
                 icon: "arrow.clockwise",
                 enabled: vm.canGenerate,
                 action: onGenerate
+            )
+
+        case .quotaExhausted:
+            // Wave 4.2 — server returned `free_limit_reached`. Skip the
+            // generic "Try Again" and route the user straight to the
+            // paywall. The CTA copy intentionally references the value
+            // they're unlocking ("Unlimited AI day plans"), not the
+            // price — the paywall itself handles billing optics.
+            primaryButton(
+                title: "Upgrade for unlimited plans",
+                icon: "sparkles",
+                enabled: true,
+                action: onUpgradeTap,
+                tall: true
             )
 
         case .applied:

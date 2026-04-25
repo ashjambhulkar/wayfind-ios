@@ -26,6 +26,14 @@ struct Place: Identifiable, Codable, Hashable {
     var bookingDetails: BookingDetailUnion?
     var googlePlaceId: String?
 
+    // MARK: – booking monetary fields (drive expense auto-sync)
+    /// Booking total. Used only when `isBooking == true`; round-trips through
+    /// `trip_bookings.amount`. `Decimal` to avoid Double drift on currency.
+    var bookingAmount: Decimal?
+    /// ISO 4217 code that pairs with `bookingAmount`. Falls back to "USD"
+    /// when amount is set but currency is missing.
+    var bookingCurrencyCode: String?
+
     // MARK: – city_places enrichment (joined via place_id / googlePlaceId)
     var heroImageUrl: String?          // city_places.thumbnail_url
     var rating: Double?                // city_places.rating

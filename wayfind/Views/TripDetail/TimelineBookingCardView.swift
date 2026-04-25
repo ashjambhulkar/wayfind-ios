@@ -13,6 +13,18 @@ struct TimelineBookingCardView: View {
     var onEdit: () -> Void = {}
     var onMoveToDay: () -> Void = {}
     var onDelete: () -> Void = {}
+    /// Wave 1.2 — opens the attachments manager for this booking.
+    /// Optional so callers that don't yet wire it (e.g. previews) compile.
+    var onAttachments: (() -> Void)? = nil
+    /// Wave 3.3 — live (or last-known) flight status. Only consulted
+    /// when this booking's category is `.flight`. Defaults to nil so
+    /// non-flight previews / older callers stay source-compatible.
+    var flightStatus: FlightStatus? = nil
+    var isFlightStale: Bool = false
+    var flightTint: FlightStatus.DisplayState.Tint = .neutral
+    var isProUser: Bool = true
+    var onUpgradeTap: (() -> Void)? = nil
+    var onFlightBadgeTap: (() -> Void)? = nil
 
     private var bookingColor: Color {
         place.bookingCategoryEnum?.color ?? AppColors.appPrimary
@@ -29,6 +41,9 @@ struct TimelineBookingCardView: View {
         }
         .contextMenu {
             Button("Edit", action: onEdit)
+            if let onAttachments {
+                Button("Files & Photos", action: onAttachments)
+            }
             Button("Move to Day", action: onMoveToDay)
             Button("Delete", role: .destructive, action: onDelete)
         }
@@ -71,8 +86,33 @@ struct TimelineBookingCardView: View {
                     .foregroundStyle(AppColors.textSecondary)
                     .lineLimit(1)
             }
+
+            if shouldShowFlightBadge {
+                FlightStatusBadge(
+                    status: flightStatus,
+                    isStale: isFlightStale,
+                    tint: flightTint,
+                    isProUser: isProUser,
+                    onUpsellTap: onUpgradeTap,
+                    onTap: onFlightBadgeTap
+                )
+            }
         }
         .timelineCardChassis(stripeColor: bookingColor)
+    }
+
+    /// Only render the badge for flight bookings — and even then only
+    /// when we either have a status to show or we're soft-upselling
+    /// the free user. Hides the badge entirely on hotels / restaurants
+    /// / activities so the timeline stays uncluttered.
+    private var shouldShowFlightBadge: Bool {
+        guard place.bookingCategoryEnum == .flight else { return false }
+        if flightStatus != nil { return true }
+        // Free user with no status yet → show the upsell pill so they
+        // can discover the feature. Pro user with no status row yet
+        // (haven't started tracking) → hide; the explicit "Track flight"
+        // entry point lives in the booking detail screen.
+        return isProUser == false
     }
 
     // MARK: - Type-aware subtitle

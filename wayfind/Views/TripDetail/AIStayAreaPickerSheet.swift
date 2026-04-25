@@ -19,7 +19,6 @@ struct AIStayAreaPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var placeSearch = PlaceSearchService()
     @State private var query: String = ""
-    @State private var isResolvingDetails: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -63,15 +62,7 @@ struct AIStayAreaPickerSheet: View {
     private var content: some View {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if isResolvingDetails {
-            VStack(spacing: AppSpacing.md) {
-                ProgressView()
-                Text("Pinning the area…")
-                    .font(.appCaption)
-                    .foregroundStyle(AppColors.textSecondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if trimmed.isEmpty {
+        if trimmed.isEmpty {
             emptyState
         } else if placeSearch.isSearching && placeSearch.results.isEmpty {
             loadingSkeleton
@@ -157,7 +148,10 @@ struct AIStayAreaPickerSheet: View {
                 Circle()
                     .fill(AppColors.appPrimary.opacity(0.12))
                     .frame(width: 36, height: 36)
-                Image(systemName: "mappin.circle.fill")
+                // `mappin.and.ellipse` reads as "an area" rather than a single
+                // point — matches the picker's "stay area" intent better than
+                // the `mappin.circle.fill` we used before.
+                Image(systemName: "mappin.and.ellipse")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(AppColors.appPrimary)
             }
@@ -183,23 +177,15 @@ struct AIStayAreaPickerSheet: View {
     }
 
     private func select(_ result: PlaceAutocompleteResult) {
-        // We resolve full place details to confirm the place_id and capture the
-        // formatted name. The autocomplete row's `id` IS the Google place_id, so
-        // worst case (network fails) we still have a valid id to send.
+        // Phase B of the cost-reduction plan: we no longer fetch Place Details
+        // here. The autocomplete prediction already contains the Google
+        // `place_id` (in `result.id`) and a human-readable label (in
+        // `mainText` / `fullDescription`) — that's everything the AI day
+        // planner contract needs. Skipping Place Details cuts the most
+        // expensive Places SKU out of this flow entirely.
         HapticManager.light()
-        let fallbackLabel = result.mainText.isEmpty ? result.fullDescription : result.mainText
-        let fallbackId = result.id
-
-        isResolvingDetails = true
-        Task { @MainActor in
-            defer { isResolvingDetails = false }
-            if let detail = await placeSearch.getPlaceDetails(placeId: result.id) {
-                let label = detail.name.isEmpty ? fallbackLabel : detail.name
-                onSelect(label, detail.placeId)
-            } else {
-                onSelect(fallbackLabel, fallbackId)
-            }
-            dismiss()
-        }
+        let label = result.mainText.isEmpty ? result.fullDescription : result.mainText
+        onSelect(label, result.id)
+        dismiss()
     }
 }

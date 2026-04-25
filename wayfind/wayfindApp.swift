@@ -1,3 +1,5 @@
+import Auth
+import MapKit
 import SwiftUI
 
 @main
@@ -59,6 +61,12 @@ struct WayfindApp: App {
                         )) {
                             DisplayNamePromptView()
                         }
+                        // Wave 4.3 — single paywall surface attached at
+                        // the signed-in scene root so every gate (CSV,
+                        // currency, flight tracking, documents, AI cap,
+                        // Settings) presents into the same sheet via
+                        // `PaywallPresenter.shared.present(...)`.
+                        .paywallSurface()
 
                 case .signedOut:
                     NavigationStack {
@@ -86,6 +94,15 @@ struct WayfindApp: App {
                     NotificationManager.shared.dataService = dataService
                     NotificationManager.shared.pendingDeepLinkStore = pendingDeepLinkStore
                 }
+                // Wave 4.2 — cold-start bind. `onChange(authState:)`
+                // doesn't fire for the initial value, so on launches
+                // where the previous session is restored to .signedIn
+                // before this scene mounts we'd never hand the Supabase
+                // user id to RevenueCat. This task path covers it.
+                if case .signedIn = authViewModel.authState,
+                   let session = await AuthSessionService.shared.currentSession() {
+                    await EntitlementService.shared.bind(userId: session.user.id)
+                }
             }
             .onOpenURL { url in
                 // Phase 2 invite-first branch: if this is a wayfind://invite/<token>
@@ -106,9 +123,33 @@ struct WayfindApp: App {
             // and it survives an app crash mid-flow. If a token already
             // sits in `pendingInviteToken` (live tap) we leave it.
             .onChange(of: authViewModel.authState) { _, newState in
-                guard case .signedIn = newState else { return }
-                if pendingInviteToken == nil, let stored = PendingInviteStorage.get() {
-                    pendingInviteToken = stored
+                switch newState {
+                case .signedIn:
+                    // Drain any invite token stashed before sign-in so
+                    // the join sheet can fire on this same session.
+                    if pendingInviteToken == nil, let stored = PendingInviteStorage.get() {
+                        pendingInviteToken = stored
+                    }
+                    // Wave 4.2 — sync the Supabase user id into
+                    // RevenueCat so any purchases (anonymous or
+                    // otherwise) reconcile to the right entitlement
+                    // record. Also seeds the AI usage cache that the
+                    // wizard's "X of 3 free remaining" badge reads.
+                    Task { @MainActor in
+                        if let session = await AuthSessionService.shared.currentSession() {
+                            await EntitlementService.shared.bind(userId: session.user.id)
+                        }
+                    }
+                case .signedOut:
+                    // Drop the RevenueCat appUserID back to anonymous
+                    // so the next account on this shared device starts
+                    // clean instead of inheriting the previous user's
+                    // receipt state.
+                    Task { @MainActor in
+                        await EntitlementService.shared.unbind()
+                    }
+                case .loading:
+                    break
                 }
             }
             .fullScreenCover(item: Binding(
@@ -201,6 +242,12 @@ private struct AppRootTabView: View {
     /// the kick toast). Updated by `TripDetailView.onAppear` once it
     /// instantiates its viewmodel.
     @State private var activeTripDetailViewModel: TripDetailViewModel?
+    /// Per-active-trip Budget tab viewmodel. Created in the same
+    /// `onChange(of: coordinator.activeTrip?.id)` that binds the
+    /// collaboration store, so its lifetime mirrors the trip's. The
+    /// realtime service holds a `weak` reference; the strong owner here
+    /// keeps it alive across tab switches inside the trip.
+    @State private var activeBudgetViewModel: BudgetViewModel?
     /// Hoisted to the trip tab-view root so the AI Day Planner sheet can be
     /// launched identically from both the Itinerary and Map tabs and survives
     /// tab switches without each tab re-instantiating its own copy.
@@ -208,6 +255,10 @@ private struct AppRootTabView: View {
     /// Bound to the trip-detail TabView so the Phase C apply-handoff can
     /// programmatically switch the user to the Map tab.
     @State private var selectedTab: TripDetailTab = .home
+    /// iOS 26 map accessory state is hoisted to the TabView root because
+    /// `tabViewBottomAccessory` must be applied to the TabView, not inside
+    /// the Map tab content.
+    @State private var mapTabState = MapTabSharedState()
     /// Owned by the parent `WayfindApp` and passed in via Binding so
     /// `InviteAcceptView` (which is presented above this view) can ask
     /// us to navigate to a freshly-joined trip and surface the
@@ -283,6 +334,17 @@ private struct AppRootTabView: View {
             if let newTripId {
                 collaborationStore.bind(to: newTripId)
                 collaborationUi.bind(to: newTripId)
+                // Spin up the Budget viewmodel up-front so the tab switch
+                // is instant — the first render uses its empty snapshot
+                // and the parallel fetch in `reload()` paints over it
+                // within a frame or two.
+                let budget = BudgetViewModel(
+                    tripId: newTripId,
+                    currentUserId: collaborationStore.currentUserId,
+                    dataService: dataService
+                )
+                activeBudgetViewModel = budget
+                Task { await budget.reload() }
                 // Realtime binds lazily — wait for the detail viewmodel
                 // to land via `activeTripDetailViewModel` (set below).
             } else {
@@ -290,6 +352,7 @@ private struct AppRootTabView: View {
                 collaborationUi.clear()
                 realtimeService.unbind()
                 activeTripDetailViewModel = nil
+                activeBudgetViewModel = nil
                 isKickFading = false
             }
         }
@@ -409,6 +472,9 @@ private struct AppRootTabView: View {
                 }
             }
         )
+        if let budget = activeBudgetViewModel {
+            realtimeService.bindBudget(budget)
+        }
     }
 
     @MainActor
@@ -499,21 +565,27 @@ private struct AppRootTabView: View {
                     if collaborationStore.canViewExpenses {
                         Tab("Budget", systemImage: "creditcard", value: TripDetailTab.budget) {
                             NavigationStack {
-                                TripBudgetTabView()
-                                    .navigationTitle("Budget")
+                                TripBudgetTabView(
+                                    trip: trip,
+                                    viewModel: activeBudgetViewModel
+                                )
+                                .navigationTitle("Budget")
                             }
                         }
                     }
 
                     Tab("Bookings", systemImage: "airplane", value: TripDetailTab.bookings) {
                         NavigationStack {
-                            BookingsScreenView(trip: trip)
+                            BookingsScreenView(
+                                trip: trip,
+                                onOpenBudgetTab: collaborationStore.canViewExpenses ? { selectedTab = .budget } : nil
+                            )
                         }
                     }
 
                     Tab("Map", systemImage: "map.fill", value: TripDetailTab.map, role: .search) {
                         if #available(iOS 26.0, *) {
-                            MapTabWrapper(trip: trip)
+                            MapTabWrapper(trip: trip, mapState: mapTabState)
                         } else {
                             NavigationStack {
                                 TripMapView(trip: trip)
@@ -523,6 +595,11 @@ private struct AppRootTabView: View {
                 }
             }
             .modifier(ScrollDownMinimizeTabBarModifier())
+            .modifier(MapTabBottomAccessoryModifier(
+                isEnabled: selectedTab == .map,
+                trip: trip,
+                mapState: mapTabState
+            ))
         } else {
             // LIST MODE — no tab bar; create button lives in the nav toolbar
             TripsListView()
@@ -541,15 +618,21 @@ private struct AppRootTabView: View {
 
                 if collaborationStore.canViewExpenses {
                     NavigationStack {
-                        TripBudgetTabView()
-                            .navigationTitle("Budget")
+                        TripBudgetTabView(
+                            trip: trip,
+                            viewModel: activeBudgetViewModel
+                        )
+                        .navigationTitle("Budget")
                     }
                     .tabItem { Label("Budget", systemImage: "creditcard") }
                     .tag(TripDetailTab.budget)
                 }
 
                 NavigationStack {
-                    BookingsScreenView(trip: trip)
+                    BookingsScreenView(
+                        trip: trip,
+                        onOpenBudgetTab: collaborationStore.canViewExpenses ? { selectedTab = .budget } : nil
+                    )
                 }
                 .tabItem { Label("Bookings", systemImage: "airplane") }
                 .tag(TripDetailTab.bookings)
@@ -574,7 +657,9 @@ private struct AppRootTabView: View {
                 onViewModelCreated: { viewModel in
                     activeTripDetailViewModel = viewModel
                     attachRealtimeIfReady()
-                }
+                },
+                onOpenBudgetTab: { selectedTab = .budget },
+                budgetViewModel: activeBudgetViewModel
             )
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -608,48 +693,28 @@ private struct AppRootTabView: View {
 @available(iOS 26.0, *)
 private struct MapTabWrapper: View {
     let trip: Trip
-    @State private var mapState = MapTabSharedState()
+    let mapState: MapTabSharedState
 
     var body: some View {
         NavigationStack {
             TripMapView(trip: trip, sharedState: mapState)
         }
-        // The two .safeAreaInset(.bottom) modifiers stack: the docked
-        // accessory bar sits directly above the floating tab bar, and the
-        // AI Planner FAB floats one band higher so it doesn't compete with
-        // the day filter chips.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            MapDockedAccessoryBar(
-                trip: trip,
-                selectedDayFilter: $mapState.selectedDayFilter,
-                mappablePlaces: mapState.mappablePlaces,
-                dayNumberByDayId: mapState.dayNumberByDayId,
-                onExpand: { mapState.showPlacesSheet = true }
-            )
-            .background(.regularMaterial)
-        }
-        .sheet(isPresented: $mapState.showPlacesSheet) {
+        .sheet(isPresented: Binding(
+            get: { mapState.showPlacesSheet },
+            set: { mapState.showPlacesSheet = $0 }
+        )) {
             TripMapPlacesExpandedSheet(
                 trip: trip,
-                selectedDayFilter: $mapState.selectedDayFilter,
-                activeCategoryFilter: .init(
-                    get: { mapState.activeCategoryFilter },
-                    set: { mapState.activeCategoryFilter = $0 }
+                selectedDayFilter: Binding(
+                    get: { mapState.selectedDayFilter },
+                    set: { mapState.selectedDayFilter = $0 }
                 ),
                 allPlacesForList: mapState.mappablePlaces,
                 dayNumberByDayId: mapState.dayNumberByDayId,
                 onSelectPlace: { place in
                     mapState.showPlacesSheet = false
                     mapState.selectedPlaceToFocus = place
-                },
-                onSearchResultSelected: { name, lat, lng in
-                    mapState.showPlacesSheet = false
-                    mapState.searchResultToFocus = (name, lat, lng)
-                },
-                searchText: .init(
-                    get: { mapState.searchText },
-                    set: { mapState.searchText = $0 }
-                )
+                }
             )
             .presentationDetents([.medium, .large])
             .presentationBackground(.regularMaterial)
@@ -659,15 +724,43 @@ private struct MapTabWrapper: View {
     }
 }
 
+private struct MapTabBottomAccessoryModifier: ViewModifier {
+    let isEnabled: Bool
+    let trip: Trip
+    let mapState: MapTabSharedState
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.1, *) {
+            content
+                .tabViewBottomAccessory(isEnabled: isEnabled) {
+                    MapDockedAccessoryBar(
+                        trip: trip,
+                        selectedDayFilter: Binding(
+                            get: { mapState.selectedDayFilter },
+                            set: { mapState.selectedDayFilter = $0 }
+                        ),
+                        mappablePlaces: mapState.mappablePlaces,
+                        dayNumberByDayId: mapState.dayNumberByDayId,
+                        onExpand: { mapState.showPlacesSheet = true }
+                    )
+                }
+        } else {
+            content
+        }
+    }
+}
+
 /// Shared state between the map view, the tab accessory bar, and the expanded sheet.
+///
+/// Search state lives in `TripMapState` (Phase 2) and is owned by
+/// `TripMapView`; this object now carries only the data that the day
+/// list / day filter / accessory bar need.
 @Observable @MainActor
 final class MapTabSharedState {
     var selectedDayFilter: Int?
     var mappablePlaces: [Place] = []
-    var searchText: String = ""
-    var activeCategoryFilter: String?
     var selectedPlaceToFocus: Place?
-    var searchResultToFocus: (String, Double, Double)?
     var dayNumberByDayId: [UUID: Int] = [:]
     var showPlacesSheet = false
 }

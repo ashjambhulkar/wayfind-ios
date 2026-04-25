@@ -2,8 +2,15 @@ import SwiftUI
 
 struct BookingsScreenView: View {
     @Environment(DataService.self) var dataService
+    @Environment(ToastManager.self) private var toastManager
+    @Environment(CollaborationStore.self) private var collaborationStore
 
     let trip: Trip
+    /// Optional callback so the post-save toast's "View" action can jump
+    /// into the trip's Budget tab. The dedicated bookings screen lives in
+    /// the trip-detail navigation stack, so the parent injects the same
+    /// handle it gives `TripDetailView`.
+    var onOpenBudgetTab: (() -> Void)? = nil
 
     @State private var allBookings: [Place] = []
     @State private var bookingToEdit: Place?
@@ -103,7 +110,13 @@ struct BookingsScreenView: View {
         }
         .navigationDestination(isPresented: $showAddBooking) {
             AddBookingView(
-                onSave: { _ in Task { await loadBookings() } },
+                onSave: { savedPlace, cost in
+                    Task {
+                        await loadBookings()
+                        await trackBookingExpenseIfNeeded(place: savedPlace, cost: cost)
+                    }
+                    toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: false))
+                },
                 targetDayId: addBookingTargetDayId ?? UUID()
             )
         }
@@ -111,16 +124,80 @@ struct BookingsScreenView: View {
             NavigationStack {
                 AddBookingView(
                     editingPlace: place,
-                    onSave: { updated in
+                    onSave: { updated, cost in
                         Task {
                             await dataService.updatePlace(updated)
                             await loadBookings()
+                            await trackBookingExpenseIfNeeded(place: updated, cost: cost)
                         }
+                        toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: true))
                     },
                     targetDayId: place.itineraryDayId
                 )
             }
         }
+    }
+
+    /// Mirror of `TripDetailView.trackBookingExpenseIfNeeded` — kept inline
+    /// so this screen works standalone (it's also reachable from the home
+    /// dashboard via the bookings tab). When a cost is supplied we file a
+    /// `full`-split expense for the current user; the budget hub picks it
+    /// up via realtime as soon as the user navigates to that tab.
+    private func trackBookingExpenseIfNeeded(place: Place, cost: BookingCost?) async {
+        guard let cost else { return }
+        guard let userId = collaborationStore.currentUserId else { return }
+        let expense = TripExpense(
+            id: UUID(),
+            tripId: trip.id,
+            userId: userId,
+            payerUserId: userId,
+            bookingId: place.isBooking ? place.id : nil,
+            title: place.name,
+            amount: cost.amount,
+            currencyCode: cost.currency,
+            category: ExpenseCategory.fromBookingKind(place.bookingType),
+            splitType: .full,
+            expenseDate: place.startTime ?? Date(),
+            notes: nil,
+            isAutoSynced: false,
+            createdAt: nil,
+            updatedAt: nil
+        )
+        let split = ExpenseSplit(
+            id: UUID(),
+            expenseId: expense.id,
+            tripId: trip.id,
+            userId: userId,
+            amount: cost.amount,
+            currencyCode: cost.currency,
+            isAccepted: true,
+            createdAt: nil,
+            updatedAt: nil
+        )
+        _ = await dataService.addExpense(expense, splits: [split])
+    }
+
+    /// Same toast factory used by `TripDetailView` — surfaces the
+    /// "Booking added · Tracked as $X expense" copy with a "View" action
+    /// when an `onOpenBudgetTab` handle was injected, otherwise falls back
+    /// to a plain success toast.
+    private func makeBookingSavedToast(cost: BookingCost?, isUpdate: Bool) -> ToastData {
+        let saveMessage = isUpdate ? "Booking updated" : "Booking added"
+        guard let cost else {
+            return ToastData(message: saveMessage, type: .success)
+        }
+        let formattedAmount = MoneyFormatter.string(cost.amount, currency: cost.currency)
+        let message = "\(saveMessage) · Tracked as \(formattedAmount) expense"
+        if let openBudget = onOpenBudgetTab {
+            return ToastData(
+                message: message,
+                type: .success,
+                duration: 5,
+                actionLabel: "View",
+                actionHandler: { openBudget() }
+            )
+        }
+        return ToastData(message: message, type: .success, duration: 5)
     }
 
     private var undoBanner: some View {

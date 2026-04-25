@@ -7,6 +7,11 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>travel.wayfind.background-uploader</string>
 	</array>
 	<key>GIDClientID</key>
 	<string>1009434603775-8c92mfkampnmj1l7goj6517raaelq0vl.apps.googleusercontent.com</string>
@@ -31,5 +36,18 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Wave 0 §0.5 C1 — privacy disclosures with App-Review-grade copy. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>wayfind lets you attach photos to your activities, bookings, expenses, and trip documents.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save trip photos and screenshots back to your photo library.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo of receipts, boarding passes, or anything you want to keep with your trip.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>wayfind adds your trip itinerary to your calendar so you can see flights, hotels, and activities alongside your other plans. You can turn this off any time in Settings.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>wayfind adds your trip itinerary to your calendar so you can see flights, hotels, and activities alongside your other plans. You can turn this off any time in Settings.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Find friends to invite to your trips by name. We never read or upload your contacts list.</string>
 </dict>
 </plist>

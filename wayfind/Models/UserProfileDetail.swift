@@ -16,6 +16,13 @@ struct UserProfileDetail: Equatable, Sendable {
     let preferredAirport: String?
     let preferredCurrency: String?
     let createdAt: Date?
+    /// Venmo username (no `@`). Used to open `venmo://paycharge?txn=pay&recipients=…`
+    /// from the settlement sheet. Nil-able because a member who hasn't filled
+    /// it in still gets to see settlements — they just won't get a deep link.
+    let venmoUsername: String?
+    /// PayPal.me handle (no `paypal.me/` prefix). Used to construct
+    /// `https://paypal.me/<handle>/<amount>`.
+    let paypalUsername: String?
 
     var avatarURL: URL? {
         guard let avatarURLString, let url = URL(string: avatarURLString), !avatarURLString.isEmpty else {

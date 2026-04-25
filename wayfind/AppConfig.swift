@@ -33,5 +33,33 @@ enum AppConfig {
     static var useRealBackend: Bool {
         !supabaseURL.contains("YOUR_PROJECT")
     }
+
+    /// Build-time toggle for the AI Stay Area picker autocomplete endpoint.
+    /// `true` ⇒ Places API (New) — `places.googleapis.com/v1/places:autocomplete`
+    /// with explicit `X-Goog-FieldMask`. `false` ⇒ Legacy `/place/autocomplete/json`.
+    /// Both paths bill the same SKU; the new API is future-proof against the
+    /// Legacy sunset Google has signaled. See places-cost-and-owned-data plan,
+    /// Phase B.5.
+    static let useNewPlacesAPIForAutocomplete: Bool = true
+
+    // MARK: - RevenueCat (Wave 4.2)
+
+    /// Apple App Store **public** API key from the RevenueCat dashboard
+    /// (Project Settings → API Keys → "Public app-specific API keys" →
+    /// iOS / App Store row, prefix `appl_…`). This is intentionally a
+    /// public key — RevenueCat treats it like an anon Supabase key, the
+    /// real auth happens server-side against the App Store receipt.
+    /// Replace with your project's value before TestFlight; an empty
+    /// string keeps the SDK in no-op mode so dev builds don't crash.
+    static let revenueCatPublicAPIKey: String = ""
+
+    /// Whether `Purchases.configure(...)` should be invoked at launch.
+    /// Driven entirely by whether we have a non-empty key — guarded so
+    /// engineers without a configured key can still build and run the
+    /// rest of the app, paywall flows just route through the SDK-less
+    /// branch in `EntitlementService`.
+    static var isRevenueCatConfigured: Bool {
+        !revenueCatPublicAPIKey.isEmpty
+    }
 }
 

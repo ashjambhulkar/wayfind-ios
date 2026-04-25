@@ -15,6 +15,12 @@ final class MockDataService {
     var dayPlaces: [UUID: [Place]]
     var parsedBookings: [ParsedBooking]
 
+    // Phase 1 of collaborative budget. In-memory snapshots so previews and
+    // unit tests get the same surface as the live Supabase backend without
+    // round-tripping through the network. Keyed by trip id; the snapshot's
+    // four arrays are appended/removed in the relevant mutator below.
+    var budgetSnapshotsByTripId: [UUID: BudgetSnapshot] = [:]
+
     init() {
         let built = Self.buildSampleData()
         trips = built.trips
@@ -148,6 +154,157 @@ final class MockDataService {
     func updateTrip(_ trip: Trip) async {
         if let index = trips.firstIndex(where: { $0.id == trip.id }) {
             trips[index] = trip
+        }
+    }
+
+    // MARK: - Budget mocks (collaborative budget Phase 1)
+
+    /// Mock equivalent of `BudgetService.fetchAll`. Returns an empty snapshot
+    /// for trips the mock hasn't seeded — preview hosts can pre-populate
+    /// `budgetSnapshotsByTripId[tripId]` directly to drive specific UI states.
+    func fetchBudgetSnapshot(tripId: UUID) async -> BudgetSnapshot {
+        budgetSnapshotsByTripId[tripId] ?? .empty
+    }
+
+    func updateTripTotalBudget(tripId: UUID, totalBudget: Decimal?, currency: String) async {
+        if let index = trips.firstIndex(where: { $0.id == tripId }) {
+            trips[index].totalBudget = totalBudget
+            trips[index].budgetCurrencyCode = currency
+        }
+    }
+
+    @discardableResult
+    func addExpense(_ expense: TripExpense, splits: [ExpenseSplit]) async -> TripExpense {
+        var snapshot = budgetSnapshotsByTripId[expense.tripId] ?? .empty
+        snapshot.expenses.append(expense)
+        snapshot.splits.append(contentsOf: splits.map { split in
+            ExpenseSplit(
+                id: split.id,
+                expenseId: expense.id,
+                tripId: expense.tripId,
+                userId: split.userId,
+                amount: split.amount,
+                currencyCode: split.currencyCode,
+                isAccepted: split.isAccepted,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+        })
+        budgetSnapshotsByTripId[expense.tripId] = snapshot
+        return expense
+    }
+
+    func updateExpense(_ expense: TripExpense, splits: [ExpenseSplit]) async {
+        guard var snapshot = budgetSnapshotsByTripId[expense.tripId] else { return }
+        if let index = snapshot.expenses.firstIndex(where: { $0.id == expense.id }) {
+            snapshot.expenses[index] = expense
+        }
+        snapshot.splits.removeAll { $0.expenseId == expense.id }
+        snapshot.splits.append(contentsOf: splits.map { split in
+            ExpenseSplit(
+                id: split.id,
+                expenseId: expense.id,
+                tripId: expense.tripId,
+                userId: split.userId,
+                amount: split.amount,
+                currencyCode: split.currencyCode,
+                isAccepted: split.isAccepted,
+                createdAt: split.createdAt ?? Date(),
+                updatedAt: Date()
+            )
+        })
+        budgetSnapshotsByTripId[expense.tripId] = snapshot
+    }
+
+    func deleteExpense(id: UUID) async {
+        for tripId in budgetSnapshotsByTripId.keys {
+            guard var snapshot = budgetSnapshotsByTripId[tripId] else { continue }
+            let before = snapshot.expenses.count
+            snapshot.expenses.removeAll { $0.id == id }
+            snapshot.splits.removeAll { $0.expenseId == id }
+            if snapshot.expenses.count != before {
+                budgetSnapshotsByTripId[tripId] = snapshot
+                return
+            }
+        }
+    }
+
+    func upsertCategoryBudget(
+        tripId: UUID,
+        category: ExpenseCategory,
+        plannedAmount: Decimal,
+        currency: String
+    ) async {
+        var snapshot = budgetSnapshotsByTripId[tripId] ?? .empty
+        if let index = snapshot.budgets.firstIndex(where: { $0.category == category }) {
+            let existing = snapshot.budgets[index]
+            snapshot.budgets[index] = TripBudget(
+                id: existing.id,
+                tripId: tripId,
+                userId: existing.userId,
+                category: category,
+                plannedAmount: plannedAmount,
+                currencyCode: currency,
+                createdAt: existing.createdAt,
+                updatedAt: Date()
+            )
+        } else {
+            snapshot.budgets.append(TripBudget(
+                id: UUID(),
+                tripId: tripId,
+                userId: trips.first(where: { $0.id == tripId })?.userId ?? UUID(),
+                category: category,
+                plannedAmount: plannedAmount,
+                currencyCode: currency,
+                createdAt: Date(),
+                updatedAt: Date()
+            ))
+        }
+        budgetSnapshotsByTripId[tripId] = snapshot
+    }
+
+    func deleteCategoryBudget(id: UUID) async {
+        for tripId in budgetSnapshotsByTripId.keys {
+            guard var snapshot = budgetSnapshotsByTripId[tripId] else { continue }
+            let before = snapshot.budgets.count
+            snapshot.budgets.removeAll { $0.id == id }
+            if snapshot.budgets.count != before {
+                budgetSnapshotsByTripId[tripId] = snapshot
+                return
+            }
+        }
+    }
+
+    @discardableResult
+    func addSettlement(_ settlement: ExpenseSettlement) async -> ExpenseSettlement {
+        var snapshot = budgetSnapshotsByTripId[settlement.tripId] ?? .empty
+        snapshot.settlements.append(settlement)
+        budgetSnapshotsByTripId[settlement.tripId] = snapshot
+        return settlement
+    }
+
+    func markSettled(id: UUID, method: ExpenseSettlement.SettlementMethod) async {
+        for tripId in budgetSnapshotsByTripId.keys {
+            guard var snapshot = budgetSnapshotsByTripId[tripId] else { continue }
+            if let index = snapshot.settlements.firstIndex(where: { $0.id == id }) {
+                let existing = snapshot.settlements[index]
+                snapshot.settlements[index] = ExpenseSettlement(
+                    id: existing.id,
+                    tripId: existing.tripId,
+                    fromUserId: existing.fromUserId,
+                    toUserId: existing.toUserId,
+                    amount: existing.amount,
+                    currencyCode: existing.currencyCode,
+                    isSettled: true,
+                    settledAt: Date(),
+                    settledVia: method,
+                    notes: existing.notes,
+                    createdAt: existing.createdAt,
+                    updatedAt: Date()
+                )
+                budgetSnapshotsByTripId[tripId] = snapshot
+                return
+            }
         }
     }
 

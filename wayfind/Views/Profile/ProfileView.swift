@@ -231,6 +231,8 @@ struct ProfileView: View {
                     .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
                 }
 
+                ProSubscriptionSection()
+
                 VStack(alignment: .leading, spacing: AppSpacing.md) {
                     Text("ABOUT")
                         .font(.appSmall)

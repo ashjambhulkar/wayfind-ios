@@ -19,6 +19,8 @@ struct EditProfileView: View {
     @State private var bio = ""
     @State private var preferredAirport = ""
     @State private var preferredCurrency = ""
+    @State private var venmoUsername = ""
+    @State private var paypalUsername = ""
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var pickedAvatarJPEG: Data?
     @State private var isLoading = true
@@ -45,7 +47,15 @@ struct EditProfileView: View {
         let nextCur = (PreferredCurrencyFormatting.normalizeInput(preferredCurrency) ?? "").uppercased()
         let prevCur = (loaded.preferredCurrency ?? "").uppercased()
         if nextCur != prevCur { return true }
+        if normalizedHandle(venmoUsername) != normalizedHandle(loaded.venmoUsername ?? "") { return true }
+        if normalizedHandle(paypalUsername) != normalizedHandle(loaded.paypalUsername ?? "") { return true }
         return false
+    }
+
+    private func normalizedHandle(_ raw: String) -> String {
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while trimmed.hasPrefix("@") { trimmed.removeFirst() }
+        return trimmed
     }
 
     private var canSave: Bool {
@@ -100,6 +110,8 @@ struct EditProfileView: View {
                 }
 
                 currencySection
+
+                paymentHandlesSection
 
                 if let saveError, !saveError.isEmpty {
                     Text(saveError)
@@ -259,6 +271,40 @@ struct EditProfileView: View {
         }
     }
 
+    private var paymentHandlesSection: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            Text("Settle up handles")
+                .font(.appCaption)
+                .foregroundStyle(AppColors.textSecondary)
+
+            labeledField(title: "Venmo", hint: "Used to launch Venmo when collaborators settle up.") {
+                HStack(spacing: AppSpacing.xs) {
+                    Text("@")
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textTertiary)
+                    TextField("yourhandle", text: $venmoUsername)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onChange(of: venmoUsername) { _, newValue in
+                            let stripped = newValue.replacingOccurrences(of: "@", with: "")
+                            if stripped != newValue { venmoUsername = stripped }
+                        }
+                }
+            }
+
+            labeledField(title: "PayPal.me", hint: "Used to launch paypal.me/yourname when settling up.") {
+                HStack(spacing: AppSpacing.xs) {
+                    Text("paypal.me/")
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textTertiary)
+                    TextField("yourname", text: $paypalUsername)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+            }
+        }
+    }
+
     private func labeledField(title: String, hint: String?, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             Text(title)
@@ -304,6 +350,8 @@ struct EditProfileView: View {
         bio = detail.bio ?? ""
         preferredAirport = detail.preferredAirport ?? ""
         preferredCurrency = detail.preferredCurrency ?? ""
+        venmoUsername = detail.venmoUsername ?? ""
+        paypalUsername = detail.paypalUsername ?? ""
     }
 
     @MainActor
@@ -340,6 +388,10 @@ struct EditProfileView: View {
             ? nil
             : String(airportTrim.uppercased().prefix(EditProfileLayout.airportMaxLen))
         let currencyValue = PreferredCurrencyFormatting.normalizeInput(preferredCurrency)
+        let venmoTrim = normalizedHandle(venmoUsername)
+        let venmoValue: String? = venmoTrim.isEmpty ? nil : venmoTrim
+        let paypalTrim = normalizedHandle(paypalUsername)
+        let paypalValue: String? = paypalTrim.isEmpty ? nil : paypalTrim
 
         var avatarURL = loaded.avatarURLString
         if let jpeg = pickedAvatarJPEG {
@@ -358,7 +410,9 @@ struct EditProfileView: View {
                 bio: bioValue,
                 preferredAirport: airportValue,
                 preferredCurrency: currencyValue,
-                avatarURL: avatarURL
+                avatarURL: avatarURL,
+                venmoUsername: venmoValue,
+                paypalUsername: paypalValue
             )
         } catch {
             saveError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -373,7 +427,9 @@ struct EditProfileView: View {
             bio: bioValue,
             preferredAirport: airportValue,
             preferredCurrency: currencyValue,
-            createdAt: loaded.createdAt
+            createdAt: loaded.createdAt,
+            venmoUsername: venmoValue,
+            paypalUsername: paypalValue
         )
         authViewModel.currentUserName = ProfileHeroFormatting.primaryLine(
             detail: synthetic,

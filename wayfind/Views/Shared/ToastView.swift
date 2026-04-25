@@ -15,6 +15,14 @@ struct ToastData: Identifiable {
     var type: ToastKind
     var duration: TimeInterval = 3
     var undoAction: (() -> Void)?
+    /// Optional inline action shown to the trailing edge of the toast — e.g.
+    /// "View" on the booking-tracked-as-expense confirmation. Takes
+    /// precedence over `undoAction` when both are set so each toast surfaces
+    /// at most one tappable affordance. Mirrors `Snackbar` action semantics
+    /// from Material so the UI doesn't have to teach the user a new
+    /// interaction.
+    var actionLabel: String?
+    var actionHandler: (() -> Void)?
 }
 
 @MainActor
@@ -70,7 +78,14 @@ struct ToastView: View {
                     .foregroundStyle(AppColors.textPrimary)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
-                if toast.undoAction != nil {
+                if let label = toast.actionLabel, let handler = toast.actionHandler {
+                    Button(label) {
+                        handler()
+                        toastManager.dismiss()
+                    }
+                    .font(.appButton)
+                    .foregroundStyle(AppColors.appPrimary)
+                } else if toast.undoAction != nil {
                     Button("Undo") {
                         toast.undoAction?()
                         toastManager.dismiss()

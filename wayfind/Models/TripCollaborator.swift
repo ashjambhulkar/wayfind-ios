@@ -69,6 +69,16 @@ struct TripCollaborator: Identifiable, Hashable {
     var canAccessExpenses: Bool = true
     var canAccessNotes: Bool = true
 
+    /// Optional payment handles surfaced by the SECURITY DEFINER
+    /// `get_trip_owner_profile_snippet` /
+    /// `list_trip_collaborator_profile_snippets` RPCs so the
+    /// `SettlementCompleteSheet` can deep-link into Venmo / PayPal without
+    /// requiring direct profile-row access. `nil` when the recipient hasn't
+    /// filled them in from Edit Profile — the UI gracefully falls back to a
+    /// "no deep link" caption in that case.
+    var venmoUsername: String?
+    var paypalUsername: String?
+
     /// Stable identifier for SwiftUI / haptics / avatar palette. Real rows use
     /// their `trip_collaborators.id`; the synthesized owner row uses the trip's
     /// owner `userId` (always present for the owner row).

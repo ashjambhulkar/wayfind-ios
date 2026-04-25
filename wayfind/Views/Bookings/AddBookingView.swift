@@ -1,5 +1,15 @@
 import SwiftUI
 
+/// User-entered cost surfaced through `AddBookingView.onSave`. The parent
+/// view is responsible for routing it to the budget service so a tracked
+/// `trip_expense` is created alongside the booking. We intentionally use
+/// `Decimal` (not `Double`) so locale parsing in `MoneyField.parse` keeps
+/// full precision through the database round-trip.
+struct BookingCost: Hashable, Sendable {
+    let amount: Decimal
+    let currency: String
+}
+
 struct AddBookingView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -49,8 +59,15 @@ struct AddBookingView: View {
     @State private var transportArrivalDate = Date()
     @State private var transportSeat = ""
 
+    /// Phase 7 — optional cost the user types into `MoneyField`. When
+    /// non-empty, the parent uses it to upsert a tracked `trip_expense`
+    /// alongside the booking. Locale-friendly text storage matches the
+    /// behaviour of `AddExpenseSheet` (also a `MoneyField` consumer).
+    @State private var costAmountText: String = ""
+    @State private var costCurrency: String = "USD"
+
     var editingPlace: Place? = nil
-    var onSave: ((Place) -> Void)? = nil
+    var onSave: ((Place, BookingCost?) -> Void)? = nil
     let targetDayId: UUID
 
     private var isEditMode: Bool { editingPlace != nil }
@@ -71,6 +88,22 @@ struct AddBookingView: View {
                 bookingForm
                     .padding(.horizontal, AppSpacing.lg)
                     .animation(AppSpring.smooth, value: selectedType)
+
+                VStack(alignment: .leading, spacing: AppSpacing.md) {
+                    Text("COST")
+                        .font(.appSmall)
+                        .foregroundStyle(AppColors.textTertiary)
+                        .tracking(1.5)
+                        .textCase(.uppercase)
+                    MoneyField(
+                        label: "Amount",
+                        placeholder: "0.00",
+                        amountText: $costAmountText,
+                        currency: $costCurrency,
+                        caption: "Tracks as expense automatically"
+                    )
+                }
+                .padding(.horizontal, AppSpacing.lg)
 
                 VStack(alignment: .leading, spacing: AppSpacing.md) {
                     Text("CONFIRMATION")
@@ -107,6 +140,12 @@ struct AddBookingView: View {
         confirmationNumber = place.confirmationNumber ?? ""
         if let typeStr = place.bookingType, let cat = BookingCategory(rawValue: typeStr) {
             selectedType = cat
+        }
+        if let amount = place.bookingAmount {
+            costAmountText = NSDecimalNumber(decimal: amount).stringValue
+        }
+        if let currency = place.bookingCurrencyCode, !currency.isEmpty {
+            costCurrency = currency.uppercased()
         }
         guard let details = place.bookingDetails else { return }
         switch details {
@@ -222,8 +261,20 @@ struct AddBookingView: View {
     private func save() {
         let place = makePlace()
         HapticManager.success()
-        onSave?(place)
+        let cost = parsedCost()
+        onSave?(place, cost)
         dismiss()
+    }
+
+    /// Parsed `(amount, currency)` pair, or `nil` when the user left the
+    /// cost field empty. Currency normalises to upper-case ISO 4217 to
+    /// keep the database row consistent with the budget snapshot.
+    private func parsedCost() -> BookingCost? {
+        guard let amount = MoneyField.parse(costAmountText), amount > 0 else {
+            return nil
+        }
+        let code = costCurrency.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return BookingCost(amount: amount, currency: code.isEmpty ? "USD" : code)
     }
 
     private func makePlace() -> Place {

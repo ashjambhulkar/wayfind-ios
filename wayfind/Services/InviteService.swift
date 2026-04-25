@@ -93,18 +93,20 @@ final class InviteService {
         let tripIdLower = tripId.uuidString.lowercased()
         let createdByLower = userId.uuidString.lowercased()
 
-        // Phase 1.5 backend follow-up: once the migration adds the three
-        // `can_access_*` columns to `trip_invites`, append them to this
-        // payload so they propagate to `trip_collaborators` on accept.
-        // PostgREST returns 400 on unknown columns — so we don't send
-        // them yet. UI today still records the chosen values in the
-        // returned `TripInvite` so we can wire them in once the column
-        // ships, without rebuilding `InviteComposeSheet`.
+        // Phase 8 (collaborative-budget rollout): the
+        // `20260503120000_trip_invites_access_flags` migration added
+        // `can_see_documents` / `can_see_expenses` / `can_see_notes` columns
+        // to `trip_invites` and updated `accept_invite` to copy them onto
+        // the new `trip_collaborators` row. The toggles in
+        // `InviteComposeSheet` finally round-trip end-to-end.
         let payload = InviteInsertPayload(
             trip_id: tripIdLower,
             created_by: createdByLower,
             token: token,
-            role: role.rawValue
+            role: role.rawValue,
+            can_see_documents: canAccessDocuments,
+            can_see_expenses: canAccessExpenses,
+            can_see_notes: canAccessNotes
         )
 
         do {
@@ -257,6 +259,13 @@ private struct InviteInsertPayload: Encodable {
     let created_by: String
     let token: String
     let role: String
+    /// Phase 8 — surface-access flags that round-trip into
+    /// `trip_collaborators` via `accept_invite`. Defaulted to `true` in the
+    /// SQL migration so omitting any of them on an older iOS build still
+    /// preserves the previous "all on" behaviour.
+    let can_see_documents: Bool
+    let can_see_expenses: Bool
+    let can_see_notes: Bool
 }
 
 private struct InviteSelectRow: Decodable {

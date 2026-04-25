@@ -34,6 +34,10 @@ import FirebaseCore
 import FirebaseMessaging
 #endif
 
+#if canImport(RevenueCat)
+import RevenueCat
+#endif
+
 final class AppDelegate: NSObject, UIApplicationDelegate {
     /// Set in `application(_:didFinishLaunchingWithOptions:)` from the
     /// notification launch payload (cold start). `WayfindApp` passes its
@@ -71,6 +75,40 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         if let userInfo = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
             coldStartTripId = PushNotificationService.extractTripId(from: userInfo)
         }
+
+        // 5. RevenueCat (Wave 4.2). Configured *before* the SwiftUI
+        // scene mounts so any view that observes `EntitlementService`
+        // on first appear (e.g. AIPlanWizardSheet's "X of 3 free
+        // remaining" badge) sees a real `CustomerInfo` instead of the
+        // pre-config default. We log in the user id later, in
+        // `WayfindApp.onChange(authState:)`, because we don't have a
+        // Supabase session yet at this point in the launch sequence.
+        //
+        // Configuration is idempotent on the SDK's side but `isConfigured`
+        // is checked just to silence the noisy double-config warning
+        // when the app delegate is invoked twice during state restoration.
+        #if canImport(RevenueCat)
+        if AppConfig.isRevenueCatConfigured, !Purchases.isConfigured {
+            // .info is the SDK's default; bumping to .debug is reserved
+            // for in-flight purchase debugging only — the production
+            // log volume is uninteresting noise otherwise.
+            #if DEBUG
+            Purchases.logLevel = .info
+            #else
+            Purchases.logLevel = .warn
+            #endif
+
+            Purchases.configure(
+                with: Configuration.Builder(withAPIKey: AppConfig.revenueCatPublicAPIKey)
+                    // Explicit StoreKit 2 — required for promotional
+                    // offers, deferred / Ask-to-Buy state, and the
+                    // single-source TX history surface RevenueCat reads
+                    // when validating receipts.
+                    .with(storeKitVersion: .storeKit2)
+                    .build()
+            )
+        }
+        #endif
 
         return true
     }

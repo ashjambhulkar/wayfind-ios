@@ -115,6 +115,16 @@ struct ItineraryAIService {
                 let msg = extractErrorMessage(from: data) ?? "Could not generate a plan. Try adjusting parameters."
                 throw ItineraryAIError.planFailed(msg)
             case 429:
+                // Wave 4.4b: a 429 can mean either of two things now —
+                // (a) free user hit the monthly cap → upsell paywall,
+                // (b) ANY user hit the per-day safety cap → "try
+                // tomorrow" message, no paywall.
+                // Distinguish by the `error` field in the body.
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   (json["error"] as? String) == "daily_safety_cap_reached"
+                {
+                    throw ItineraryAIError.dailySafetyCapReached
+                }
                 throw ItineraryAIError.quotaExceeded
             default:
                 let msg = extractErrorMessage(from: data) ?? "Server error \(http.statusCode)"
