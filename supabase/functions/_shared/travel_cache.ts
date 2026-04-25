@@ -22,6 +22,12 @@ type TravelTimesRow = {
   to_place_id: string;
   walking_minutes: number | null;
   driving_minutes: number | null;
+  // Phase J.5 — per-mode provenance lets us prefer Apple-sourced rows
+  // (free, fresh, recorded by `upload-travel-leg`) over older
+  // mapbox/google rows. `haversine` rows are still skipped — the
+  // optimizer has its own haversine fallback when the cache misses.
+  walking_provider?: string | null;
+  driving_provider?: string | null;
 };
 
 /** Minimal Supabase client shape for `city_travel_times` batch reads (service role in Edge Functions). */
@@ -86,7 +92,9 @@ export async function preloadTravelCache(
     const fromChunk = ids.slice(i, i + PRELOAD_FROM_PLACE_ID_CHUNK_SIZE);
     const { data, error } = await admin
       .from("city_travel_times")
-      .select("from_place_id, to_place_id, walking_minutes, driving_minutes")
+      .select(
+        "from_place_id, to_place_id, walking_minutes, driving_minutes, walking_provider, driving_provider",
+      )
       .eq("city_profile_id", cityProfileId)
       .in("from_place_id", fromChunk)
       .in("to_place_id", ids);
@@ -102,10 +110,14 @@ export async function preloadTravelCache(
 
     const rows = (data ?? []) as TravelTimesRow[];
     for (const row of rows) {
-      const minutes =
-        row.driving_minutes != null
-          ? row.driving_minutes
-          : row.walking_minutes;
+      // Phase J.5 — pick the freshest, most-trusted minute. We prefer:
+      //   1) Apple-sourced driving (free, road-aware, recent)
+      //   2) Apple-sourced walking (same)
+      //   3) Any-provider driving
+      //   4) Any-provider walking
+      // and we drop pure haversine rows since the optimizer already
+      // recomputes that on miss.
+      const minutes = pickPreferredMinutes(row);
       if (minutes == null) continue;
       cache.set(
         travelCacheKey(row.from_place_id, row.to_place_id),
@@ -119,6 +131,19 @@ export async function preloadTravelCache(
   }
 
   return cache;
+}
+
+function pickPreferredMinutes(row: TravelTimesRow): number | null {
+  const drivingIsApple = row.driving_provider === "apple";
+  const walkingIsApple = row.walking_provider === "apple";
+  const drivingIsHaversine = row.driving_provider === "haversine";
+  const walkingIsHaversine = row.walking_provider === "haversine";
+
+  if (drivingIsApple && row.driving_minutes != null) return row.driving_minutes;
+  if (walkingIsApple && row.walking_minutes != null) return row.walking_minutes;
+  if (!drivingIsHaversine && row.driving_minutes != null) return row.driving_minutes;
+  if (!walkingIsHaversine && row.walking_minutes != null) return row.walking_minutes;
+  return null;
 }
 
 /**

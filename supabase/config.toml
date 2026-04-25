@@ -57,3 +57,29 @@ entrypoint = "./functions/ai-consumer/index.ts"
 # After user adds a place-backed `trip_activities` row: upsert `city_places` using `matchCityProfile` (same as itinerary-ai).
 [functions.sync-city-place-from-trip]
 verify_jwt = false
+
+# Apple→Google place_id resolver (Phase C of places-cost plan). Validates JWT inside the function via auth.getUser()
+# so it can use the user id for per-user Upstash sliding-window rate limiting.
+[functions.lookup-place-id]
+verify_jwt = false
+
+# Phase F.3 — User-photo moderation pipeline. JWT validated inside the function so the uploader is bound to the
+# request; required for CSAM workflow per docs/csam-ncmec-runbook.md.
+[functions.moderate-place-photo]
+verify_jwt = false
+
+# Phase I.2 — Open-data ingestion (Overpass / Wikidata / Wikivoyage / Commons). Service-role only;
+# guarded by `x-worker-secret` (Vault), same pattern as city-place-enricher.
+[functions.ingest-open-data-for-city]
+verify_jwt = false
+
+# Phase J.2 — Apple-sourced travel leg uploader. JWT validated inside the function so the per-user
+# Upstash sliding-window rate limiter (600/hr) can key off the user id. Same pattern as lookup-place-id.
+[functions.upload-travel-leg]
+verify_jwt = false
+
+# Phase G.1 — Nightly aggregation of `places_usage_events` into `places_usage_daily`. The function
+# itself enforces the bearer check (it rejects anything that isn't the service-role key the cron job
+# mints), so we keep the gateway off; pg_cron talks to it from inside the Supabase network.
+[functions.places-usage-rollup]
+verify_jwt = false

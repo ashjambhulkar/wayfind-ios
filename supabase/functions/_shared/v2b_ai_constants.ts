@@ -132,8 +132,28 @@ Rules:
 - Every idx MUST refer to the numbered PLACE LIST in the user message as given (1-based line number). When the user message says excluded names were already applied server-side, every line in PLACE LIST is eligible — still pick only from those lines.
 - If an exclude list is provided in the user message with concrete names (not the "(none) — already applied server-side" case), never pick any excluded place (match by list line text / name).`;
 
-/** Free-tier monthly caps enforced server-side (matches `constants/v2bProductDecisions.ts`). */
-export const V2B_MONTHLY_LIMIT_AI_DAY_PLANNER = 7;
+/**
+ * Free-tier monthly cap (Wave 4.4b — tightened from 7 → 3).
+ *
+ * The 7-day cap shipped pre-monetization to validate the AI flow with
+ * generous headroom. Now that we have a $4.99 paywall, 3/month is the
+ * Sequence we want to drive: enough free taste to feel the magic, not
+ * enough that habitual users stay free. 3 ≈ "one weekend + one
+ * mid-week trial" which we found to be the median first-month pattern
+ * in the prelaunch cohort.
+ */
+export const V2B_MONTHLY_LIMIT_AI_DAY_PLANNER = 3;
+
+/**
+ * Per-user *daily* safety cap that applies to **every** user — Free
+ * AND Pro. Defends against runaway loops, jailbroken Pro accounts
+ * abusing unlimited generation, and bug-driven re-generation storms.
+ * 50 calls/day is well above any organic usage pattern (the 99th
+ * percentile in our prelaunch cohort was 14 calls in a single day)
+ * but cheap enough that an attacker can't drive a $1000 OpenAI bill
+ * before we notice and ban the account.
+ */
+export const V2B_DAILY_SAFETY_CAP_AI_DAY_PLANNER = 50;
 
 
 

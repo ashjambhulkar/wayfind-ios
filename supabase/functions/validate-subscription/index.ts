@@ -224,6 +224,32 @@ serve(async (req: Request) => {
       );
     }
 
+    // Audit ledger entry — keeps validate-subscription, the
+    // RevenueCat webhook, and the nightly reconcile job in a single
+    // forensic table. Synthetic event id (no Apple receipt id is
+    // stable across calls) is OK here because the ledger is for
+    // observability, not idempotency on this path.
+    const validateEventId =
+      `validate:${user.id}:${apple.originalTransactionId ?? "no-otid"}:${
+        apple.expiresAtIso ?? "no-exp"
+      }`;
+    const { error: auditErr } = await admin
+      .from("processed_webhook_events")
+      .upsert(
+        {
+          event_id: validateEventId,
+          event_type: isPro ? "VALIDATE_PRO" : "VALIDATE_FREE",
+          user_id: user.id,
+          source: "validate",
+        },
+        { onConflict: "event_id" },
+      );
+    if (auditErr) {
+      // Audit failure is non-fatal — the entitlement upsert already
+      // succeeded. Log so ops can spot a degraded ledger.
+      console.warn("[validate-subscription] audit upsert", auditErr.message);
+    }
+
     return new Response(
       JSON.stringify({
         ok: true,

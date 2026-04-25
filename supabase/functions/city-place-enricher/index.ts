@@ -610,8 +610,31 @@ async function markJob(
   if (error) throw new Error(`markJob failed: ${error.message}`);
 }
 
-async function runSenseStage(row: CityPlaceRow) {
-  if (row.details_enriched_at && row.rating !== null && row.reviews_tags && row.reviews_tags.length > 0) {
+/**
+ * Mode controls which slice of the SerpAPI payload we apply:
+ *
+ *   - 'details': rating, hours, phones, website, AI-feeders. Skips image
+ *               writes entirely. Cheap fields, refreshed often.
+ *   - 'images':  thumbnail_url + images[] + images_refreshed_at +
+ *               image_source. Skips text fields.
+ *   - 'all':    legacy combined behavior.
+ *
+ * Critical safety: when image_source = 'user', we NEVER overwrite the
+ * thumbnail or images columns. User-uploaded photos (Phase F) own those
+ * slots until the Phase F lifecycle removes them.
+ */
+type EnrichMode = 'details' | 'images' | 'all';
+
+async function runSenseStage(row: CityPlaceRow, mode: EnrichMode = 'all') {
+  // For 'details' mode the gating heuristic is unchanged; for 'images' mode
+  // we always re-fetch (the caller has already decided the image is stale).
+  if (
+    mode === 'details' &&
+    row.details_enriched_at &&
+    row.rating !== null &&
+    row.reviews_tags &&
+    row.reviews_tags.length > 0
+  ) {
     return;
   }
 
@@ -630,35 +653,52 @@ async function runSenseStage(row: CityPlaceRow) {
     return;
   }
 
-  const spendText = extractSpendText(place);
-  const { time_spent_min, time_spent_max } = parseTypicalSpend(spendText);
-  const imageUrls = extractImageUrls(place.images);
-  const phones = extractPhones(place);
-  const thumbnailUrl = extractThumbnailUrl(place);
-  const subtypes = extractSubtypes(place);
-  const reviewTags = extractReviewTags(place);
-  const popularTimesPayload = normalizePopularTimes(place.popular_times);
   const nowIso = new Date().toISOString();
+  const payload: Record<string, unknown> = {};
 
-  const payload: Record<string, unknown> = {
-    rating: place.rating ?? null,
-    user_ratings_total:
-      typeof place.reviews === 'number' ? Math.round(place.reviews) : null,
-    price_level: parsePriceLevel(place.price ?? null),
-    opening_hours: normalizeOpeningHours(place.hours ?? null),
-    formatted_phone_number: phones.formatted,
-    international_phone_number: phones.international,
-    website: place.website?.trim() || null,
-    images: imageUrls.length > 0 ? imageUrls : null,
-    thumbnail_url: thumbnailUrl,
-    popular_times: popularTimesPayload,
-    subtypes,
-    reviews_tags: reviewTags,
-    time_spent_min,
-    time_spent_max,
-    details_enriched_at: nowIso,
-    time_spent_enriched_at: nowIso,
-  };
+  if (mode === 'details' || mode === 'all') {
+    const spendText = extractSpendText(place);
+    const { time_spent_min, time_spent_max } = parseTypicalSpend(spendText);
+    const phones = extractPhones(place);
+    const subtypes = extractSubtypes(place);
+    const reviewTags = extractReviewTags(place);
+    const popularTimesPayload = normalizePopularTimes(place.popular_times);
+
+    payload.rating = place.rating ?? null;
+    payload.user_ratings_total =
+      typeof place.reviews === 'number' ? Math.round(place.reviews) : null;
+    payload.price_level = parsePriceLevel(place.price ?? null);
+    payload.opening_hours = normalizeOpeningHours(place.hours ?? null);
+    payload.formatted_phone_number = phones.formatted;
+    payload.international_phone_number = phones.international;
+    payload.website = place.website?.trim() || null;
+    payload.popular_times = popularTimesPayload;
+    payload.subtypes = subtypes;
+    payload.reviews_tags = reviewTags;
+    payload.time_spent_min = time_spent_min;
+    payload.time_spent_max = time_spent_max;
+    payload.details_enriched_at = nowIso;
+    payload.time_spent_enriched_at = nowIso;
+  }
+
+  if (mode === 'images' || mode === 'all') {
+    // Hard stop: never overwrite user-uploaded photos.
+    const imageSource = (row as unknown as { image_source?: string | null }).image_source;
+    if (imageSource === 'user') {
+      console.log(
+        `[worker] image_source=user for city_place_id=${row.id} — skipping image refresh`,
+      );
+    } else {
+      const imageUrls = extractImageUrls(place.images);
+      const thumbnailUrl = extractThumbnailUrl(place);
+      payload.images = imageUrls.length > 0 ? imageUrls : null;
+      payload.thumbnail_url = thumbnailUrl;
+      payload.image_source = thumbnailUrl ? 'serpapi' : 'unknown';
+      payload.images_refreshed_at = nowIso;
+    }
+  }
+
+  if (Object.keys(payload).length === 0) return;
 
   const { error } = await supabase.from('city_places').update(payload).eq('id', row.id);
   if (error) throw new Error(`sense update failed: ${error.message}`);
@@ -702,27 +742,37 @@ async function processBatch(batchSize = 5) {
 
   if (error) throw new Error(`claim jobs failed: ${error.message}`);
 
-  const jobs = (data ?? []) as { id: number; city_place_id: string }[];
+  const jobs = (data ?? []) as {
+    id: number;
+    city_place_id: string;
+    mode?: EnrichMode | null;
+    priority?: string | null;
+  }[];
   if (jobs.length === 0) return { claimed: 0 };
 
   for (const job of jobs) {
+    const mode: EnrichMode = (job.mode ?? 'all') as EnrichMode;
     try {
       let row = await fetchPlaceRow(job.city_place_id);
 
-      await runSenseStage(row);
+      await runSenseStage(row, mode);
 
       row = await fetchPlaceRow(job.city_place_id);
 
-      if (row.details_enriched_at) {
+      // AI stage only makes sense after we have details; skip entirely
+      // for image-only refreshes.
+      if (mode !== 'images' && row.details_enriched_at) {
         await runAiStage(row);
       }
 
       await markJob(job.id, 'done', null);
-      console.log(`[worker] done city_place_id=${job.city_place_id}`);
+      console.log(`[worker] done city_place_id=${job.city_place_id} mode=${mode}`);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       await markJob(job.id, 'failed', message, 300);
-      console.error(`[worker] failed city_place_id=${job.city_place_id}: ${message}`);
+      console.error(
+        `[worker] failed city_place_id=${job.city_place_id} mode=${mode}: ${message}`,
+      );
     }
   }
 

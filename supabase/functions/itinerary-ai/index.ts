@@ -652,8 +652,58 @@ async function lookupPlaceCache(
   return null;
 }
 
+// Phase G.1 — usage recorder. Reads SUPABASE_URL +
+// SUPABASE_SERVICE_ROLE_KEY from the function's runtime env (always
+// present in production, optional locally), POSTs the event to the
+// `record_places_usage_event` RPC, and discards the response. We
+// hash the call key with SHA-256 so the raw `places_usage_events`
+// table never carries PII or business identifiers — the dashboard
+// only needs api/status counts; key_hash exists purely for spotting
+// hot keys in forensic audits.
+//
+// Failures are swallowed: telemetry must never block a real request.
+async function recordPlacesUsageEvent(
+  api: string,
+  key: string,
+  status: string,
+): Promise<void> {
+  try {
+    const url = Deno.env.get("SUPABASE_URL");
+    const key_role = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!url || !key_role) return;
+    const keyHash = await sha256Hex(key);
+    await fetch(`${url}/rest/v1/rpc/record_places_usage_event`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": key_role,
+        "Authorization": `Bearer ${key_role}`,
+      },
+      body: JSON.stringify({
+        p_api: api,
+        p_status: status,
+        p_key_hash: keyHash,
+      }),
+    });
+  } catch (_) {
+    // best-effort; never propagate
+  }
+}
+
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(s),
+  );
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function logGoogleApiCall(api: string, key: string, status: string): void {
   console.log(`[GoogleAPI] ${api} | key=${key} | ${status}`);
+  // Fire-and-forget — never await, never block the caller.
+  void recordPlacesUsageEvent(api, key, status);
 }
 
 const VALID_TRAVEL_MODES = new Set([
@@ -663,12 +713,60 @@ const VALID_TRAVEL_MODES = new Set([
   "bicycling",
 ]);
 
+/**
+ * Phase J.5 — Travel-time lookup with `city_travel_times` Apple-source
+ * preference.
+ *
+ * Resolution order (cheapest, freshest first):
+ *   1. `city_travel_times` row for `(cityProfileId, from_place_id, to_place_id)`
+ *      where the per-mode `*_provider` is `'apple'`. This is the
+ *      output of `upload-travel-leg` (Phase J.2) and is free.
+ *   2. Same row, any provider — covers older `mapbox`/`google` rows we
+ *      haven't refreshed yet.
+ *   3. `cachedDirections` (Google Routes with Redis cache). This is
+ *      where the spend lives, so we want it to be the *fallback*, not
+ *      the primary lookup.
+ *
+ * The optional `lookup` arg is what enables the cache hit. Existing
+ * call-sites that don't have place_ids (e.g. coordinate-only AI
+ * proposals) fall through to step 3 unchanged.
+ */
 async function distanceLegMinutesCached(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
   mode = "driving",
+  lookup?: {
+    admin: ReturnType<typeof createClient>;
+    cityProfileId: string;
+    fromPlaceId: string | null | undefined;
+    toPlaceId: string | null | undefined;
+  } | null,
 ): Promise<number | null> {
   const m = VALID_TRAVEL_MODES.has(mode) ? mode : "driving";
+
+  if (
+    lookup?.admin &&
+    lookup.cityProfileId &&
+    lookup.fromPlaceId &&
+    lookup.toPlaceId
+  ) {
+    const cached = await readCityTravelTimesLeg(
+      lookup.admin,
+      lookup.cityProfileId,
+      lookup.fromPlaceId,
+      lookup.toPlaceId,
+      m,
+    );
+    if (cached != null) {
+      logGoogleApiCall(
+        "compute_routes",
+        `${lookup.fromPlaceId}|${lookup.toPlaceId}|${m}`,
+        "city_travel_times_hit",
+      );
+      return cached;
+    }
+  }
+
   logGoogleApiCall(
     "compute_routes",
     `${from.lat},${from.lng}|${to.lat},${to.lng}|${m}`,
@@ -677,6 +775,80 @@ async function distanceLegMinutesCached(
   const { durationSeconds } = await cachedDirections(from, to, m);
   if (durationSeconds == null) return null;
   return Math.round(durationSeconds / 60);
+}
+
+/**
+ * Best-effort resolver for the city profile that owns this trip's
+ * destination. Returns `null` when we can't tell — callers must
+ * gracefully fall back to the unscoped (coordinate-only) path.
+ */
+async function resolveTripCityProfileId(
+  admin: ReturnType<typeof createClient>,
+  tripId: string,
+): Promise<string | null> {
+  type TripRow = { destination_place_id: string | null };
+  const { data: trip, error: tripErr } = await admin
+    .from("trips")
+    .select("destination_place_id")
+    .eq("id", tripId)
+    .maybeSingle<TripRow>();
+  if (tripErr || !trip?.destination_place_id) return null;
+
+  type ProfileRow = { id: string };
+  const { data: profile, error: profileErr } = await admin
+    .from("city_profiles")
+    .select("id")
+    .eq("place_id", trip.destination_place_id)
+    .maybeSingle<ProfileRow>();
+  if (profileErr || !profile?.id) return null;
+  return profile.id;
+}
+
+/**
+ * Single-row lookup against `city_travel_times`. Returns minutes for
+ * the requested mode, preferring Apple-sourced data. Returns `null`
+ * on miss or when the row only carries a `haversine` value (the
+ * caller should fall back to a real router in that case).
+ */
+async function readCityTravelTimesLeg(
+  admin: ReturnType<typeof createClient>,
+  cityProfileId: string,
+  fromPlaceId: string,
+  toPlaceId: string,
+  mode: string,
+): Promise<number | null> {
+  type Row = {
+    walking_minutes: number | null;
+    driving_minutes: number | null;
+    transit_minutes: number | null;
+    walking_provider: string | null;
+    driving_provider: string | null;
+    transit_provider: string | null;
+  };
+  const { data, error } = await admin
+    .from("city_travel_times")
+    .select(
+      "walking_minutes,driving_minutes,transit_minutes," +
+        "walking_provider,driving_provider,transit_provider",
+    )
+    .eq("city_profile_id", cityProfileId)
+    .eq("from_place_id", fromPlaceId)
+    .eq("to_place_id", toPlaceId)
+    .maybeSingle<Row>();
+  if (error || !data) return null;
+
+  const modeColumn = mode === "walking"
+    ? { minutes: data.walking_minutes, provider: data.walking_provider }
+    : mode === "transit"
+    ? { minutes: data.transit_minutes, provider: data.transit_provider }
+    : { minutes: data.driving_minutes, provider: data.driving_provider };
+
+  // Skip haversine values — a real router (cachedDirections) will give
+  // a better answer and the function call is cheap enough that we'd
+  // rather pay for it than hand back a bad estimate.
+  if (modeColumn.provider === "haversine") return null;
+  if (modeColumn.minutes == null) return null;
+  return modeColumn.minutes;
 }
 
 function directionsUrl(
@@ -1008,6 +1180,12 @@ async function recomputeLegsForTrip(
   const sortedDays = [...(daysRaw ?? [])] as { id: string; date: string }[];
   sortedDays.sort((a, b) => a.date.localeCompare(b.date));
 
+  // Phase J.5 — pull the trip's city_profile_id once so each leg can
+  // try its `city_travel_times` row before falling back to Google
+  // Routes. Best-effort; missing profile just means we use the same
+  // path as before (cachedDirections).
+  const cityProfileId = await resolveTripCityProfileId(admin, tripId);
+
   for (const day of sortedDays) {
     const list = byDay.get(day.id);
     if (!list?.length) continue;
@@ -1034,6 +1212,14 @@ async function recomputeLegsForTrip(
           { lat: prev!.latitude!, lng: prev!.longitude! },
           { lat: cur.latitude!, lng: cur.longitude! },
           mode,
+          cityProfileId
+            ? {
+                admin,
+                cityProfileId,
+                fromPlaceId: prev?.place_id,
+                toPlaceId: cur.place_id,
+              }
+            : null,
         );
       }
       const { error: upErr } = await admin.from("trip_activities").update({
@@ -2186,20 +2372,29 @@ serve(async (req: Request) => {
       "ok" in claimRow &&
       (claimRow as { ok: boolean }).ok;
     if (!claimOk) {
+      const claimReason = (claimRow as { reason?: string })?.reason ?? "limit_exceeded";
+      // Wave 4.4b: distinguish the daily safety cap from the free
+      // monthly cap. The client maps `daily_safety_cap_reached` to a
+      // "Try again tomorrow" message, NOT the upgrade paywall — we
+      // don't want a Pro user who hit their own anti-abuse cap to
+      // see an upsell. The `error` field stays `free_limit_reached`
+      // for back-compat with older clients that branch on it; new
+      // clients should branch on `reason` instead.
+      const isDailySafetyCap = claimReason === "daily_safety_cap_reached";
       step(
         "journey_quota_blocked",
         {
           feature: aiFeature,
-          reason: (claimRow as { reason?: string })?.reason ?? "limit_exceeded",
+          reason: claimReason,
+          tier: isDailySafetyCap ? "daily_safety_cap" : "monthly_free",
         },
         "warn",
       );
       return respond(
         {
-          error: "free_limit_reached",
+          error: isDailySafetyCap ? "daily_safety_cap_reached" : "free_limit_reached",
           feature: aiFeature,
-          reason: (claimRow as { reason?: string })?.reason ??
-            "limit_exceeded",
+          reason: claimReason,
         },
         429,
       );
