@@ -448,13 +448,25 @@ struct TripDetailView: View {
                 .environment(collaborationStore)
         }
         .sheet(item: $itineraryPhotosTarget) { target in
-            ActivityPhotosSheet(
-                activityId: target.activityId,
-                tripId: viewModel?.trip.id ?? trip.id,
-                activityTitle: target.title,
-                canEditAttachments: collaborationStore.canEdit
-            )
-            .environment(dataService)
+            Group {
+                switch target.presentation {
+                case .galleryOnly:
+                    ActivityPhotoGallerySheet(
+                        activityId: target.activityId,
+                        tripId: viewModel?.trip.id ?? trip.id,
+                        activityTitle: target.title
+                    )
+                    .environment(dataService)
+                case .manage:
+                    ActivityPhotosSheet(
+                        activityId: target.activityId,
+                        tripId: viewModel?.trip.id ?? trip.id,
+                        activityTitle: target.title,
+                        canEditAttachments: collaborationStore.canEdit
+                    )
+                    .environment(dataService)
+                }
+            }
             .onDisappear {
                 Task { await refreshItineraryPhotoStacks() }
             }
@@ -479,8 +491,12 @@ struct TripDetailView: View {
         itineraryPhotoStacks = stacks
     }
 
-    private func openItineraryActivityPhotos(for place: Place) {
-        itineraryPhotosTarget = ActivityPhotosSheetTarget(activityId: place.id, title: place.name)
+    private func openItineraryActivityPhotos(for place: Place, presentation: ActivityPhotosSheetTarget.Presentation) {
+        itineraryPhotosTarget = ActivityPhotosSheetTarget(
+            activityId: place.id,
+            title: place.name,
+            presentation: presentation
+        )
     }
 
     // MARK: - Calendar sync helpers (Wave 2.1)
@@ -792,7 +808,8 @@ struct TripDetailView: View {
                                     onDelete: { deletePlace(place, viewModel: viewModel) },
                                     activityPhotoStack: itineraryPhotoStacks[place.id] ?? [],
                                     canEditActivityPhotos: collaborationStore.canEdit,
-                                    onOpenActivityPhotos: { openItineraryActivityPhotos(for: place) }
+                                    onOpenActivityPhotoGallery: { openItineraryActivityPhotos(for: place, presentation: .galleryOnly) },
+                                    onOpenActivityPhotoManage: { openItineraryActivityPhotos(for: place, presentation: .manage) }
                                 )
                             }
                         }
@@ -1035,7 +1052,8 @@ struct TripDetailView: View {
                                 onDelete: { deletePlace(place, viewModel: viewModel) },
                                 activityPhotoStack: itineraryPhotoStacks[place.id] ?? [],
                                 canEditActivityPhotos: collaborationStore.canEdit,
-                                onOpenActivityPhotos: { openItineraryActivityPhotos(for: place) }
+                                onOpenActivityPhotoGallery: { openItineraryActivityPhotos(for: place, presentation: .galleryOnly) },
+                                onOpenActivityPhotoManage: { openItineraryActivityPhotos(for: place, presentation: .manage) }
                             )
                         }
                     }

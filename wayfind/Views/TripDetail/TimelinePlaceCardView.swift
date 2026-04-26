@@ -15,9 +15,12 @@ struct TimelinePlaceCardView: View {
 
     /// Signed thumbnail URLs for `trip_activity_attachments` (same ids as `place.id`).
     var activityPhotoStack: [ActivityFeedPhotoStackItem] = []
-    /// Editors get swipe-to-photos + empty-state camera; viewers only see stacks when non-empty.
+    /// Editors get swipe-to-photos; viewers only see stacks when non-empty.
     var canEditActivityPhotos: Bool = false
-    var onOpenActivityPhotos: (() -> Void)? = nil
+    /// Tap on the stacked thumbnails — paged gallery only.
+    var onOpenActivityPhotoGallery: (() -> Void)? = nil
+    /// Swipe / context **Photos** — full add–manage sheet (editors).
+    var onOpenActivityPhotoManage: (() -> Void)? = nil
 
     /// Phase 3 — pulled from the environment so cards in the wishlist
     /// section pick up flashes too, not just cards in scheduled days.
@@ -49,8 +52,8 @@ struct TimelinePlaceCardView: View {
 
     var body: some View {
         Group {
-            if let onPhotos = onOpenActivityPhotos, canEditActivityPhotos {
-                TimelineSwipeRevealPhotosRow(onPhotos: onPhotos) {
+            if let manage = onOpenActivityPhotoManage, canEditActivityPhotos {
+                TimelineSwipeRevealPhotosRow(onPhotos: manage) {
                     rowCore
                 }
             } else {
@@ -63,9 +66,15 @@ struct TimelinePlaceCardView: View {
             if dayNumber != 0 {
                 Button("Move to Ideas", action: onMoveToIdeas)
             }
-            if let onPhotos = onOpenActivityPhotos, canEditActivityPhotos || !activityPhotoStack.isEmpty {
+            if canEditActivityPhotos, let manage = onOpenActivityPhotoManage {
                 Button {
-                    onPhotos()
+                    manage()
+                } label: {
+                    Label("Photos", systemImage: "photo.on.rectangle.angled")
+                }
+            } else if let gallery = onOpenActivityPhotoGallery, !activityPhotoStack.isEmpty {
+                Button {
+                    gallery()
                 } label: {
                     Label("Photos", systemImage: "photo.on.rectangle.angled")
                 }
@@ -128,8 +137,8 @@ struct TimelinePlaceCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let onPhotos = onOpenActivityPhotos, !activityPhotoStack.isEmpty {
-                ActivityFeedPhotoStackView(items: activityPhotoStack, onTap: onPhotos)
+            if let gallery = onOpenActivityPhotoGallery, !activityPhotoStack.isEmpty {
+                ActivityFeedPhotoStackView(items: activityPhotoStack, onTap: gallery)
             }
         }
         .timelineCardChassis(stripeColor: familyColor)

@@ -92,10 +92,19 @@ struct ActivityPhotosSheet: View {
                                     .font(.appBody.weight(.semibold))
                             }
                             .foregroundStyle(AppColors.appPrimary)
-                            .padding(.horizontal, 12)
+                            .padding(.leading, 12)
+                            .padding(.trailing, 10)
                             .frame(height: 36)
                             .background(AppColors.appSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+                            .clipShape(
+                                UnevenRoundedRectangle(
+                                    topLeadingRadius: 0,
+                                    bottomLeadingRadius: 0,
+                                    bottomTrailingRadius: AppCornerRadius.medium,
+                                    topTrailingRadius: AppCornerRadius.medium,
+                                    style: .continuous
+                                )
+                            )
                             .shadow(color: Color.black.opacity(0.06), radius: 4, x: 0, y: 2)
                         }
                         .buttonStyle(.plain)

@@ -1,10 +1,17 @@
 import SwiftUI
 
-/// Identifies which activity to show in `ActivityPhotosSheet` when using `.sheet(item:)`.
+/// Identifies which activity to show when using `.sheet(item:)` — full manager vs view-only gallery.
 struct ActivityPhotosSheetTarget: Identifiable, Hashable {
+    enum Presentation: String, Hashable {
+        case manage
+        case galleryOnly
+    }
+
     let activityId: UUID
     let title: String
-    var id: UUID { activityId }
+    var presentation: Presentation = .manage
+
+    var id: String { "\(activityId.uuidString)-\(presentation.rawValue)" }
 }
 
 /// Overlapping thumbnails for activity attachments (timeline + recent activity).

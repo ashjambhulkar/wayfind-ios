@@ -53,13 +53,25 @@ struct RecentActivitySheet: View {
         .presentationDragIndicator(.visible)
         .tint(AppColors.appPrimary)
         .sheet(item: $photosSheetTarget) { target in
-            ActivityPhotosSheet(
-                activityId: target.activityId,
-                tripId: trip.id,
-                activityTitle: target.title,
-                canEditAttachments: collaborationStore.canEdit
-            )
-            .environment(dataService)
+            Group {
+                switch target.presentation {
+                case .galleryOnly:
+                    ActivityPhotoGallerySheet(
+                        activityId: target.activityId,
+                        tripId: trip.id,
+                        activityTitle: target.title
+                    )
+                    .environment(dataService)
+                case .manage:
+                    ActivityPhotosSheet(
+                        activityId: target.activityId,
+                        tripId: trip.id,
+                        activityTitle: target.title,
+                        canEditAttachments: collaborationStore.canEdit
+                    )
+                    .environment(dataService)
+                }
+            }
             .onDisappear {
                 Task { await store.refreshAttachmentStacksOnly() }
             }
@@ -97,13 +109,14 @@ struct RecentActivitySheet: View {
                         ActivityFeedRow(
                             entry: entry,
                             photoStack: store.photoStack(for: entry),
-                            onOpenPhotos: { openPhotos(for: entry) }
+                            onOpenPhotoGallery: { openPhotos(for: entry, presentation: .galleryOnly) },
+                            onOpenPhotoManage: { openPhotos(for: entry, presentation: .manage) }
                         )
                         .listRowBackground(AppColors.appSurface)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             if collaborationStore.canEdit, entry.tripActivityAttachmentTargetId != nil {
                                 Button {
-                                    openPhotos(for: entry)
+                                    openPhotos(for: entry, presentation: .manage)
                                 } label: {
                                     Label("Photos", systemImage: "photo.on.rectangle.angled")
                                 }
@@ -127,11 +140,11 @@ struct RecentActivitySheet: View {
         }
     }
 
-    private func openPhotos(for entry: ActivityLogEntry) {
+    private func openPhotos(for entry: ActivityLogEntry, presentation: ActivityPhotosSheetTarget.Presentation) {
         guard let aid = entry.tripActivityAttachmentTargetId else { return }
         let trimmed = entry.entityName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let title = trimmed.isEmpty ? String(localized: "Stop") : trimmed
-        photosSheetTarget = ActivityPhotosSheetTarget(activityId: aid, title: title)
+        photosSheetTarget = ActivityPhotosSheetTarget(activityId: aid, title: title, presentation: presentation)
     }
 
     // MARK: - Placeholders / states
@@ -259,7 +272,8 @@ struct RecentActivitySheet: View {
 private struct ActivityFeedRow: View {
     let entry: ActivityLogEntry
     let photoStack: [ActivityFeedPhotoStackItem]
-    let onOpenPhotos: () -> Void
+    let onOpenPhotoGallery: () -> Void
+    let onOpenPhotoManage: () -> Void
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
@@ -299,7 +313,7 @@ private struct ActivityFeedRow: View {
             Spacer(minLength: AppSpacing.sm)
 
             if showsPhotoChrome {
-                ActivityFeedPhotoStackView(items: photoStack, onTap: onOpenPhotos)
+                ActivityFeedPhotoStackView(items: photoStack, onTap: onOpenPhotoGallery)
             }
         }
         .padding(.vertical, 4)

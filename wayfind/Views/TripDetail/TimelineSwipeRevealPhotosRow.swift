@@ -8,8 +8,8 @@ struct TimelineSwipeRevealPhotosRow<Content: View>: View {
     let onPhotos: () -> Void
     @ViewBuilder var content: () -> Content
 
-    /// Within this distance of the hard stop counts as “extreme” swipe → open sheet.
-    private var fullSwipeSlop: CGFloat { 4 }
+    /// Must be this close to the hard stop (px) for auto-open; keeps partial swipes on the button only.
+    private var fullSwipeSlop: CGFloat { 1 }
     /// Smaller drifts spring closed; past this we snap the reveal button open.
     private var peekThreshold: CGFloat { 14 }
 
@@ -40,10 +40,10 @@ struct TimelineSwipeRevealPhotosRow<Content: View>: View {
                     .background(AppColors.appPrimary)
                     .clipShape(
                         UnevenRoundedRectangle(
-                            topLeadingRadius: AppCornerRadius.medium,
-                            bottomLeadingRadius: AppCornerRadius.medium,
-                            bottomTrailingRadius: 0,
-                            topTrailingRadius: 0,
+                            topLeadingRadius: 0,
+                            bottomLeadingRadius: 0,
+                            bottomTrailingRadius: AppCornerRadius.medium,
+                            topTrailingRadius: AppCornerRadius.medium,
                             style: .continuous
                         )
                     )
