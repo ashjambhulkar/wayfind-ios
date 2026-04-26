@@ -118,3 +118,16 @@ struct AvatarView: View {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Avatars") {
+    HStack(spacing: 16) {
+        AvatarView(displayName: "Alex Johnson", imageURL: nil, stableID: "1", size: 40)
+        AvatarView(displayName: "Sam Rivera", imageURL: nil, stableID: "2", size: 40, showRing: true)
+        AvatarView(displayName: nil, imageURL: nil, stableID: "3", size: 40)
+        AvatarView(displayName: "Z", imageURL: nil, stableID: "4", size: 56)
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

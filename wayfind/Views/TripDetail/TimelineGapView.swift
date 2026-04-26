@@ -110,3 +110,20 @@ struct TimelineGapView: View {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Travel gap") {
+    VStack {
+        TimelineGapView(
+            fromPlace: .previewAttraction,
+            toPlace: .previewRestaurant
+        )
+        TimelineGapView(
+            fromPlace: .previewRestaurant,
+            toPlace: .previewHotel
+        )
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

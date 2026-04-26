@@ -58,3 +58,15 @@ struct DayFilterChipsView: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Day filter chips") {
+    @Previewable @State var selected: Int? = nil
+    VStack(spacing: 16) {
+        DayFilterChipsView(selectedDay: $selected, dayCount: 5)
+        DayFilterChipsView(selectedDay: $selected, dayCount: 7, unselectedSystemFill: true)
+    }
+    .padding(.vertical)
+    .background(AppColors.appBackground)
+}
+#endif

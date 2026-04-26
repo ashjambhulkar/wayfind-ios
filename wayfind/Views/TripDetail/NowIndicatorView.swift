@@ -51,3 +51,11 @@ struct NowIndicatorView: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Now indicator") {
+    NowIndicatorView()
+        .padding()
+        .background(AppColors.appBackground)
+}
+#endif

@@ -274,3 +274,15 @@ private struct ConfettiOverlay: View {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Welcome sheet") {
+    InviteeWelcomeSheet(
+        tripTitle: "Paris Weekend",
+        inviterName: "Alex Johnson",
+        role: .editor,
+        onRequestNotifications: {},
+        onDismiss: {}
+    )
+}
+#endif

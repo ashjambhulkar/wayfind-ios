@@ -202,7 +202,6 @@ struct PaywallHostView: View {
             // instead of leaving the user staring at a paywall they
             // just successfully completed.
             PaywallView(
-                offering: nil,
                 fonts: DefaultPaywallFontProvider(),
                 displayCloseButton: true
             )

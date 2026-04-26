@@ -120,3 +120,18 @@ private struct PressFeedbackView: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("All styles") {
+    VStack(spacing: 16) {
+        AppButton(title: "Continue", style: .primary) {}
+        AppButton(title: "Cancel", style: .outline) {}
+        AppButton(title: "Delete trip", style: .destructive) {}
+        AppButton(title: "Learn more", style: .text) {}
+        AppButton(title: "Saving…", style: .primary, isLoading: true) {}
+        AppButton(title: "Disabled", style: .primary, isDisabled: true) {}
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

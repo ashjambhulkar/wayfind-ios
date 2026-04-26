@@ -116,3 +116,15 @@ struct BudgetSummaryCard: View {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Budget summary") {
+    VStack(spacing: 16) {
+        BudgetSummaryCard(spent: 1230, budget: 3000, currency: "USD", dailyPace: 205, daysRemainingCaption: "4 days left")
+        BudgetSummaryCard(spent: 3400, budget: 3000, currency: "EUR", dailyPace: nil, daysRemainingCaption: nil)
+        BudgetSummaryCard(spent: 500, budget: nil, currency: "GBP", dailyPace: 100, daysRemainingCaption: "2 days left")
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

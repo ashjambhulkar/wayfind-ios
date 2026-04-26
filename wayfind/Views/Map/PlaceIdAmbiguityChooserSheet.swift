@@ -111,3 +111,69 @@ struct PlaceIdAmbiguityChooserSheet: View {
         .accessibilityAddTraits(.isButton)
     }
 }
+
+// =============================================================================
+
+#if DEBUG
+#Preview("Ambiguity chooser — 3 candidates") {
+    let candidates = [
+        PlaceIdBridgeService.Candidate(
+            placeId: "ChIJD7fiBh9u5kcRYJSMaMOCCwQ",
+            name: "Louvre Museum",
+            lat: 48.8606,
+            lng: 2.3376,
+            confidence: 0.92,
+            source: .cityPlaces
+        ),
+        PlaceIdBridgeService.Candidate(
+            placeId: "ChIJBbMjYSJu5kcR0G2LCqA6Jac",
+            name: "Louvre Palace (Historic)",
+            lat: 48.8604,
+            lng: 2.3374,
+            confidence: 0.74,
+            source: .bridge
+        ),
+        PlaceIdBridgeService.Candidate(
+            placeId: "ChIJXxxFakeId123",
+            name: "Louvre Hotel",
+            lat: 48.8598,
+            lng: 2.3380,
+            confidence: 0.61,
+            source: .googleTextSearch
+        ),
+    ]
+    PlaceIdAmbiguityChooserSheet(
+        queryName: "Louvre",
+        candidates: candidates,
+        onSelect: { _ in },
+        onCancel: {}
+    )
+}
+
+#Preview("Ambiguity chooser — 2 candidates") {
+    let candidates = [
+        PlaceIdBridgeService.Candidate(
+            placeId: "ChIJVVVVV1234",
+            name: "Sacré-Cœur Basilica",
+            lat: 48.8867,
+            lng: 2.3431,
+            confidence: 0.88,
+            source: .bridge
+        ),
+        PlaceIdBridgeService.Candidate(
+            placeId: "ChIJAAAAA5678",
+            name: "Sacré-Cœur (Montmartre Summit)",
+            lat: 48.8869,
+            lng: 2.3433,
+            confidence: 0.71,
+            source: .googleTextSearch
+        ),
+    ]
+    PlaceIdAmbiguityChooserSheet(
+        queryName: "Sacré-Cœur",
+        candidates: candidates,
+        onSelect: { _ in },
+        onCancel: {}
+    )
+}
+#endif

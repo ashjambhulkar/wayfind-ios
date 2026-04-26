@@ -194,3 +194,16 @@ struct TimelineBookingCardView: View {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Booking cards") {
+    ScrollView {
+        VStack(spacing: 0) {
+            TimelineBookingCardView(place: .previewHotel, dayNumber: 1)
+            TimelineBookingCardView(place: .previewFlight, dayNumber: 1)
+        }
+        .padding()
+    }
+    .background(AppColors.appBackground)
+}
+#endif

@@ -42,7 +42,7 @@
 //      `purchasePending` so the wizard can show "Waiting for guardian
 //      approval…" instead of locking back to the paywall.
 //
-//  The `pro` entitlement id is `wayfind_pro` and matches what was
+//  The `pro` entitlement id is `Wayfind Pro` and matches what was
 //  configured in App Store Connect / RevenueCat per
 //  `docs/wave4-app-store-setup.md`.
 //
@@ -63,7 +63,7 @@ import RevenueCat
 /// asks "is this Pro?" we route through the singleton below — never read
 /// `Purchases.shared` directly from a view.
 enum EntitlementID {
-    static let pro = "wayfind_pro"
+    static let pro = "Wayfind Pro"
 }
 
 /// AI feature key the server keys monthly usage off of. Mirrors
@@ -81,7 +81,7 @@ final class EntitlementService {
 
     // MARK: - Observable surface
 
-    /// True iff the active user has the `wayfind_pro` entitlement. Driven
+    /// True iff the active user has the RevenueCat Pro entitlement. Driven
     /// by RevenueCat's `CustomerInfo` when the SDK is present and falls
     /// back to a Supabase `user_subscriptions` poll otherwise. Default
     /// `false` is the safe answer pre-binding — every gate will treat
@@ -213,7 +213,7 @@ final class EntitlementService {
 
     #if canImport(RevenueCat)
     /// Maps a RevenueCat `CustomerInfo` snapshot onto our observable
-    /// surface. We treat presence of the `wayfind_pro` entitlement key
+    /// surface. We treat presence of the configured Pro entitlement key
     /// in `entitlements.active` as the single Pro signal — neither the
     /// product id nor the offering matters here. This keeps the gate
     /// resilient to App Store Connect product renames as long as the

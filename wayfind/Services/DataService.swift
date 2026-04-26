@@ -344,6 +344,32 @@ final class DataService {
         return await real.resolveCityProfileId(forTrip: trip)
     }
 
+    /// Fetches center_lat / center_lng for a city_profiles row by id.
+    /// Used after first-time async resolution to persist coords to trips.
+    /// Returns nil in mock mode and on miss.
+    func fetchCityProfileCenterCoords(id: UUID) async -> (lat: Double, lng: Double)? {
+        guard let real else { return nil }
+        return await real.fetchCityProfileCenterCoords(id: id)
+    }
+
+    /// Persists a resolved city_profile_id/lat/lng back to the trips row
+    /// so subsequent map opens skip the 3-tier resolver. No-op in mock mode.
+    /// Best-effort — callers should not await a result.
+    func patchTripCityProfile(
+        tripId: UUID,
+        cityProfileId: UUID,
+        lat: Double,
+        lng: Double
+    ) async {
+        guard let real else { return }
+        await real.patchTripCityProfile(
+            tripId: tripId,
+            cityProfileId: cityProfileId,
+            lat: lat,
+            lng: lng
+        )
+    }
+
     /// Enqueues a foreground enrichment job for the given Google `place_id`.
     /// Stampede-deduped server-side. No-op in mock mode.
     func requestCityPlaceEnrichment(googlePlaceId: String) async {

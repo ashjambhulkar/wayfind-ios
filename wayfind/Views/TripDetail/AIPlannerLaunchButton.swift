@@ -45,3 +45,10 @@ struct AIPlannerLaunchButton: View {
         AIPlannerLaunchButton(action: {})
     }
 }
+
+#Preview("AI planner button (existing)") {
+    ZStack(alignment: .bottom) {
+        AppColors.appBackground.ignoresSafeArea()
+        AIPlannerLaunchButton(action: {})
+    }
+}

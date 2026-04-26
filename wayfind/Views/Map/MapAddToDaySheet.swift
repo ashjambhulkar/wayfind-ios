@@ -149,3 +149,58 @@ struct MapAddToDaySheet: View {
 }
 
 // =============================================================================
+
+#if DEBUG
+import CoreLocation
+
+#Preview("Add to day — prefilled") {
+    let tripId = UUID()
+    let day1Id = UUID()
+    let preview = MapSearchPreview(
+        id: "preview-eiffel",
+        origin: .apple,
+        name: "Eiffel Tower",
+        subtitle: "Champ de Mars, 75007 Paris",
+        coordinate: .init(latitude: 48.8584, longitude: 2.2945),
+        googlePlaceId: nil,
+        phone: nil,
+        website: nil,
+        thumbnailURL: nil,
+        category: .attraction
+    )
+    let days = [
+        ItineraryDay(id: day1Id, tripId: tripId, dayNumber: 1, date: Date()),
+        ItineraryDay(id: UUID(), tripId: tripId, dayNumber: 2, date: Date().addingTimeInterval(86_400)),
+        ItineraryDay(id: UUID(), tripId: tripId, dayNumber: 3, date: Date().addingTimeInterval(172_800)),
+    ]
+    MapAddToDaySheet(
+        preview: preview,
+        scheduledDays: days,
+        preselectedDayId: day1Id,
+        onSave: { _, _, _ in },
+        onCancel: {}
+    )
+}
+
+#Preview("Add to day — no days") {
+    let preview = MapSearchPreview(
+        id: "preview-louvre",
+        origin: .cityPlaces,
+        name: "Louvre Museum",
+        subtitle: "Rue de Rivoli, 75001 Paris",
+        coordinate: .init(latitude: 48.8606, longitude: 2.3376),
+        googlePlaceId: nil,
+        phone: nil,
+        website: nil,
+        thumbnailURL: nil,
+        category: .attraction
+    )
+    MapAddToDaySheet(
+        preview: preview,
+        scheduledDays: [],
+        preselectedDayId: nil,
+        onSave: { _, _, _ in },
+        onCancel: {}
+    )
+}
+#endif

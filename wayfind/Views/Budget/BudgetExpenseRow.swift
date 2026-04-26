@@ -114,3 +114,24 @@ struct BudgetExpenseRow: View {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Expense rows") {
+    VStack(spacing: 0) {
+        BudgetExpenseRow(
+            expense: .preview,
+            payerName: "Alex Johnson",
+            payerAvatarURL: nil,
+            myShare: Decimal(160)
+        )
+        BudgetExpenseRow(
+            expense: .preview,
+            payerName: nil,
+            payerAvatarURL: nil,
+            myShare: nil
+        )
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

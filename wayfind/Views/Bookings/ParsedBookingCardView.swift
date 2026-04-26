@@ -77,3 +77,15 @@ struct ParsedBookingCardView: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Parsed booking card") {
+    ParsedBookingCardView(
+        booking: .preview,
+        onAdd: {},
+        onEdit: {}
+    )
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

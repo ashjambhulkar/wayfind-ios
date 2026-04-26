@@ -99,3 +99,14 @@ struct MapSearchPill: View {
 }
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Map search pill") {
+    VStack(spacing: 16) {
+        MapSearchPill(hasResults: false, onTapPill: {}, onTapClear: {})
+        MapSearchPill(hasResults: true, onTapPill: {}, onTapClear: {})
+    }
+    .padding()
+    .background(Color.gray.opacity(0.2))
+}
+#endif

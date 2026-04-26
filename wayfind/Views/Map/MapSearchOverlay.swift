@@ -1115,3 +1115,43 @@ private enum SearchRowIconHeuristic {
 }
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Search overlay — empty state") {
+    MapSearchOverlay(
+        country: "FR",
+        initialQuery: "",
+        cityProfileId: nil,
+        region: .init(
+            center: .init(latitude: 48.8566, longitude: 2.3522),
+            span: .init(latitudeDelta: 0.05, longitudeDelta: 0.05)
+        ),
+        excludedPlaceIds: [],
+        onPickResult: { _ in },
+        onPickSuggestedResult: { _ in },
+        onPickSuggestedBrowserResult: { _ in },
+        onPickCategory: { _, _ in },
+        onSubmitSearch: { _, _ in },
+        onCancel: {}
+    )
+}
+
+#Preview("Search overlay — prefilled query") {
+    MapSearchOverlay(
+        country: "FR",
+        initialQuery: "Eiffel",
+        cityProfileId: nil,
+        region: .init(
+            center: .init(latitude: 48.8566, longitude: 2.3522),
+            span: .init(latitudeDelta: 0.05, longitudeDelta: 0.05)
+        ),
+        excludedPlaceIds: [],
+        onPickResult: { _ in },
+        onPickSuggestedResult: { _ in },
+        onPickSuggestedBrowserResult: { _ in },
+        onPickCategory: { _, _ in },
+        onSubmitSearch: { _, _ in },
+        onCancel: {}
+    )
+}
+#endif

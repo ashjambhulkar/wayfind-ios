@@ -505,3 +505,47 @@ private extension String {
 }
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Preview sheet — Wayfind suggestion") {
+    let preview = MapSearchPreview(
+        id: "louvre-city-places",
+        origin: .cityPlaces,
+        name: "Louvre Museum",
+        subtitle: "Rue de Rivoli, 75001 Paris",
+        coordinate: .init(latitude: 48.8606, longitude: 2.3376),
+        googlePlaceId: "ChIJD7fiBh9u5kcRYJSMaMOCCwQ",
+        phone: "+33 1 40 20 53 17",
+        website: URL(string: "https://www.louvre.fr"),
+        thumbnailURL: nil,
+        category: .attraction
+    )
+    MapSearchPreviewSheet(
+        preview: preview,
+        onAddToDay: {},
+        onSearchNearby: {},
+        onDismiss: {}
+    )
+}
+
+#Preview("Preview sheet — Apple result") {
+    let preview = MapSearchPreview(
+        id: "eiffel-apple",
+        origin: .apple,
+        name: "Eiffel Tower",
+        subtitle: "Champ de Mars, 75007 Paris",
+        coordinate: .init(latitude: 48.8584, longitude: 2.2945),
+        googlePlaceId: nil,
+        phone: nil,
+        website: nil,
+        thumbnailURL: nil,
+        category: .attraction
+    )
+    MapSearchPreviewSheet(
+        preview: preview,
+        onAddToDay: {},
+        onSearchNearby: {},
+        onDismiss: {}
+    )
+}
+#endif

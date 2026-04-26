@@ -139,3 +139,15 @@ func hourMinuteString(_ date: Date) -> String {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Time pin variants") {
+    VStack(spacing: 12) {
+        TimePinView(time: Date(), tint: .blue)
+        TimePinView(time: Date(), tint: .orange)
+        UnscheduledMarkerView(tint: .purple)
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

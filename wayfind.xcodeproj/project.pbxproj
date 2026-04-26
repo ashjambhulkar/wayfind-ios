@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		210F8DA82F8D7EA1001E4E65 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAPRD032F7F0D8C00154A03 /* Supabase */; };
 		210F8DA92F8D7EA1001E4E65 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAPRD042F7F0D8C00154A04 /* GoogleSignIn */; };
+		A1AAC0DE2F7F0D8C00154A08 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAC0DE2F7F0D8C00154A06 /* RevenueCat */; };
+		A1AAC0DE2F7F0D8C00154A09 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAC0DE2F7F0D8C00154A07 /* RevenueCatUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,6 +47,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				210F8DA92F8D7EA1001E4E65 /* GoogleSignIn in Frameworks */,
+				A1AAC0DE2F7F0D8C00154A08 /* RevenueCat in Frameworks */,
+				A1AAC0DE2F7F0D8C00154A09 /* RevenueCatUI in Frameworks */,
 				210F8DA82F8D7EA1001E4E65 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -99,6 +103,8 @@
 			packageProductDependencies = (
 				A1AAPRD032F7F0D8C00154A03 /* Supabase */,
 				A1AAPRD042F7F0D8C00154A04 /* GoogleSignIn */,
+				A1AAC0DE2F7F0D8C00154A06 /* RevenueCat */,
+				A1AAC0DE2F7F0D8C00154A07 /* RevenueCatUI */,
 			);
 			productName = wayfind;
 			productReference = 21CB27242F7F0D8C00154A0F /* wayfind.app */;
@@ -158,6 +164,7 @@
 			packageReferences = (
 				A1AAPKG012F7F0D8C00154A01 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 				A1AAPKG022F7F0D8C00154A02 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				A1AAC0DE2F7F0D8C00154A05 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 21CB27252F7F0D8C00154A0F /* Products */;
@@ -481,6 +488,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		A1AAC0DE2F7F0D8C00154A05 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.69.0;
+			};
+		};
 		A1AAPKG012F7F0D8C00154A01 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/supabase/supabase-swift";
@@ -500,6 +515,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A1AAC0DE2F7F0D8C00154A06 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1AAC0DE2F7F0D8C00154A05 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
+		};
+		A1AAC0DE2F7F0D8C00154A07 /* RevenueCatUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1AAC0DE2F7F0D8C00154A05 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCatUI;
+		};
 		A1AAPRD032F7F0D8C00154A03 /* Supabase */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A1AAPKG012F7F0D8C00154A01 /* XCRemoteSwiftPackageReference "supabase-swift" */;

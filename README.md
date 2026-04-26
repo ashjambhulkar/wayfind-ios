@@ -33,6 +33,21 @@ For a fork or a new environment, replace those values with your own Supabase pro
 | `wayfind/` | App source (SwiftUI views, view models, services) |
 | `wayfind.xcodeproj/` | Xcode project and SPM resolution |
 | `InfoAdditions.plist` | Extra Info.plist entries referenced by the target |
+| `supabase/` | Database migrations, Edge Functions, config, tests, and seeds |
+| `docs/` | Living architecture, module, backend, and runbook documentation |
+
+## Project memory
+
+Start here when you need to understand the system without holding it all in your head:
+
+- `docs/ARCHITECTURE.md` — app shape, state ownership, and data flow.
+- `docs/MODULES.md` — feature ownership and the first files to open.
+- `docs/SUPABASE_BACKEND.md` — tables, functions, triggers, cron jobs, and Swift owners.
+- `docs/DECISIONS.md` — short decision log for tradeoffs worth remembering.
+- `docs/AI_CHANGE_PROTOCOL.md` — checklist for keeping AI-generated changes reviewable.
+- `docs/CHANGE_TEMPLATES.md` — copy/paste templates for feature, Supabase, and bug-investigation notes.
+
+For map-specific work, read `wayfind/Views/Map/README.md` before editing map search, suggested places, preview sheets, or the day-filter accessory.
 
 ## Stack (high level)
 

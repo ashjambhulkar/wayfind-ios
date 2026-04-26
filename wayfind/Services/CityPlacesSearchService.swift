@@ -133,6 +133,8 @@ final class CityPlacesSearchService {
                 if out.count == limit { break }
             }
             return out
+        } catch is CancellationError {
+            return []
         } catch {
             #if DEBUG
             print("[CityPlacesSearchService] search failed: \(error)")
@@ -201,6 +203,8 @@ final class CityPlacesSearchService {
                 if out.count == limit { break }
             }
             return out
+        } catch is CancellationError {
+            return []
         } catch {
             #if DEBUG
             print("[CityPlacesSearchService] topPicks failed: \(error)")

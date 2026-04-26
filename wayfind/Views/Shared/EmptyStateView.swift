@@ -76,3 +76,25 @@ private struct WayfindEmptyStateButtonStyle: ButtonStyle {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("With button") {
+    EmptyStateView(
+        sfSymbol: "map",
+        title: "No places yet",
+        subtitle: "Add your first activity to get started.",
+        buttonTitle: "Add Place",
+        buttonAction: {}
+    )
+    .background(AppColors.appBackground)
+}
+
+#Preview("Without button") {
+    EmptyStateView(
+        sfSymbol: "ticket",
+        title: "No bookings",
+        subtitle: "Your confirmed bookings will appear here."
+    )
+    .background(AppColors.appBackground)
+}
+#endif

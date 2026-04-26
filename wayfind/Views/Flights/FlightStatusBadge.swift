@@ -185,3 +185,14 @@ struct FlightStatusBadge: View {
         return "\(status.carrierIata) \(status.flightNumber). \(coreLabel)\(staleSuffix)\(proSuffix)"
     }
 }
+
+#if DEBUG
+#Preview("Flight status badges") {
+    VStack(spacing: 12) {
+        FlightStatusBadge(status: nil, isStale: false, tint: .neutral, isProUser: true)
+        FlightStatusBadge(status: nil, isStale: true, tint: .amber, isProUser: false, onUpsellTap: {})
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

@@ -139,3 +139,23 @@ struct SpeedDialFooterTip {
 
 // =============================================================================
 
+
+#if DEBUG
+import SwiftUI
+
+#Preview("Speed Dial") {
+    @Previewable @State var isOpen = false
+    ZStack(alignment: .bottomTrailing) {
+        AppColors.appBackground.ignoresSafeArea()
+        SpeedDialFABView(
+            isOpen: $isOpen,
+            items: [
+                ("plus.circle", "Add Place", {}),
+                ("ticket", "Add Booking", {}),
+                ("note.text", "Add Note", {}),
+            ]
+        )
+        .padding()
+    }
+}
+#endif

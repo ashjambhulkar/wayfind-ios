@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// Bottom sheet: map mode tiles (hybrid / standard) + attribution.
 struct TripMapModesSheet: View {
@@ -53,13 +52,13 @@ struct TripMapModesSheet: View {
         let isOn = selectedMode == mode
         return Button {
             HapticManager.light()
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+            withAnimation(AppSpring.smooth) {
                 selectedMode = mode
             }
         } label: {
             VStack(spacing: 8) {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(UIColor.tertiarySystemFill))
+                    .fill(Color(uiColor: .tertiarySystemFill))
                     .aspectRatio(1, contentMode: .fit)
                     .overlay {
                         Image(systemName: mode.sfSymbol)
@@ -92,3 +91,10 @@ struct TripMapModesSheet: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Map modes sheet") {
+    @Previewable @State var mode: TripMapMode = .map
+    TripMapModesSheet(selectedMode: $mode)
+}
+#endif

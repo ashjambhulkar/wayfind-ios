@@ -131,3 +131,9 @@ private struct OnboardingPage: View {
         .padding(.bottom, AppSpacing.xl)
     }
 }
+
+#if DEBUG
+#Preview("Calendar sync onboarding") {
+    CalendarSyncOnboardingView(trip: .preview, onCompleted: {})
+}
+#endif

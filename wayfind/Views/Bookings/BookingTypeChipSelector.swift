@@ -46,3 +46,12 @@ struct BookingTypeChipSelector: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Booking type chips") {
+    @Previewable @State var selected: BookingCategory = .flight
+    BookingTypeChipSelector(selectedType: $selected)
+        .padding()
+        .background(AppColors.appBackground)
+}
+#endif

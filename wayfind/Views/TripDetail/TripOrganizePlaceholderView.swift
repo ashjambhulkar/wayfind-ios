@@ -17,3 +17,10 @@ struct TripOrganizePlaceholderView: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Organize placeholder") {
+    TripOrganizePlaceholderView(trip: .preview)
+        .background(AppColors.appBackground)
+}
+#endif

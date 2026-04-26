@@ -50,3 +50,19 @@ struct InlineAddButtonView: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Inline add button") {
+    VStack(spacing: 16) {
+        InlineAddButtonView(dayNumber: 1, onTap: {})
+        InlineAddButtonView(
+            dayNumber: 1,
+            showForwardingHint: true,
+            forwardingEmail: "trip@mail.wayfind.app",
+            onTap: {}
+        )
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

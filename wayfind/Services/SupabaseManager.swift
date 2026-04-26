@@ -150,7 +150,7 @@ final class SupabaseManager {
             user_id: userId,
             name: trip.title,
             destination: trip.destination,
-            destination_place_id: nil,
+            destination_place_id: trip.destinationPlaceId,
             start_date: startISO,
             end_date: endISO,
             status: status,
@@ -160,7 +160,10 @@ final class SupabaseManager {
             cover_attribution: trip.coverImageAttribution,
             privacy: "private",
             total_budget: trip.totalBudget.map(DecimalCodec.init),
-            budget_currency: trip.budgetCurrencyCode
+            budget_currency: trip.budgetCurrencyCode,
+            city_profile_id: trip.cityProfileId,
+            lat: trip.lat,
+            lng: trip.lng
         )
 
         let created: TripRow = try await client
@@ -220,7 +223,7 @@ final class SupabaseManager {
         let payload = TripUpdate(
             name: trip.title,
             destination: trip.destination,
-            destination_place_id: nil,
+            destination_place_id: trip.destinationPlaceId,
             start_date: startISO,
             end_date: endISO,
             description: trip.notes,
@@ -228,7 +231,10 @@ final class SupabaseManager {
             cover_attribution: trip.coverImageAttribution,
             status: status,
             is_active: isActive,
-            updated_at: nowIso
+            updated_at: nowIso,
+            city_profile_id: trip.cityProfileId,
+            lat: trip.lat,
+            lng: trip.lng
         )
 
         // NOTE: filter on `id` only. RLS already enforces who can update —
@@ -532,6 +538,27 @@ final class SupabaseManager {
     /// does not store a Google place id; resolve through `city_places`, which
     /// carries both the Google `place_id` and owning `city_profile_id`.
     ///
+    /// Fetches the geographic center of a city_profiles row by primary key.
+    /// Used after first-time async resolution to persist lat/lng back to the
+    /// trips row so future sessions read it directly. Returns nil on miss.
+    func fetchCityProfileCenterCoords(id: UUID) async -> (lat: Double, lng: Double)? {
+        guard let client = AuthSessionService.shared.client else { return nil }
+        struct Row: Decodable { let center_lat: Double; let center_lng: Double }
+        do {
+            let rows: [Row] = try await client
+                .from("city_profiles")
+                .select("center_lat,center_lng")
+                .eq("id", value: id.uuidString.lowercased())
+                .limit(1)
+                .execute()
+                .value
+            guard let r = rows.first else { return nil }
+            return (r.center_lat, r.center_lng)
+        } catch {
+            return nil
+        }
+    }
+
     /// NOTE: This only matches when the destination's place_id is itself a
     /// row in `city_places` (i.e. the destination is a known POI inside an
     /// already-seeded city). For city / locality place_ids — which is the
@@ -1683,6 +1710,11 @@ final class SupabaseManager {
         // (NULL = not set). Decoded via DecimalCodec to preserve precision.
         let total_budget: DecimalCodec?
         let budget_currency: String?
+        // City profile linkage (migration 20260426150000). NULL for trips
+        // that haven't been backfilled or resolved yet.
+        let city_profile_id: UUID?
+        let lat: Double?
+        let lng: Double?
     }
 
     private struct TripInsert: Encodable, Sendable {
@@ -1700,6 +1732,9 @@ final class SupabaseManager {
         let privacy: String
         let total_budget: DecimalCodec?
         let budget_currency: String
+        let city_profile_id: UUID?
+        let lat: Double?
+        let lng: Double?
     }
 
     private struct TripUpdate: Encodable, Sendable {
@@ -1714,6 +1749,37 @@ final class SupabaseManager {
         let status: String
         let is_active: Bool
         let updated_at: String
+        let city_profile_id: UUID?
+        let lat: Double?
+        let lng: Double?
+    }
+
+    /// Lightweight PATCH that only writes city_profile_id / lat / lng.
+    /// Called by TripMapView after the first async resolution so all
+    /// subsequent map opens skip the 3-tier resolver entirely.
+    func patchTripCityProfile(
+        tripId: UUID,
+        cityProfileId: UUID,
+        lat: Double,
+        lng: Double
+    ) async {
+        guard let client = AuthSessionService.shared.client else { return }
+        struct Patch: Encodable {
+            let city_profile_id: UUID
+            let lat: Double
+            let lng: Double
+        }
+        do {
+            try await client
+                .from("trips")
+                .update(Patch(city_profile_id: cityProfileId, lat: lat, lng: lng))
+                .eq("id", value: tripId.uuidString.lowercased())
+                .execute()
+        } catch {
+            #if DEBUG
+            print("[trips] patchTripCityProfile failed: \(error)")
+            #endif
+        }
     }
 
     private struct TripDayRow: Decodable, Sendable {
@@ -1843,8 +1909,9 @@ final class SupabaseManager {
             title: row.name,
             destination: row.destination,
             destinationPlaceId: row.destination_place_id,
-            lat: nil,
-            lng: nil,
+            cityProfileId: row.city_profile_id,
+            lat: row.lat,
+            lng: row.lng,
             startDate: start,
             endDate: end,
             coverImageUrl: row.cover_image_url,

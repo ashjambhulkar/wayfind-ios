@@ -89,3 +89,17 @@ private struct PillPressButtonStyle: ButtonStyle {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Pill buttons") {
+    VStack(spacing: 12) {
+        PillButtonView(sfSymbol: "map", label: "Map", action: {})
+        PillButtonView(sfSymbol: "ticket", label: "Bookings", badgeCount: 3, action: {})
+        PillButtonView(sfSymbol: "checklist", label: "Checklist", trailingDetail: " 4/10", action: {})
+        PillButtonView(sfSymbol: "note.text", label: "Notes", showPulseDot: true, action: {})
+        PillButtonView(sfSymbol: "clock", label: "Coming soon", isActive: false, action: {})
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

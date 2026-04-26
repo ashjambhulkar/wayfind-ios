@@ -259,9 +259,8 @@ private struct AppRootTabView: View {
     /// the real tab so tapping AI can present the sheet without leaving the
     /// user on an empty tab.
     @State private var lastContentTab: TripDetailTab = .home
-    /// iOS 26 map accessory state is hoisted to the TabView root because
-    /// `tabViewBottomAccessory` must be applied to the TabView, not inside
-    /// the Map tab content.
+    /// iOS 26 map places-sheet state is hoisted so the map, sheet, and
+    /// tab-level wrapper can coordinate selection and detent changes.
     @State private var mapTabState = MapTabSharedState()
     /// Owned by the parent `WayfindApp` and passed in via Binding so
     /// `InviteAcceptView` (which is presented above this view) can ask
@@ -620,11 +619,6 @@ private struct AppRootTabView: View {
                 }
             }
             .modifier(ScrollDownMinimizeTabBarModifier())
-            .modifier(MapTabBottomAccessoryModifier(
-                isEnabled: selectedTab == .map,
-                trip: trip,
-                mapState: mapTabState
-            ))
         } else {
             // LIST MODE — no tab bar; create button lives in the nav toolbar
             TripsListView()
@@ -709,10 +703,11 @@ private struct AppRootTabView: View {
     }
 }
 
-// MARK: - Map Tab Wrapper (tabViewBottomAccessory)
+// MARK: - Map Tab Wrapper
 
-/// Wraps the map view and applies `tabViewBottomAccessory` at the Tab content level
-/// so the day filter bar sits above the tab bar.
+/// Wraps the map view and owns the native places sheet. The sheet uses
+/// small / medium / large detents so the compact state behaves like the
+/// former docked day-pill bar while expanded states follow system sheet UX.
 @available(iOS 26.0, *)
 private struct MapTabWrapper: View {
     let trip: Trip
@@ -721,6 +716,9 @@ private struct MapTabWrapper: View {
     var body: some View {
         NavigationStack {
             TripMapView(trip: trip, sharedState: mapState)
+        }
+        .onDisappear {
+            mapState.showPlacesSheet = false
         }
         .sheet(isPresented: Binding(
             get: { mapState.showPlacesSheet },
@@ -740,6 +738,7 @@ private struct MapTabWrapper: View {
                 }
             )
             .presentationDetents([.medium, .large])
+            .presentationContentInteraction(.scrolls)
             .presentationBackground(.regularMaterial)
             .presentationDragIndicator(.visible)
             .tint(AppColors.appPrimary)
@@ -747,38 +746,12 @@ private struct MapTabWrapper: View {
     }
 }
 
-private struct MapTabBottomAccessoryModifier: ViewModifier {
-    let isEnabled: Bool
-    let trip: Trip
-    let mapState: MapTabSharedState
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.1, *) {
-            content
-                .tabViewBottomAccessory(isEnabled: isEnabled) {
-                    MapDockedAccessoryBar(
-                        trip: trip,
-                        selectedDayFilter: Binding(
-                            get: { mapState.selectedDayFilter },
-                            set: { mapState.selectedDayFilter = $0 }
-                        ),
-                        mappablePlaces: mapState.mappablePlaces,
-                        dayNumberByDayId: mapState.dayNumberByDayId,
-                        onExpand: { mapState.showPlacesSheet = true }
-                    )
-                }
-        } else {
-            content
-        }
-    }
-}
-
-/// Shared state between the map view, the tab accessory bar, and the expanded sheet.
+/// Shared state between the map view, the minimized safe-area accessory,
+/// and the expanded places sheet.
 ///
 /// Search state lives in `TripMapState` (Phase 2) and is owned by
 /// `TripMapView`; this object now carries only the data that the day
-/// list / day filter / accessory bar need.
+/// list / day filter / places accessory need.
 @Observable @MainActor
 final class MapTabSharedState {
     var selectedDayFilter: Int?

@@ -56,3 +56,22 @@ struct CollaborativeAttributionPill: View {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Attribution pills") {
+    VStack(spacing: 8) {
+        CollaborativeAttributionPill(
+            actorDisplayName: "Alex Johnson",
+            actorUserId: MockID.user,
+            kind: .new
+        )
+        CollaborativeAttributionPill(
+            actorDisplayName: "Sam Rivera",
+            actorUserId: MockID.user2,
+            kind: .updated
+        )
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

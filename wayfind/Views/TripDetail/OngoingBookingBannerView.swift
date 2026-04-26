@@ -35,3 +35,14 @@ struct OngoingBookingBannerView: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Ongoing booking banners") {
+    VStack(spacing: 12) {
+        OngoingBookingBannerView(bookingName: "Air France AF264", bookingType: .flight)
+        OngoingBookingBannerView(bookingName: "Hôtel Plaza Athénée", bookingType: .hotel)
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

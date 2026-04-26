@@ -82,3 +82,11 @@ struct DaySummaryView: View {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Day summary") {
+    DaySummaryView(places: [.previewAttraction, .previewRestaurant, .previewHotel])
+        .padding()
+        .background(AppColors.appBackground)
+}
+#endif

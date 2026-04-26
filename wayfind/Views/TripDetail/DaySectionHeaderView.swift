@@ -70,3 +70,28 @@ struct DaySectionHeaderView: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Day headers") {
+    VStack(spacing: 0) {
+        DaySectionHeaderView(
+            day: .preview1,
+            titleText: "Day 1 · Monday, May 12",
+            itemCount: 4,
+            isCollapsed: false,
+            contentPreview: "Eiffel Tower, Lunch, Louvre…",
+            onToggle: {}
+        )
+        DaySectionHeaderView(
+            day: .preview2,
+            titleText: "Day 2 · Tuesday, May 13",
+            itemCount: 3,
+            isCollapsed: true,
+            contentPreview: "Versailles, Dinner…",
+            onToggle: {}
+        )
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

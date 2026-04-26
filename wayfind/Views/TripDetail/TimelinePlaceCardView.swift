@@ -264,3 +264,18 @@ func neighborhood(from address: String?) -> String? {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Activity cards") {
+    ScrollView {
+        VStack(spacing: 0) {
+            TimelinePlaceCardView(place: .previewAttraction, dayNumber: 1)
+            TimelinePlaceCardView(place: .previewRestaurant, dayNumber: 1)
+            TimelinePlaceCardView(place: .previewHotel, dayNumber: 1)
+        }
+        .padding()
+    }
+    .background(AppColors.appBackground)
+    .environment(TripCollaborationUiStore())
+}
+#endif

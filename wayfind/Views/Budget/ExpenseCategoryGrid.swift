@@ -70,3 +70,12 @@ struct ExpenseCategoryGrid: View {
 
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Category grid") {
+    @Previewable @State var selection: ExpenseCategory = .food
+    ExpenseCategoryGrid(selection: $selection)
+        .padding()
+        .background(AppColors.appBackground)
+}
+#endif

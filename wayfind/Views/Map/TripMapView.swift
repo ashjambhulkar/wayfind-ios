@@ -455,17 +455,27 @@ struct TripMapView: View {
         self.externalSearchText = searchText
         self.sharedState = sharedState
 
-        let center = CLLocationCoordinate2D(
-            latitude: trip.lat ?? 0,
-            longitude: trip.lng ?? 0
-        )
+        // Seed city profile from the trip row when already resolved (avoids
+        // the async 3-tier resolver on every subsequent map open).
+        _resolvedCityProfileId = State(initialValue: trip.cityProfileId)
 
-        _searchRegion = State(
-            initialValue: MKCoordinateRegion(
-                center: center,
-                span: MKCoordinateSpan(latitudeDelta: 0.6, longitudeDelta: 0.6)
+        // Use stored coords when available; fall back to a globe-level view
+        // so unanchored trips don't lock the camera to (0, 0).
+        if let lat = trip.lat, let lng = trip.lng {
+            _searchRegion = State(
+                initialValue: MKCoordinateRegion(
+                    center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
+                    span: MKCoordinateSpan(latitudeDelta: 0.6, longitudeDelta: 0.6)
+                )
             )
-        )
+        } else {
+            _searchRegion = State(
+                initialValue: MKCoordinateRegion(
+                    center: CLLocationCoordinate2D(latitude: 20, longitude: 0),
+                    span: MKCoordinateSpan(latitudeDelta: 120, longitudeDelta: 240)
+                )
+            )
+        }
 
         // Trip-scoped AppStorage so each trip remembers its own mode.
         _transportModeRaw = AppStorage(
@@ -489,7 +499,14 @@ struct TripMapView: View {
     }
 
     var body: some View {
+        mapHandoffView
+    }
+
+    private var mapSearchableView: some View {
         mapRoot
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                mapPlacesMinimizedAccessory
+            }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -516,8 +533,13 @@ struct TripMapView: View {
                 withTransaction(t) {
                     isTabSearchPresented = false
                 }
+                hideMapPlacesSheet()
                 showSearchOverlay = true
             }
+    }
+
+    private var mapDataLifecycleView: some View {
+        mapSearchableView
             .task {
                 await loadMapData()
                 await resolveCityProfileId()
@@ -548,6 +570,10 @@ struct TripMapView: View {
                     fitMapForCurrentMode()
                 }
             }
+    }
+
+    private var mapSharedStateView: some View {
+        mapDataLifecycleView
             .onAppear {
                 fitMapForCurrentMode()
                 syncToSharedState()
@@ -577,10 +603,18 @@ struct TripMapView: View {
                 }
             }
             .onChange(of: selectedPlace) { oldPlace, newPlace in
+                if newPlace != nil {
+                    hideMapPlacesSheet()
+                }
                 if oldPlace != nil && newPlace == nil {
                     fitMapForCurrentMode()
+                    restoreMapPlacesSheetSmall()
                 }
             }
+    }
+
+    private var mapSheetsView: some View {
+        mapSharedStateView
             .sheet(item: $selectedPlace, content: placeDetailSheet)
             .sheet(isPresented: $showMapModesSheet) {
                 mapModesSheet
@@ -591,14 +625,23 @@ struct TripMapView: View {
             .sheet(isPresented: $showSearchOverlay) {
                 searchOverlaySheet
             }
+    }
+
+    private var mapHandoffView: some View {
+        mapSheetsView
             .onChange(of: showSearchOverlay) { _, isPresented in
-                guard !isPresented, let preview = pendingSuggestedPlacesPreview else { return }
-                pendingSuggestedPlacesPreview = nil
-                Task {
-                    try? await Task.sleep(for: .milliseconds(350))
-                    await MainActor.run {
-                        presentSuggestedPlacesPreview(preview)
+                if isPresented {
+                    hideMapPlacesSheet()
+                } else if let preview = pendingSuggestedPlacesPreview {
+                    pendingSuggestedPlacesPreview = nil
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(350))
+                        await MainActor.run {
+                            presentSuggestedPlacesPreview(preview)
+                        }
                     }
+                } else {
+                    restoreMapPlacesSheetSmallAfterTransition()
                 }
             }
             .sheet(isPresented: $showSuggestedPlacesBrowser) {
@@ -607,6 +650,23 @@ struct TripMapView: View {
             .sheet(item: selectedSearchResultBinding, content: searchPreviewSheet)
             .sheet(isPresented: $showAddToDay) {
                 addToDaySheet
+            }
+            .onChange(of: showSuggestedPlacesBrowser) { _, isPresented in
+                if isPresented {
+                    hideMapPlacesSheet()
+                    return
+                }
+                guard let preview = pendingSuggestedPlacesPreview else {
+                    restoreMapPlacesSheetSmallAfterTransition()
+                    return
+                }
+                pendingSuggestedPlacesPreview = nil
+                Task {
+                    try? await Task.sleep(for: .milliseconds(350))
+                    await MainActor.run {
+                        presentSuggestedPlacesPreview(preview)
+                    }
+                }
             }
             .onChange(of: mapState.selectedSearchResult) { _, newVal in
                 // Single-sheet ownership: collapse the day sheet when a
@@ -638,20 +698,20 @@ struct TripMapView: View {
                         }
                     }
                 } else if newVal != nil && showPlacesSheet {
-                    showPlacesSheet = false
+                    hideMapPlacesSheet()
                     searchPreviewDetent = .medium
                 } else if newVal != nil {
+                    hideMapPlacesSheet()
                     searchPreviewDetent = .medium
+                } else {
+                    restoreMapPlacesSheetSmallAfterTransition()
                 }
             }
-            .onChange(of: showSuggestedPlacesBrowser) { _, isPresented in
-                guard !isPresented, let preview = pendingSuggestedPlacesPreview else { return }
-                pendingSuggestedPlacesPreview = nil
-                Task {
-                    try? await Task.sleep(for: .milliseconds(350))
-                    await MainActor.run {
-                        presentSuggestedPlacesPreview(preview)
-                    }
+            .onChange(of: showAddToDay) { _, isPresented in
+                if isPresented {
+                    hideMapPlacesSheet()
+                } else {
+                    restoreMapPlacesSheetSmallAfterTransition()
                 }
             }
     }
@@ -785,11 +845,7 @@ struct TripMapView: View {
         // ZStack pattern (instead of `.overlay` chained after
         // `.ignoresSafeArea()`): the map fills edge-to-edge, but the
         // overlays (controls + "Search this area" pill) live in the
-        // ZStack's safe-area-respecting bounds. Critically, the iOS 26
-        // `tabViewBottomAccessory` contributes to our bottom safe-area
-        // inset automatically, so a `.bottom`-aligned overlay sits
-        // *exactly* on top of the day-pill bar with zero hardcoded
-        // chrome heights.
+        // ZStack's safe-area-respecting bounds.
         ZStack(alignment: .bottom) {
             mapContent
                 .ignoresSafeArea()
@@ -815,11 +871,62 @@ struct TripMapView: View {
         }
     }
 
+    @ViewBuilder
+    private var mapPlacesMinimizedAccessory: some View {
+        if shouldShowMapPlacesMinimizedAccessory {
+            MapPlacesMinimizedAccessory(
+                trip: trip,
+                selectedDayFilter: Binding(
+                    get: { selectedDayFilter },
+                    set: { selectedDayFilter = $0 }
+                ),
+                allPlacesForList: mappablePlaces,
+                onExpand: {
+                    showPlacesSheet = true
+                    sharedState?.showPlacesSheet = true
+                }
+            )
+        }
+    }
+
+    private var shouldShowMapPlacesMinimizedAccessory: Bool {
+        sharedState != nil
+            && !showPlacesSheet
+            && !showSearchOverlay
+            && !showSuggestedPlacesBrowser
+            && !showAddToDay
+            && !showAddPlace
+            && !showMapModesSheet
+            && selectedPlace == nil
+            && mapState.selectedSearchResult == nil
+    }
+
+    private func hideMapPlacesSheet() {
+        showPlacesSheet = false
+        sharedState?.showPlacesSheet = false
+    }
+
+    private func restoreMapPlacesSheetSmallAfterTransition() {
+        Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            await MainActor.run {
+                restoreMapPlacesSheetSmall()
+            }
+        }
+    }
+
+    private func restoreMapPlacesSheetSmall() {
+        // The minimized places control is now a safe-area accessory, not
+        // a sheet detent. Keep the expanded sheet dismissed so the
+        // accessory can reappear above the tab bar.
+        sharedState?.showPlacesSheet = false
+        showPlacesSheet = false
+    }
+
     /// "Search this area" pill — appears once the user has panned past
     /// ~30% of the originating span after a category search.
     /// Positioned by the parent `ZStack(alignment: .bottom)` so it
-    /// floats just above whatever bottom chrome the system inserts
-    /// (tab bar + `tabViewBottomAccessory`).
+    /// floats above the map while the native places sheet owns bottom chrome.
     @ViewBuilder
     private var searchThisAreaOverlay: some View {
         if shouldShowSearchThisArea {
@@ -942,8 +1049,7 @@ struct TripMapView: View {
         .accessibilityLabel("Map of places for \(trip.title)")
     }
 
-    /// Compact vertical pill — right edge, below the search affordance so the
-    /// top map chrome does not crowd the native navigation/search region.
+    /// Compact vertical pill — right edge, just below the navigation bar.
     private var mapControlStack: some View {
         VStack(spacing: 0) {
             Button {
@@ -959,7 +1065,7 @@ struct TripMapView: View {
             .accessibilityLabel("Current location")
 
             Color(UIColor.separator)
-                .frame(width: 24, height: 0.5)
+                .frame(width: 26, height: 0.5)
 
             Button {
                 HapticManager.light()
@@ -974,7 +1080,7 @@ struct TripMapView: View {
             .accessibilityLabel("Map style")
 
             Color(UIColor.separator)
-                .frame(width: 24, height: 0.5)
+                .frame(width: 26, height: 0.5)
 
             Button {
                 HapticManager.light()
@@ -1012,7 +1118,7 @@ struct TripMapView: View {
         .background(.regularMaterial)
         .clipShape(Capsule())
         .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
-        .padding(.top, KeyWindowSafeArea.topInset + 76)
+        .padding(.top, KeyWindowSafeArea.topInset + 52)
         .padding(.trailing, AppSpacing.sm)
     }
 
@@ -1222,7 +1328,9 @@ struct TripMapView: View {
     /// polyline refresh path which races the trip-load.
     private func ensureCityProfileResolved() async -> UUID? {
         if let id = resolvedCityProfileId { return id }
-        let id = await dataService.resolveCityProfileId(forTrip: trip)
+        // Fall back to the async resolver — result will be persisted by
+        // resolveCityProfileId() if that task hasn't fired yet.
+        guard let id = await dataService.resolveCityProfileId(forTrip: trip) else { return nil }
         await MainActor.run { resolvedCityProfileId = id }
         return id
     }
@@ -1340,17 +1448,30 @@ struct TripMapView: View {
         )
     }
 
-    /// Resolve city_profiles.id from the trip's destinationPlaceId so
-    /// city_places searches can scope to the trip's city.
+    /// Resolve city_profiles.id from the trip's destination so city_places
+    /// searches can scope to the trip's city.
     ///
-    /// Uses the 3-tier resolver (slug → geo proximity → place_id) so
-    /// trips whose destination is a locality (the common case) still
-    /// land on the right city profile. The legacy place_id-only path
-    /// missed every locality destination and silently disabled
-    /// `city_places` features for them.
+    /// Short-circuits when the trip row already carries a city_profile_id
+    /// (populated by the DB migration backfill or a previous session).
+    /// When resolution succeeds for the first time the result is persisted
+    /// back to the trips row so future sessions skip this call entirely.
     private func resolveCityProfileId() async {
-        let id = await dataService.resolveCityProfileId(forTrip: trip)
+        // Fast path: already seeded from the trip row in init.
+        if resolvedCityProfileId != nil { return }
+
+        guard let id = await dataService.resolveCityProfileId(forTrip: trip) else { return }
         await MainActor.run { resolvedCityProfileId = id }
+
+        // Persist so the next map open reads it from the DB directly.
+        // Fire-and-forget — map functionality is unaffected by the write.
+        if let coords = await dataService.fetchCityProfileCenterCoords(id: id) {
+            await dataService.patchTripCityProfile(
+                tripId: trip.id,
+                cityProfileId: id,
+                lat: coords.lat,
+                lng: coords.lng
+            )
+        }
     }
 
     private func handleOverlayPicked(_ preview: MapSearchPreview) {

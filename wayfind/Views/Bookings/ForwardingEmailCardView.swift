@@ -92,3 +92,11 @@ struct ForwardingEmailCardView: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Forwarding email card") {
+    ForwardingEmailCardView(trip: .preview)
+        .padding()
+        .background(AppColors.appBackground)
+}
+#endif

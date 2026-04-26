@@ -86,3 +86,15 @@ struct ForwardingBannerView: View {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Forwarding banner") {
+    ForwardingBannerView(
+        email: "paris-trip@mail.wayfind.app",
+        onCopy: {},
+        onDismiss: {}
+    )
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

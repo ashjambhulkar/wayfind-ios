@@ -83,3 +83,17 @@ private struct WayfindCardButtonStyle: ButtonStyle {
 
 // =============================================================================
 
+
+#if DEBUG
+#Preview("Trip cards") {
+    ScrollView {
+        VStack(spacing: 12) {
+            TripCardView(trip: .preview, action: {})
+            TripCardView(trip: .previewActive, action: {})
+            TripCardView(trip: .previewPast, action: {})
+        }
+        .padding()
+    }
+    .background(AppColors.appBackground)
+}
+#endif

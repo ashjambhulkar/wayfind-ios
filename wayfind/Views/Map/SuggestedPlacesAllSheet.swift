@@ -319,3 +319,62 @@ struct SuggestedThumbnail: View {
 }
 
 // =============================================================================
+
+#if DEBUG
+#Preview("Suggested places — no city resolved") {
+    SuggestedPlacesAllSheet(
+        cityProfileId: nil,
+        excludedPlaceIds: [],
+        onPick: { _ in },
+        onCancel: {}
+    )
+}
+
+#Preview("Suggested places — city resolved (live fetch)") {
+    SuggestedPlacesAllSheet(
+        cityProfileId: UUID(),
+        excludedPlaceIds: [],
+        onPick: { _ in },
+        onCancel: {}
+    )
+}
+
+#Preview("Suggested place list row") {
+    let preview = MapSearchPreview(
+        id: "row-preview",
+        origin: .cityPlaces,
+        name: "Musée d'Orsay",
+        subtitle: "1 Rue de la Légion d'Honneur, 75007 Paris",
+        coordinate: .init(latitude: 48.8600, longitude: 2.3266),
+        googlePlaceId: nil,
+        phone: nil,
+        website: nil,
+        thumbnailURL: nil,
+        category: .attraction
+    )
+    List {
+        SuggestedPlaceListRow(preview: preview)
+    }
+    .listStyle(.plain)
+}
+
+#Preview("Suggested thumbnail — no image") {
+    let preview = MapSearchPreview(
+        id: "thumb-preview",
+        origin: .cityPlaces,
+        name: "Sacré-Cœur",
+        subtitle: "Montmartre, Paris",
+        coordinate: .init(latitude: 48.8867, longitude: 2.3431),
+        googlePlaceId: nil,
+        phone: nil,
+        website: nil,
+        thumbnailURL: nil,
+        category: .attraction
+    )
+    HStack(spacing: 12) {
+        SuggestedThumbnail(preview: preview, size: 52)
+        SuggestedThumbnail(preview: preview, size: 72)
+    }
+    .padding()
+}
+#endif

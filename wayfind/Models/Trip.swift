@@ -14,6 +14,13 @@ struct Trip: Identifiable, Codable, Hashable {
     var destination: String
     /// Google place_id for the trip destination (used by AI day planner as stay-area anchor).
     var destinationPlaceId: String?
+    /// Resolved city_profiles.id for this trip's primary destination.
+    /// Populated by the DB migration backfill and persisted after first
+    /// runtime resolution. When non-nil the map screen and search fan-out
+    /// use it directly without running the 3-tier resolver.
+    var cityProfileId: UUID?
+    /// Geographic center of the resolved city_profiles row (denormalized).
+    /// Non-nil whenever cityProfileId is set.
     var lat: Double?
     var lng: Double?
     var startDate: Date

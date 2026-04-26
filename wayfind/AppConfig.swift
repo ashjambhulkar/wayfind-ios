@@ -51,7 +51,7 @@ enum AppConfig {
     /// real auth happens server-side against the App Store receipt.
     /// Replace with your project's value before TestFlight; an empty
     /// string keeps the SDK in no-op mode so dev builds don't crash.
-    static let revenueCatPublicAPIKey: String = ""
+    static let revenueCatPublicAPIKey: String = "appl_YqMSykVMPajgsOXZOwGGFegdZuf"
 
     /// Whether `Purchases.configure(...)` should be invoked at launch.
     /// Driven entirely by whether we have a non-empty key — guarded so
