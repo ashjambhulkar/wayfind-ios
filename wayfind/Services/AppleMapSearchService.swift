@@ -331,14 +331,38 @@ final class AppleMapSearchService: NSObject {
 
     @available(iOS 16.0, *)
     func lookAroundScene(for coordinate: CLLocationCoordinate2D) async -> MKLookAroundScene? {
+        #if targetEnvironment(simulator)
+        // Look Around uses heavy MapKit plumbing that routinely blocks or
+        // wedging the main run loop on Simulator when awaited from a
+        // `@MainActor` caller (e.g. `MapSearchPreviewSheet.task`). Device
+        // builds keep full support below.
+        return nil
+        #endif
+
         let key = LookAroundKey(coordinate)
         if let cached = lookAroundCache.first(where: { $0.0 == key }) {
             return cached.1
         }
 
+        // Never await `MKLookAroundSceneRequest` on the main actor — doing so
+        // can freeze UI (touch stops working) until the request completes.
+        let requestTask = Task.detached(priority: .userInitiated) {
+            do {
+                return try await MKLookAroundSceneRequest(coordinate: coordinate).scene
+            } catch {
+                return nil
+            }
+        }
+
+        let timeoutTask = Task {
+            try? await Task.sleep(for: .seconds(8))
+            requestTask.cancel()
+        }
+
         var scene: MKLookAroundScene?
+        defer { timeoutTask.cancel() }
         do {
-            scene = try await MKLookAroundSceneRequest(coordinate: coordinate).scene
+            scene = try await requestTask.value
         } catch {
             scene = nil
         }

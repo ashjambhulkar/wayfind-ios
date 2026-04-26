@@ -40,9 +40,11 @@ struct WayfindApp: App {
                 switch authViewModel.authState {
                 case .loading:
                     VStack(spacing: AppSpacing.lg) {
-                        Image(systemName: "globe.americas.fill")
-                            .font(.system(size: 60))
-                            .foregroundStyle(AppColors.appPrimary)
+                        Image("AppLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 72, height: 72)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         Text("Wayfind")
                             .font(.screenTitle)
                             .foregroundStyle(AppColors.textPrimary)
