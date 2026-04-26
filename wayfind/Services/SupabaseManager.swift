@@ -1534,6 +1534,52 @@ final class SupabaseManager {
             .execute()
     }
 
+    func addChecklistItem(checklistId: UUID, tripId: UUID, title: String, sortOrder: Int) async throws -> TripChecklistItem {
+        let (client, userId) = try await requireClientAndUserId()
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        struct Insert: Encodable, Sendable {
+            let checklist_id: UUID
+            let trip_id: UUID
+            let user_id: UUID
+            let title: String
+            let is_done: Bool
+            let sort_order: Int
+        }
+        let row: ChecklistItemNestedRow = try await client
+            .from("checklist_items")
+            .insert(
+                Insert(
+                    checklist_id: checklistId,
+                    trip_id: tripId,
+                    user_id: userId,
+                    title: trimmed,
+                    is_done: false,
+                    sort_order: sortOrder
+                ),
+                returning: .representation
+            )
+            .select()
+            .single()
+            .execute()
+            .value
+        return TripChecklistItem(
+            id: row.id,
+            checklistId: row.checklist_id,
+            title: row.title,
+            isDone: row.is_done,
+            sortOrder: row.sort_order
+        )
+    }
+
+    func deleteChecklistItem(itemId: UUID) async throws {
+        let (client, _) = try await requireClientAndUserId()
+        try await client
+            .from("checklist_items")
+            .delete()
+            .eq("id", value: itemId.uuidString)
+            .execute()
+    }
+
     private struct TripNoteRow: Decodable, Sendable {
         let id: UUID
         let trip_id: UUID

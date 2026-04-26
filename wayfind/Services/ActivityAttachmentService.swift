@@ -26,6 +26,12 @@ import Supabase
 
 // MARK: - DTOs
 
+/// Signed image URL for compact stacks (e.g. recent activity feed). Not the full attachment DTO.
+struct ActivityFeedPhotoStackItem: Identifiable, Hashable, Sendable {
+    let id: UUID
+    let url: URL
+}
+
 struct ActivityAttachment: Identifiable, Hashable, Sendable {
     let id: UUID
     let activityId: UUID
@@ -276,6 +282,103 @@ final class ActivityAttachmentService {
             signedURLCache.removeValue(forKey: attachmentId)
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    // MARK: - Activity feed (batch thumbnails)
+
+    /// Fetches photo attachments for many activities in one query, returns up to
+    /// **5** signed URLs per activity (cover first, then chronological).
+    @MainActor
+    static func fetchFeedPhotoStacks(activityIds: [UUID]) async -> [UUID: [ActivityFeedPhotoStackItem]] {
+        let unique = Array(Set(activityIds))
+        guard let client = AuthSessionService.shared.client, !unique.isEmpty else { return [:] }
+
+        struct Row: Decodable, Sendable {
+            let id: String
+            let activity_id: String
+            let storage_path: String?
+            let is_cover: Bool?
+            let created_at: String
+        }
+
+        do {
+            let rows: [Row] = try await client
+                .from("trip_activity_attachments")
+                .select("id, activity_id, storage_path, is_cover, created_at")
+                .eq("attachment_type", value: "photo")
+                .in("activity_id", values: unique.map { $0.uuidString.lowercased() })
+                .execute()
+                .value
+
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let isoFallback = ISO8601DateFormatter()
+            isoFallback.formatOptions = [.withInternetDateTime]
+
+            struct Sortable: Sendable {
+                let activityId: UUID
+                let attachmentId: UUID
+                let storagePath: String
+                let isCover: Bool
+                let createdAt: Date
+            }
+
+            var sortables: [Sortable] = []
+            for row in rows {
+                guard let aid = UUID(uuidString: row.activity_id),
+                      let attId = UUID(uuidString: row.id),
+                      let path = row.storage_path, !path.isEmpty
+                else { continue }
+                let date = iso.date(from: row.created_at) ?? isoFallback.date(from: row.created_at) ?? .distantPast
+                sortables.append(Sortable(
+                    activityId: aid,
+                    attachmentId: attId,
+                    storagePath: path,
+                    isCover: row.is_cover ?? false,
+                    createdAt: date
+                ))
+            }
+
+            let byActivity = Dictionary(grouping: sortables, by: \.activityId)
+            var result: [UUID: [ActivityFeedPhotoStackItem]] = [:]
+
+            for (actId, items) in byActivity {
+                let ordered = Array(items.sorted {
+                    if $0.isCover != $1.isCover { return $0.isCover && !$1.isCover }
+                    return $0.createdAt < $1.createdAt
+                }.prefix(5))
+
+                var urlById: [UUID: URL] = [:]
+                await withTaskGroup(of: (UUID, URL?).self) { taskGroup in
+                    for item in ordered {
+                        taskGroup.addTask {
+                            do {
+                                let signed = try await client.storage
+                                    .from("activity-attachments")
+                                    .createSignedURL(path: item.storagePath, expiresIn: 60 * 60)
+                                return (item.attachmentId, signed)
+                            } catch {
+                                return (item.attachmentId, nil)
+                            }
+                        }
+                    }
+                    for await (id, url) in taskGroup {
+                        if let url { urlById[id] = url }
+                    }
+                }
+
+                let stack: [ActivityFeedPhotoStackItem] = ordered.compactMap { item in
+                    guard let u = urlById[item.attachmentId] else { return nil }
+                    return ActivityFeedPhotoStackItem(id: item.attachmentId, url: u)
+                }
+                if !stack.isEmpty {
+                    result[actId] = stack
+                }
+            }
+            return result
+        } catch {
+            return [:]
         }
     }
 

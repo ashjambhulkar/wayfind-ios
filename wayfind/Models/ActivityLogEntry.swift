@@ -30,6 +30,18 @@ struct ActivityLogEntry: Identifiable, Hashable, Sendable {
     /// couldn't fetch (RLS race / orphaned auth user).
     var actorDisplayName: String?
 
+    /// `trip_activities.id` when this row refers to a place/stop — used for
+    /// `trip_activity_attachments` and the activity photos sheet. `nil` for
+    /// non-activity rows and for `activity_deleted` (the row is gone).
+    var tripActivityAttachmentTargetId: UUID? {
+        guard let rawType = entityType?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              rawType == "trip_activity",
+              let eid = entityId,
+              action != .activityDeleted
+        else { return nil }
+        return eid
+    }
+
     enum Action: String, Hashable, Sendable {
         case activityAdded = "activity_added"
         case activityUpdated = "activity_updated"

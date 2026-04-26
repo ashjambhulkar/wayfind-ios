@@ -31,7 +31,10 @@ struct RecentActivitySheet: View {
     let trip: Trip
 
     @State private var store = ActivityFeedStore()
+    @State private var photosSheetTarget: ActivityPhotosSheetTarget?
     @Environment(\.dismiss) private var dismiss
+    @Environment(DataService.self) private var dataService
+    @Environment(CollaborationStore.self) private var collaborationStore
 
     var body: some View {
         NavigationStack {
@@ -49,6 +52,18 @@ struct RecentActivitySheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .tint(AppColors.appPrimary)
+        .sheet(item: $photosSheetTarget) { target in
+            ActivityPhotosSheet(
+                activityId: target.activityId,
+                tripId: trip.id,
+                activityTitle: target.title,
+                canEditAttachments: collaborationStore.canEdit
+            )
+            .environment(dataService)
+            .onDisappear {
+                Task { await store.refreshAttachmentStacksOnly() }
+            }
+        }
         .onAppear {
             store.bind(to: trip.id)
         }
@@ -79,8 +94,22 @@ struct RecentActivitySheet: View {
             ForEach(groups, id: \.bucket) { group in
                 Section {
                     ForEach(group.entries) { entry in
-                        ActivityFeedRow(entry: entry)
-                            .listRowBackground(AppColors.appSurface)
+                        ActivityFeedRow(
+                            entry: entry,
+                            photoStack: store.photoStack(for: entry),
+                            onOpenPhotos: { openPhotos(for: entry) }
+                        )
+                        .listRowBackground(AppColors.appSurface)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if collaborationStore.canEdit, entry.tripActivityAttachmentTargetId != nil {
+                                Button {
+                                    openPhotos(for: entry)
+                                } label: {
+                                    Label("Photos", systemImage: "photo.on.rectangle.angled")
+                                }
+                                .tint(AppColors.appPrimary)
+                            }
+                        }
                     }
                 } header: {
                     Text(group.label)
@@ -96,6 +125,13 @@ struct RecentActivitySheet: View {
         .refreshable {
             await store.refresh()
         }
+    }
+
+    private func openPhotos(for entry: ActivityLogEntry) {
+        guard let aid = entry.tripActivityAttachmentTargetId else { return }
+        let trimmed = entry.entityName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = trimmed.isEmpty ? String(localized: "Stop") : trimmed
+        photosSheetTarget = ActivityPhotosSheetTarget(activityId: aid, title: title)
     }
 
     // MARK: - Placeholders / states
@@ -222,12 +258,18 @@ struct RecentActivitySheet: View {
 
 private struct ActivityFeedRow: View {
     let entry: ActivityLogEntry
+    let photoStack: [ActivityFeedPhotoStackItem]
+    let onOpenPhotos: () -> Void
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter
     }()
+
+    private var showsPhotoChrome: Bool {
+        entry.tripActivityAttachmentTargetId != nil && !photoStack.isEmpty
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: AppSpacing.md) {
@@ -252,15 +294,25 @@ private struct ActivityFeedRow: View {
                 Text(Self.relativeFormatter.localizedString(for: entry.createdAt, relativeTo: Date()))
                     .font(.appCaption)
                     .foregroundStyle(AppColors.textTertiary)
-                    // Pad the relative-time row over to align with the
-                    // description text (past the SF Symbol).
                     .padding(.leading, 16 + AppSpacing.xs)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: AppSpacing.sm)
+
+            if showsPhotoChrome {
+                ActivityFeedPhotoStackView(items: photoStack, onTap: onOpenPhotos)
+            }
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(entry.description), \(Self.relativeFormatter.localizedString(for: entry.createdAt, relativeTo: Date()))")
+        .accessibilityLabel(accessibilityLabelText)
+    }
+
+    private var accessibilityLabelText: String {
+        var base = "\(entry.description), \(Self.relativeFormatter.localizedString(for: entry.createdAt, relativeTo: Date()))"
+        if showsPhotoChrome {
+            base += ", \(photoStack.count) photos"
+        }
+        return base
     }
 }
 

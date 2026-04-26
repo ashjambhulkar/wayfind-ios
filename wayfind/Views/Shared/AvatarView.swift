@@ -21,19 +21,23 @@ struct AvatarView: View {
     /// Adds a thin contrasting ring (used in the overlapping nav-bar stack
     /// so adjacent discs visually separate from each other).
     var showRing: Bool = false
+    /// When `showRing` is true, overrides the default `AppColors.appSurface` stroke (e.g. white on hero photos).
+    var ringStrokeColor: Color? = nil
 
     init(
         displayName: String?,
         imageURL: URL?,
         stableID: String,
         size: CGFloat = 32,
-        showRing: Bool = false
+        showRing: Bool = false,
+        ringStrokeColor: Color? = nil
     ) {
         self.displayName = displayName
         self.imageURL = imageURL
         self.stableID = stableID
         self.size = size
         self.showRing = showRing
+        self.ringStrokeColor = ringStrokeColor
     }
 
     var body: some View {
@@ -61,7 +65,10 @@ struct AvatarView: View {
         .clipShape(Circle())
         .overlay(
             Circle()
-                .strokeBorder(showRing ? AppColors.appSurface : Color.clear, lineWidth: showRing ? 2 : 0)
+                .strokeBorder(
+                    showRing ? (ringStrokeColor ?? AppColors.appSurface) : Color.clear,
+                    lineWidth: showRing ? 2 : 0
+                )
         )
     }
 

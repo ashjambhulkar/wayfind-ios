@@ -36,6 +36,9 @@ struct TripDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var showMembersSheet = false
     @State private var showRecentActivitySheet = false
+    /// Activity photo stacks for non-booking timeline rows (`place.id` → thumbnails).
+    @State private var itineraryPhotoStacks: [UUID: [ActivityFeedPhotoStackItem]] = [:]
+    @State private var itineraryPhotosTarget: ActivityPhotosSheetTarget?
     @State private var placeToEdit: Place?
     @State private var placeToMove: Place?
     @State private var selectedPlace: Place?
@@ -53,6 +56,8 @@ struct TripDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var isDayHeaderPinnedToNavigation = false
+    /// Hide the inline nav title while the hero shows the trip name; reveal after scrolling.
+    @State private var showInlineTripTitle = false
 
     let trip: Trip
 
@@ -72,6 +77,17 @@ struct TripDetailView: View {
 
     private var tripBookingCount: Int {
         viewModel?.totalBookingsCount ?? 0
+    }
+
+    /// Hero (cover + title) is on-screen only after the initial timeline load.
+    private var tripDetailShowsHeroWithContent: Bool {
+        guard let viewModel else { return false }
+        return !(viewModel.isLoading && viewModel.scheduledDays.isEmpty)
+    }
+
+    /// Avatars live in the nav bar while loading, when the hero is hidden, or after the user scrolls past the hero.
+    private var showTripMembersInNavigationBar: Bool {
+        !tripDetailShowsHeroWithContent || showInlineTripTitle
     }
 
     var body: some View {
@@ -96,6 +112,7 @@ struct TripDetailView: View {
                     }
                     viewModel?.trip = updatedTrip
                     await viewModel?.loadTripData()
+                    await refreshItineraryPhotoStacks()
                 }
                 toastManager.show(ToastData(message: "Trip updated", type: .success))
             }
@@ -109,6 +126,7 @@ struct TripDetailView: View {
                             Task {
                                 await dataService.updatePlace(updatedPlace)
                                 await viewModel?.loadTripData()
+                                await refreshItineraryPhotoStacks()
                                 await trackBookingExpenseIfNeeded(place: updatedPlace, cost: cost)
                             }
                             toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: true))
@@ -121,6 +139,7 @@ struct TripDetailView: View {
                     Task {
                         await dataService.updatePlace(updatedPlace)
                         await viewModel?.loadTripData()
+                        await refreshItineraryPhotoStacks()
                     }
                     toastManager.show(ToastData(message: "Updated", type: .success))
                 }
@@ -138,6 +157,7 @@ struct TripDetailView: View {
                     Task {
                         await dataService.movePlace(placeId: place.id, toDayId: targetDayId)
                         await vm.loadTripData()
+                        await refreshItineraryPhotoStacks()
                     }
                     HapticManager.success()
                     let targetDay = vm.scheduledDays.first(where: { $0.id == targetDayId })
@@ -149,6 +169,7 @@ struct TripDetailView: View {
                             Task {
                                 await dataService.movePlace(placeId: place.id, toDayId: place.itineraryDayId)
                                 await vm.loadTripData()
+                                await refreshItineraryPhotoStacks()
                             }
                         }
                     ))
@@ -169,6 +190,9 @@ struct TripDetailView: View {
                     selectedPlace = nil
                 }
             )
+            .onDisappear {
+                Task { await refreshItineraryPhotoStacks() }
+            }
         }
         .sheet(item: $bookingForAttachments) { place in
             BookingAttachmentsSheet(
@@ -228,6 +252,7 @@ struct TripDetailView: View {
                     onSave: { savedPlace, cost in
                         Task {
                             await vm.loadTripData()
+                            await refreshItineraryPhotoStacks()
                             await trackBookingExpenseIfNeeded(place: savedPlace, cost: cost)
                         }
                         toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: false))
@@ -265,6 +290,7 @@ struct TripDetailView: View {
                     Task {
                         await dataService.addPlace(newPlace)
                         await vm.loadTripData()
+                        await refreshItineraryPhotoStacks()
                     }
                     HapticManager.success()
                     showAddPlace = false
@@ -278,6 +304,7 @@ struct TripDetailView: View {
                 onViewModelCreated?(created)
             }
             await viewModel?.loadTripData()
+            await refreshItineraryPhotoStacks()
             bannerDismissed = discoveryManager.isBannerDismissed(for: trip.id)
             await flightTracking.bind(tripId: trip.id)
         }
@@ -292,7 +319,10 @@ struct TripDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .tripActivitiesDidChange)) { note in
             guard let id = note.userInfo?[TripActivitiesNotificationKeys.tripId] as? UUID,
                   id == trip.id else { return }
-            Task { await viewModel?.loadTripData() }
+            Task {
+                await viewModel?.loadTripData()
+                await refreshItineraryPhotoStacks()
+            }
         }
     }
 
@@ -314,18 +344,26 @@ struct TripDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.appBackground)
-        .navigationTitle(viewModel?.trip.title ?? trip.title)
+        .navigationTitle(showInlineTripTitle ? (viewModel?.trip.title ?? trip.title) : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         // Use the app's solid background color rather than the system's
         // translucent material so scrolled content (e.g. the forwarding
         // banner) cannot ghost through the nav as it scrolls past.
         .toolbarBackground(AppColors.appBackground, for: .navigationBar)
-        .toolbarBackground(isDayHeaderPinnedToNavigation ? .visible : .hidden, for: .navigationBar)
+        .toolbarBackground(
+            (showInlineTripTitle || isDayHeaderPinnedToNavigation) ? .visible : .hidden,
+            for: .navigationBar
+        )
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                TripMembersAvatarStack {
-                    showMembersSheet = true
+                if showTripMembersInNavigationBar {
+                    HStack(spacing: AppSpacing.sm) {
+                        TripMembersAvatarStack(onTap: {}, heroOnPhoto: false, allowsTap: false)
+                        TripMembersShareButton(heroOnPhoto: false) {
+                            showMembersSheet = true
+                        }
+                    }
                 }
 
                 Menu {
@@ -406,12 +444,43 @@ struct TripDetailView: View {
         }
         .sheet(isPresented: $showRecentActivitySheet) {
             RecentActivitySheet(trip: viewModel?.trip ?? trip)
+                .environment(dataService)
+                .environment(collaborationStore)
+        }
+        .sheet(item: $itineraryPhotosTarget) { target in
+            ActivityPhotosSheet(
+                activityId: target.activityId,
+                tripId: viewModel?.trip.id ?? trip.id,
+                activityTitle: target.title,
+                canEditAttachments: collaborationStore.canEdit
+            )
+            .environment(dataService)
+            .onDisappear {
+                Task { await refreshItineraryPhotoStacks() }
+            }
         }
         .sheet(isPresented: $showCalendarOnboarding) {
             CalendarSyncOnboardingView(trip: viewModel?.trip ?? trip) {
                 Task { await runCalendarSync() }
             }
         }
+    }
+
+    // MARK: - Activity photos (timeline)
+
+    private func refreshItineraryPhotoStacks() async {
+        guard let vm = viewModel else { return }
+        let ids = vm.nonBookingTimelineActivityIds()
+        guard !ids.isEmpty else {
+            itineraryPhotoStacks = [:]
+            return
+        }
+        let stacks = await ActivityAttachmentService.fetchFeedPhotoStacks(activityIds: ids)
+        itineraryPhotoStacks = stacks
+    }
+
+    private func openItineraryActivityPhotos(for place: Place) {
+        itineraryPhotosTarget = ActivityPhotosSheetTarget(activityId: place.id, title: place.name)
     }
 
     // MARK: - Calendar sync helpers (Wave 2.1)
@@ -466,31 +535,44 @@ struct TripDetailView: View {
                 VStack(spacing: 0) {
                     TripDetailHeroHeader(
                         trip: viewModel.trip,
-                        topBleed: KeyWindowSafeArea.topInset
+                        topBleed: KeyWindowSafeArea.topInset,
+                        showMembersCluster: !showInlineTripTitle,
+                        onShareMembers: { showMembersSheet = true }
                     )
 
                     LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                         pillsRow(viewModel: viewModel)
 
-                        HStack {
-                            Spacer()
-                            Button {
-                                let allCollapsed = viewModel.scheduledDays.allSatisfy { viewModel.isDayCollapsed($0) }
-                                if allCollapsed {
-                                    viewModel.expandAll()
-                                } else {
-                                    viewModel.collapseAll()
+                        if !viewModel.scheduledDays.isEmpty {
+                            HStack(alignment: .center, spacing: AppSpacing.md) {
+                                Text(String(localized: "Itinerary"))
+                                    .font(.title3.weight(.bold))
+                                    .foregroundStyle(AppColors.textPrimary)
+
+                                Spacer(minLength: 0)
+
+                                Button {
+                                    let allCollapsed = viewModel.scheduledDays.allSatisfy { viewModel.isDayCollapsed($0) }
+                                    if allCollapsed {
+                                        viewModel.expandAll()
+                                    } else {
+                                        viewModel.collapseAll()
+                                    }
+                                } label: {
+                                    let allCollapsed = viewModel.scheduledDays.allSatisfy { viewModel.isDayCollapsed($0) }
+                                    Text(allCollapsed ? "Expand all" : "Collapse all")
+                                        .font(.appCaption)
+                                        .fontWeight(.medium)
+                                        .foregroundStyle(AppColors.appPrimary)
                                 }
-                            } label: {
-                                let allCollapsed = viewModel.scheduledDays.allSatisfy { viewModel.isDayCollapsed($0) }
-                                Text(allCollapsed ? "Expand all" : "Collapse all")
-                                    .font(.appCaption)
-                                    .foregroundStyle(AppColors.appPrimary)
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
+                            .padding(.horizontal, AppSpacing.lg)
+                            .padding(.top, AppSpacing.sm + AppSpacing.md)
+                            .padding(.bottom, AppSpacing.md)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(String(localized: "Itinerary"))
                         }
-                        .padding(.horizontal, AppSpacing.lg)
-                        .padding(.bottom, AppSpacing.sm)
 
                         if discoveryManager.shouldShowTimelineBanner(tripBookingCount: tripBookingCount, tripId: trip.id) && !bannerDismissed {
                             ForwardingBannerView(
@@ -509,7 +591,7 @@ struct TripDetailView: View {
                                 }
                             )
                             .padding(.horizontal, AppSpacing.lg)
-                            .padding(.bottom, AppSpacing.md)
+                            .padding(.bottom, AppSpacing.sm)
                             .transition(.opacity.combined(with: .scale(scale: 0.95)))
                         }
 
@@ -543,6 +625,15 @@ struct TripDetailView: View {
                 110,
                 for: .scrollContent
             )
+            .onPreferenceChange(TripDetailScrollOffsetKey.self) { minY in
+                let threshold = TripDetailOverlayMetrics.inlineNavTitleRevealScrollMinY(
+                    topSafeInset: KeyWindowSafeArea.topInset
+                )
+                let next = minY < threshold
+                if next != showInlineTripTitle {
+                    showInlineTripTitle = next
+                }
+            }
             .onPreferenceChange(TripDetailDayHeaderMinYKey.self) { minY in
                 let next = minY <= TripDetailOverlayMetrics.stickyDayHeaderTop + 1
                 if next != isDayHeaderPinnedToNavigation {
@@ -569,14 +660,16 @@ struct TripDetailView: View {
 
     private func pillsRow(viewModel: TripDetailViewModel) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: AppSpacing.sm) {
+            // Trip tool pills: neutral capsule; icon accents via `TripToolPillIconAccent`.
+            HStack(spacing: AppSpacing.md) {
                 PillButtonView(
                     sfSymbol: "checklist",
                     label: "Checklist",
                     trailingDetail: viewModel.checklistTotalCount > 0
                         ? " \(viewModel.checklistDoneCount)/\(viewModel.checklistTotalCount)"
                         : nil,
-                    isActive: true
+                    isActive: true,
+                    iconTint: TripToolPillIconAccent.checklist
                 ) {
                     HapticManager.light()
                     showTripChecklists = true
@@ -591,7 +684,8 @@ struct TripDetailView: View {
                         sfSymbol: "note.text",
                         label: "Notes",
                         trailingDetail: viewModel.noteCount > 0 ? " \(viewModel.noteCount)" : nil,
-                        isActive: true
+                        isActive: true,
+                        iconTint: TripToolPillIconAccent.notes
                     ) {
                         HapticManager.light()
                         showTripNotes = true
@@ -602,7 +696,8 @@ struct TripDetailView: View {
                         sfSymbol: "doc.text",
                         label: "Documents",
                         trailingDetail: nil,
-                        isActive: true
+                        isActive: true,
+                        iconTint: TripToolPillIconAccent.documents
                     ) {
                         HapticManager.light()
                         showTripDocuments = true
@@ -619,7 +714,14 @@ struct TripDetailView: View {
     @ViewBuilder
     private func daySection(day: ItineraryDay, viewModel: TripDetailViewModel) -> some View {
         let places = viewModel.places(for: day)
-        let preview = places.prefix(3).map(\.name).joined(separator: ", ")
+        let ongoingForDay = viewModel.ongoingBookings(for: day)
+        let isQuietEmptyDay = places.isEmpty && ongoingForDay.isEmpty
+        let preview: String = {
+            if !places.isEmpty {
+                return places.prefix(3).map(\.name).joined(separator: ", ")
+            }
+            return ongoingForDay.first.map(\.place.name) ?? ""
+        }()
 
         Section {
             if !viewModel.isDayCollapsed(day) {
@@ -627,7 +729,7 @@ struct TripDetailView: View {
                     Spacer()
                         .frame(height: AppSpacing.md)
 
-                    DaySummaryView(places: places)
+                    DaySummaryView(places: places, showNoPlansYet: isQuietEmptyDay)
 
                     if isTodayDay(day) {
                         NowIndicatorView()
@@ -635,7 +737,7 @@ struct TripDetailView: View {
                             .padding(.bottom, AppSpacing.sm)
                     }
 
-                    ForEach(viewModel.ongoingBookings(for: day), id: \.place.id) { item in
+                    ForEach(ongoingForDay, id: \.place.id) { item in
                         if item.isFirstAppearance {
                             OngoingBookingBannerView(
                                 bookingName: item.place.name,
@@ -687,7 +789,10 @@ struct TripDetailView: View {
                                     onEdit: { placeToEdit = place },
                                     onMoveToDay: { placeToMove = place },
                                     onMoveToIdeas: { moveToIdeas(place, viewModel: viewModel) },
-                                    onDelete: { deletePlace(place, viewModel: viewModel) }
+                                    onDelete: { deletePlace(place, viewModel: viewModel) },
+                                    activityPhotoStack: itineraryPhotoStacks[place.id] ?? [],
+                                    canEditActivityPhotos: collaborationStore.canEdit,
+                                    onOpenActivityPhotos: { openItineraryActivityPhotos(for: place) }
                                 )
                             }
                         }
@@ -719,10 +824,11 @@ struct TripDetailView: View {
         } header: {
             DaySectionHeaderView(
                 day: day,
-                titleText: viewModel.dayStatusText(for: day),
-                itemCount: viewModel.placesCount(for: day),
+                dayLabel: viewModel.dayHeaderDayLabel(for: day),
+                dateLabel: viewModel.dayHeaderDateLabel(for: day),
                 isCollapsed: viewModel.isDayCollapsed(day),
-                contentPreview: preview
+                contentPreview: preview,
+                isQuietEmptyDay: isQuietEmptyDay
             ) {
                 viewModel.toggleDayCollapse(day)
             }
@@ -743,6 +849,10 @@ struct TripDetailView: View {
                 )
             }
             .id(day.id)
+        } footer: {
+            Color.clear
+                .frame(height: AppSpacing.lg)
+                .accessibilityHidden(true)
         }
         .accessibilityElement(children: .contain)
     }
@@ -780,6 +890,7 @@ struct TripDetailView: View {
         Task {
             await dataService.movePlace(placeId: place.id, toDayId: wishlistId)
             await viewModel.loadTripData()
+            await refreshItineraryPhotoStacks()
         }
         HapticManager.success()
         toastManager.show(ToastData(
@@ -790,6 +901,7 @@ struct TripDetailView: View {
                 Task {
                     await dataService.movePlace(placeId: place.id, toDayId: place.itineraryDayId)
                     await viewModel.loadTripData()
+                    await refreshItineraryPhotoStacks()
                 }
             }
         ))
@@ -800,6 +912,7 @@ struct TripDetailView: View {
         Task {
             await dataService.deletePlace(id: place.id)
             await viewModel.loadTripData()
+            await refreshItineraryPhotoStacks()
         }
         HapticManager.warning()
         toastManager.show(ToastData(
@@ -810,6 +923,7 @@ struct TripDetailView: View {
                 Task {
                     await dataService.addPlace(deleted)
                     await viewModel.loadTripData()
+                    await refreshItineraryPhotoStacks()
                 }
             }
         ))
@@ -918,7 +1032,10 @@ struct TripDetailView: View {
                                 dayNumber: 0,
                                 onEdit: { placeToEdit = place },
                                 onMoveToDay: { placeToMove = place },
-                                onDelete: { deletePlace(place, viewModel: viewModel) }
+                                onDelete: { deletePlace(place, viewModel: viewModel) },
+                                activityPhotoStack: itineraryPhotoStacks[place.id] ?? [],
+                                canEditActivityPhotos: collaborationStore.canEdit,
+                                onOpenActivityPhotos: { openItineraryActivityPhotos(for: place) }
                             )
                         }
                     }
@@ -954,6 +1071,8 @@ struct TripDetailView: View {
 private struct TripDetailHeroHeader: View {
     let trip: Trip
     var topBleed: CGFloat = 0
+    var showMembersCluster: Bool = false
+    var onShareMembers: () -> Void = {}
 
     private var statusLabel: String {
         switch trip.status {
@@ -998,28 +1117,42 @@ private struct TripDetailHeroHeader: View {
 
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 Spacer(minLength: 0)
-                Text(statusLabel)
-                    .font(.appSmall)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, AppSpacing.sm)
-                    .padding(.vertical, AppSpacing.xs)
-                    .background(Color.white.opacity(0.22))
-                    .clipShape(Capsule())
 
-                Text(trip.title)
-                    .font(.sectionHeader)
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
+                HStack(alignment: .bottom, spacing: AppSpacing.md) {
+                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                        Text(trip.title)
+                            .font(.tripDetailHeroTitle)
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
 
-                Text("\(trip.startDate.shortFormatted) – \(trip.endDate.shortFormatted)")
-                    .font(.appCaption)
-                    .foregroundStyle(.white.opacity(0.92))
-                    .multilineTextAlignment(.leading)
+                        Text("\(trip.startDate.shortFormatted) – \(trip.endDate.shortFormatted)")
+                            .font(.appCaption)
+                            .foregroundStyle(.white.opacity(0.92))
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 1)
+
+                        Text(statusLabel)
+                            .font(.appSmall)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, AppSpacing.sm)
+                            .padding(.vertical, AppSpacing.xs)
+                            .background(Color.white.opacity(0.22))
+                            .clipShape(Capsule())
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 1)
+
+                    if showMembersCluster {
+                        HStack(alignment: .center, spacing: AppSpacing.sm) {
+                            TripMembersAvatarStack(onTap: {}, heroOnPhoto: true, allowsTap: false)
+                            TripMembersShareButton(heroOnPhoto: true, action: onShareMembers)
+                        }
+                        .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 2)
+                    }
+                }
             }
             .padding(AppSpacing.lg)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -1077,6 +1210,13 @@ private enum TripDetailOverlayMetrics {
     static var stickyDayHeaderTop: CGFloat {
         KeyWindowSafeArea.topInset + navigationBarHeight
     }
+
+    /// `ScrollView` content top `minY` in `tripDetailScroll` below which the hero
+    /// (including its title) has cleared the nav — show the inline navigation title.
+    static func inlineNavTitleRevealScrollMinY(topSafeInset: CGFloat) -> CGFloat {
+        let heroTotal = visibleHeroHeight + topSafeInset
+        return -(heroTotal - navigationBarHeight - AppSpacing.lg)
+    }
 }
 
 // MARK: - Wave 3.3 — Flight tracking helpers
@@ -1121,6 +1261,40 @@ extension TripDetailView {
         )
     }
 }
+
+#if DEBUG
+private enum TripDetailView_Previews {}
+
+/// Hosts `TripDetailView` with the same environments as `AppRootTabView`.
+/// Timeline data comes from `MockDataService` when `AppConfig.useRealBackend` is `false`
+/// (`Trip.preview.id` matches the mock Paris trip).
+private struct TripDetailPreviewHost: View {
+    let trip: Trip
+    @State private var dataService = DataService()
+    @State private var toastManager = ToastManager()
+    @State private var collaborationStore = CollaborationStore()
+
+    var body: some View {
+        NavigationStack {
+            TripDetailView(trip: trip)
+        }
+        .environment(dataService)
+        .environment(toastManager)
+        .environment(collaborationStore)
+        .onAppear {
+            collaborationStore.bind(to: trip.id)
+        }
+    }
+}
+
+#Preview("Trip detail — Paris (mock timeline)") {
+    TripDetailPreviewHost(trip: .preview)
+}
+
+#Preview("Trip detail — active dates") {
+    TripDetailPreviewHost(trip: .previewActive)
+}
+#endif
 
 
 // =============================================================================

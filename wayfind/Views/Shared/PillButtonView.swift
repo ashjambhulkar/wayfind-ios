@@ -1,5 +1,48 @@
 import SwiftUI
-import UIKit
+
+// MARK: - Trip tool icon accents (Checklist / Notes / Documents)
+
+/// Distinct, readable icon colors for the trip detail tool strip. Capsule chrome stays neutral; only the SF Symbol uses these tints.
+enum TripToolPillIconAccent {
+    /// Deep teal — progress / tasks.
+    static let checklist = Color(
+        light: Color(red: 0.07, green: 0.52, blue: 0.46),
+        dark: Color(red: 0.35, green: 0.88, blue: 0.78)
+    )
+    /// Indigo — writing / notes.
+    static let notes = Color(
+        light: Color(red: 0.39, green: 0.40, blue: 0.86),
+        dark: Color(red: 0.63, green: 0.64, blue: 1.0)
+    )
+    /// Warm amber — documents / files.
+    static let documents = Color(
+        light: Color(red: 0.86, green: 0.42, blue: 0.16),
+        dark: Color(red: 0.98, green: 0.64, blue: 0.35)
+    )
+}
+
+// MARK: - Trip tool capsule metrics (aligned with `TripMembersShareButton`)
+
+private enum TripToolCapsuleMetrics {
+    static let horizontalPadding: CGFloat = 12
+    static let verticalPadding: CGFloat = 8
+    static let contentSpacing: CGFloat = 5
+    static let iconFontSize: CGFloat = 14
+}
+
+// MARK: - Trip tool pill button style
+
+/// Press feedback aligned with compact trip-tool capsules (Share, Checklist, …).
+struct TripToolPillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .opacity(configuration.isPressed ? 0.92 : 1)
+            .animation(.spring(response: 0.32, dampingFraction: 0.78), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Pill button
 
 struct PillButtonView: View {
     let sfSymbol: String
@@ -9,8 +52,11 @@ struct PillButtonView: View {
     var badgeCount: Int?
     var showPulseDot: Bool = false
     var isActive: Bool = true
+    /// When set, only the leading SF Symbol uses this color; label stays neutral.
+    var iconTint: Color? = nil
     let action: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @State private var showComingSoon = false
     @State private var pulsing = false
 
@@ -18,16 +64,16 @@ struct PillButtonView: View {
         Group {
             if isActive {
                 Button(action: action) {
-                    pillLabel
+                    pillChrome
                 }
-                .buttonStyle(PillPressButtonStyle())
+                .buttonStyle(TripToolPillButtonStyle())
             } else {
                 Button {
                     showComingSoon = true
                 } label: {
-                    pillLabel
+                    pillChrome
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(TripToolPillButtonStyle())
                 .popover(isPresented: $showComingSoon) {
                     Text("Coming Soon")
                         .font(.appBody)
@@ -37,52 +83,94 @@ struct PillButtonView: View {
         }
     }
 
-    private var pillLabel: some View {
-        HStack(spacing: AppSpacing.xs) {
+    private var pillChrome: some View {
+        HStack(spacing: TripToolCapsuleMetrics.contentSpacing) {
             Image(systemName: sfSymbol)
-            Text(label + (trailingDetail ?? ""))
+                .font(.system(size: TripToolCapsuleMetrics.iconFontSize, weight: .semibold))
+                .imageScale(.medium)
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(iconForeground)
+
+            pillTitleText
+
             if let badgeCount {
                 Text("\(badgeCount)")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(isActive ? AppColors.textSecondary : AppColors.textTertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(AppColors.appDivider.opacity(isActive ? 1 : 0.7))
+                    )
             }
+
             if showPulseDot {
                 Circle()
-                    .fill(AppColors.appPrimary)
+                    .fill(isActive ? (iconTint ?? AppColors.appPrimary) : AppColors.textTertiary)
                     .frame(width: 6, height: 6)
                     .scaleEffect(pulsing ? 1.5 : 1.0)
                     .opacity(pulsing ? 0.6 : 1.0)
                     .onAppear {
-                        guard !UIAccessibility.isReduceMotionEnabled else { return }
+                        guard !accessibilityReduceMotion else { return }
                         withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) {
                             pulsing = true
                         }
                     }
             }
         }
-        .font(.appCaption)
-        .foregroundStyle(isActive ? AppColors.textPrimary : AppColors.textTertiary)
-        .padding(.horizontal, AppSpacing.md)
-        .frame(height: 36)
-        .background {
-            if isActive {
-                Capsule()
-                    .fill(AppColors.appSurface)
-                    .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-            } else {
-                Capsule()
-                    .fill(Color.clear)
-            }
-        }
+        .padding(.horizontal, TripToolCapsuleMetrics.horizontalPadding)
+        .padding(.vertical, TripToolCapsuleMetrics.verticalPadding)
+        .background(pillBackground)
+        .overlay(pillStroke)
+        .clipShape(Capsule(style: .continuous))
+        .contentShape(Capsule())
         .accessibilityLabel(
             "\(label)\(trailingDetail.map { "\($0)" } ?? "")\(badgeCount.map { ", \($0) items" } ?? "")"
         )
     }
-}
 
-private struct PillPressButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .animation(AppSpring.snappy, value: configuration.isPressed)
+    private var iconForeground: Color {
+        guard isActive else { return AppColors.textTertiary }
+        return iconTint ?? AppColors.textPrimary
+    }
+
+    @ViewBuilder
+    private var pillTitleText: some View {
+        let detail = trailingDetail ?? ""
+        let titleTint = isActive ? AppColors.textPrimary : AppColors.textTertiary
+        if detail.isEmpty {
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(titleTint)
+        } else {
+            (Text(label)
+                .fontWeight(.semibold)
+                .foregroundStyle(titleTint)
+                + Text(detail)
+                .fontWeight(.regular)
+                .foregroundStyle(isActive ? AppColors.textSecondary : AppColors.textTertiary))
+                .font(.subheadline)
+        }
+    }
+
+    private var pillBackground: some View {
+        Group {
+            if isActive {
+                AppColors.appSurface
+            } else {
+                AppColors.appSurface.opacity(0.55)
+            }
+        }
+    }
+
+    private var pillStroke: some View {
+        Capsule(style: .continuous)
+            .strokeBorder(
+                isActive ? AppColors.appDivider : AppColors.appDivider.opacity(0.65),
+                lineWidth: 0.5
+            )
     }
 }
 
@@ -92,14 +180,16 @@ private struct PillPressButtonStyle: ButtonStyle {
 
 #if DEBUG
 #Preview("Pill buttons") {
-    VStack(spacing: 12) {
-        PillButtonView(sfSymbol: "map", label: "Map", action: {})
-        PillButtonView(sfSymbol: "ticket", label: "Bookings", badgeCount: 3, action: {})
-        PillButtonView(sfSymbol: "checklist", label: "Checklist", trailingDetail: " 4/10", action: {})
-        PillButtonView(sfSymbol: "note.text", label: "Notes", showPulseDot: true, action: {})
-        PillButtonView(sfSymbol: "clock", label: "Coming soon", isActive: false, action: {})
+    ZStack {
+        AppColors.appBackground
+        VStack(spacing: 12) {
+            PillButtonView(sfSymbol: "map", label: "Map", action: {})
+            PillButtonView(sfSymbol: "ticket", label: "Bookings", badgeCount: 3, action: {})
+            PillButtonView(sfSymbol: "checklist", label: "Checklist", trailingDetail: " 4/10", action: {})
+            PillButtonView(sfSymbol: "note.text", label: "Notes", showPulseDot: true, action: {})
+            PillButtonView(sfSymbol: "clock", label: "Coming soon", isActive: false, action: {})
+        }
+        .padding()
     }
-    .padding()
-    .background(AppColors.appBackground)
 }
 #endif

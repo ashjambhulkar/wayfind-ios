@@ -33,6 +33,8 @@ final class ActivityFeedStore {
     }
 
     private(set) var entries: [ActivityLogEntry] = []
+    /// Signed photo URLs keyed by `trip_activities.id`, for feed rows that support attachments.
+    private(set) var attachmentStacks: [UUID: [ActivityFeedPhotoStackItem]] = [:]
     private(set) var loadState: LoadState = .idle
     private(set) var currentTripId: UUID?
 
@@ -70,6 +72,7 @@ final class ActivityFeedStore {
         guard AppConfig.useRealBackend else {
             loadState = .loaded
             entries = []
+            attachmentStacks = [:]
             return
         }
 
@@ -96,12 +99,24 @@ final class ActivityFeedStore {
         }
         channel = nil
         currentTripId = nil
+        attachmentStacks = [:]
     }
 
     /// User pull-to-refresh handler. Reuses the same fetch path.
     func refresh() async {
         guard let tripId = currentTripId else { return }
         await performFetch(tripId: tripId)
+    }
+
+    /// Reload only attachment thumbnails (e.g. after closing the activity photos sheet).
+    func refreshAttachmentStacksOnly() async {
+        guard AppConfig.useRealBackend, !entries.isEmpty else { return }
+        await refreshAttachmentStacks(for: entries)
+    }
+
+    func photoStack(for entry: ActivityLogEntry) -> [ActivityFeedPhotoStackItem] {
+        guard let aid = entry.tripActivityAttachmentTargetId else { return [] }
+        return attachmentStacks[aid] ?? []
     }
 
     // MARK: - Fetch
@@ -124,6 +139,7 @@ final class ActivityFeedStore {
             guard !Task.isCancelled, currentTripId == tripId else { return }
             entries = rows
             loadState = .loaded
+            await refreshAttachmentStacks(for: rows)
         } catch is CancellationError {
             return
         } catch {
@@ -135,7 +151,21 @@ final class ActivityFeedStore {
             } else {
                 loadState = .loaded
             }
+            await refreshAttachmentStacks(for: entries)
         }
+    }
+
+    private func refreshAttachmentStacks(for rows: [ActivityLogEntry]) async {
+        guard AppConfig.useRealBackend else {
+            attachmentStacks = [:]
+            return
+        }
+        let ids = Array(Set(rows.compactMap(\.tripActivityAttachmentTargetId)))
+        guard !ids.isEmpty else {
+            attachmentStacks = [:]
+            return
+        }
+        attachmentStacks = await ActivityAttachmentService.fetchFeedPhotoStacks(activityIds: ids)
     }
 
     // MARK: - Realtime

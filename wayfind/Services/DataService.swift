@@ -203,13 +203,41 @@ final class DataService {
     }
 
     func listTemplateTripChecklistsWithItems(tripId: UUID) async -> [TripChecklistWithItems] {
-        if let real { return (try? await real.listTemplateTripChecklistsWithItems(tripId: tripId)) ?? [] }
+        if let real {
+            try? await real.ensureTripChecklistTemplates(tripId: tripId)
+            return (try? await real.listTemplateTripChecklistsWithItems(tripId: tripId)) ?? []
+        }
         return await mock!.listTemplateTripChecklistsWithItems(tripId: tripId)
+    }
+
+    func addChecklistItem(checklistId: UUID, tripId: UUID, title: String, sortOrder: Int) async -> TripChecklistItem? {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let real {
+            try? await real.ensureTripChecklistTemplates(tripId: tripId)
+            return try? await real.addChecklistItem(
+                checklistId: checklistId,
+                tripId: tripId,
+                title: trimmed,
+                sortOrder: sortOrder
+            )
+        }
+        return await mock!.addChecklistItem(
+            checklistId: checklistId,
+            tripId: tripId,
+            title: trimmed,
+            sortOrder: sortOrder
+        )
     }
 
     func setChecklistItemDone(itemId: UUID, isDone: Bool) async {
         if let real { try? await real.setChecklistItemDone(itemId: itemId, isDone: isDone) }
         else { await mock!.setChecklistItemDone(itemId: itemId, isDone: isDone) }
+    }
+
+    func deleteChecklistItem(itemId: UUID) async {
+        if let real { try? await real.deleteChecklistItem(itemId: itemId) }
+        else { await mock!.deleteChecklistItem(itemId: itemId) }
     }
 
     // MARK: - Collaborative budget (Phase 1)

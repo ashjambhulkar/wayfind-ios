@@ -8,6 +8,13 @@ struct TripNote: Identifiable, Hashable, Sendable {
     var body: String
     let createdAt: Date
     var updatedAt: Date
+
+    /// True when the note has no meaningful title or body (list + cleanup).
+    var isVisuallyEmpty: Bool {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let b = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty && b.isEmpty
+    }
 }
 
 

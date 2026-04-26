@@ -21,6 +21,9 @@ final class MockDataService {
     // four arrays are appended/removed in the relevant mutator below.
     var budgetSnapshotsByTripId: [UUID: BudgetSnapshot] = [:]
 
+    /// Lazily copied default template checklists so toggles and adds persist in mock mode.
+    var tripChecklistsByTripId: [UUID: [TripChecklistWithItems]] = [:]
+
     init() {
         let built = Self.buildSampleData()
         trips = built.trips
@@ -353,15 +356,74 @@ final class MockDataService {
     }
 
     func listTemplateTripChecklistsWithItems(tripId: UUID) async -> [TripChecklistWithItems] {
-        let uid = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        if tripChecklistsByTripId[tripId] == nil {
+            tripChecklistsByTripId[tripId] = Self.defaultTemplateChecklists(for: tripId)
+        }
+        return tripChecklistsByTripId[tripId]!
+    }
 
+    func addChecklistItem(checklistId: UUID, tripId: UUID, title: String, sortOrder: Int) async -> TripChecklistItem? {
+        if tripChecklistsByTripId[tripId] == nil {
+            tripChecklistsByTripId[tripId] = Self.defaultTemplateChecklists(for: tripId)
+        }
+        guard var lists = tripChecklistsByTripId[tripId],
+              let idx = lists.firstIndex(where: { $0.id == checklistId }) else { return nil }
+        let newItem = TripChecklistItem(
+            id: UUID(),
+            checklistId: checklistId,
+            title: title,
+            isDone: false,
+            sortOrder: sortOrder
+        )
+        lists[idx].items.append(newItem)
+        tripChecklistsByTripId[tripId] = lists
+        return newItem
+    }
+
+    func setChecklistItemDone(itemId: UUID, isDone: Bool) async {
+        for tripId in tripChecklistsByTripId.keys {
+            guard var lists = tripChecklistsByTripId[tripId] else { continue }
+            var changed = false
+            for i in lists.indices {
+                if let j = lists[i].items.firstIndex(where: { $0.id == itemId }) {
+                    lists[i].items[j].isDone = isDone
+                    changed = true
+                    break
+                }
+            }
+            if changed {
+                tripChecklistsByTripId[tripId] = lists
+                return
+            }
+        }
+    }
+
+    func deleteChecklistItem(itemId: UUID) async {
+        for tripId in tripChecklistsByTripId.keys {
+            guard var lists = tripChecklistsByTripId[tripId] else { continue }
+            var changed = false
+            for i in lists.indices {
+                if let j = lists[i].items.firstIndex(where: { $0.id == itemId }) {
+                    lists[i].items.remove(at: j)
+                    changed = true
+                    break
+                }
+            }
+            if changed {
+                tripChecklistsByTripId[tripId] = lists
+                return
+            }
+        }
+    }
+
+    private static func defaultTemplateChecklists(for tripId: UUID) -> [TripChecklistWithItems] {
         func makeItem(_ id: String, _ checklistId: UUID, _ title: String, _ isDone: Bool, _ order: Int) -> TripChecklistItem {
             TripChecklistItem(id: UUID(uuidString: id)!, checklistId: checklistId, title: title, isDone: isDone, sortOrder: order)
         }
 
         let packingId = UUID(uuidString: "60000001-0000-0000-0000-000000000001")!
-        let todoId    = UUID(uuidString: "60000002-0000-0000-0000-000000000001")!
-        let docsId    = UUID(uuidString: "60000003-0000-0000-0000-000000000001")!
+        let todoId = UUID(uuidString: "60000002-0000-0000-0000-000000000001")!
+        let docsId = UUID(uuidString: "60000003-0000-0000-0000-000000000001")!
 
         let packing = TripChecklistWithItems(
             id: packingId, tripId: tripId, templateKey: "packing", title: "Packing", sortOrder: 0,
@@ -398,13 +460,7 @@ final class MockDataService {
             ]
         )
 
-        _ = uid
         return [packing, todo, documents]
-    }
-
-    func setChecklistItemDone(itemId: UUID, isDone: Bool) async {
-        _ = itemId
-        _ = isDone
     }
 
     func regenerateDays(for tripId: UUID, startDate: Date, endDate: Date) async {

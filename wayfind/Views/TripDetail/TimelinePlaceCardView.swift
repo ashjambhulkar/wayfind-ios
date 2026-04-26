@@ -13,6 +13,12 @@ struct TimelinePlaceCardView: View {
     var onMoveToIdeas: () -> Void = {}
     var onDelete: () -> Void = {}
 
+    /// Signed thumbnail URLs for `trip_activity_attachments` (same ids as `place.id`).
+    var activityPhotoStack: [ActivityFeedPhotoStackItem] = []
+    /// Editors get swipe-to-photos + empty-state camera; viewers only see stacks when non-empty.
+    var canEditActivityPhotos: Bool = false
+    var onOpenActivityPhotos: (() -> Void)? = nil
+
     /// Phase 3 — pulled from the environment so cards in the wishlist
     /// section pick up flashes too, not just cards in scheduled days.
     /// Optional in mock-mode where the realtime layer never fires.
@@ -33,17 +39,36 @@ struct TimelinePlaceCardView: View {
         collaborationUi.flash(for: place.id)
     }
 
-    var body: some View {
+    private var rowCore: some View {
         HStack(alignment: .center, spacing: AppSpacing.xs) {
             leadingMarker
             cardSurface
                 .cardPulse(flashID: flash?.id)
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let onPhotos = onOpenActivityPhotos, canEditActivityPhotos {
+                TimelineSwipeRevealPhotosRow(onPhotos: onPhotos) {
+                    rowCore
+                }
+            } else {
+                rowCore
+            }
         }
         .contextMenu {
             Button("Edit", action: onEdit)
             Button("Move to Day", action: onMoveToDay)
             if dayNumber != 0 {
                 Button("Move to Ideas", action: onMoveToIdeas)
+            }
+            if let onPhotos = onOpenActivityPhotos, canEditActivityPhotos || !activityPhotoStack.isEmpty {
+                Button {
+                    onPhotos()
+                } label: {
+                    Label("Photos", systemImage: "photo.on.rectangle.angled")
+                }
             }
             Button("Delete", role: .destructive, action: onDelete)
         }
@@ -65,39 +90,46 @@ struct TimelinePlaceCardView: View {
     // MARK: - Card surface
 
     private var cardSurface: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
-                Image(systemName: inlineIcon)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(familyColor)
-                    .frame(width: 16, alignment: .center)
+        HStack(alignment: .center, spacing: AppSpacing.sm) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+                    Image(systemName: inlineIcon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(familyColor)
+                        .frame(width: 16, alignment: .center)
 
-                // Use `Color.primary` (true system-black in light, true white
-                // in dark) for the strongest, Apple-correct title contrast.
-                // `AppColors.textPrimary` reads slightly washed at 0x1A1A1A.
-                Text(place.name)
-                    .font(.cardTitle)
-                    .foregroundStyle(Color.primary)
-                    .lineLimit(1)
+                    // Use `Color.primary` (true system-black in light, true white
+                    // in dark) for the strongest, Apple-correct title contrast.
+                    // `AppColors.textPrimary` reads slightly washed at 0x1A1A1A.
+                    Text(place.name)
+                        .font(.cardTitle)
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+                }
+
+                if !subtitleParts.isEmpty {
+                    Text(subtitleParts.joined(separator: " · "))
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(1)
+                }
+
+                // Phase 3 — only renders when a recent realtime change has
+                // landed for this card. Layout-stable: the row collapses
+                // back to nothing once the flash expires (no border, no
+                // sized placeholder) so neighbours don't shift.
+                if let flash {
+                    CollaborativeAttributionPill(
+                        actorDisplayName: flash.displayActor,
+                        actorUserId: flash.actorUserId,
+                        kind: flash.kind
+                    )
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !subtitleParts.isEmpty {
-                Text(subtitleParts.joined(separator: " · "))
-                    .font(.appCaption)
-                    .foregroundStyle(AppColors.textSecondary)
-                    .lineLimit(1)
-            }
-
-            // Phase 3 — only renders when a recent realtime change has
-            // landed for this card. Layout-stable: the row collapses
-            // back to nothing once the flash expires (no border, no
-            // sized placeholder) so neighbours don't shift.
-            if let flash {
-                CollaborativeAttributionPill(
-                    actorDisplayName: flash.displayActor,
-                    actorUserId: flash.actorUserId,
-                    kind: flash.kind
-                )
+            if let onPhotos = onOpenActivityPhotos, !activityPhotoStack.isEmpty {
+                ActivityFeedPhotoStackView(items: activityPhotoStack, onTap: onPhotos)
             }
         }
         .timelineCardChassis(stripeColor: familyColor)

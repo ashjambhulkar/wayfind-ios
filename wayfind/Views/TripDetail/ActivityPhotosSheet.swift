@@ -28,6 +28,8 @@ struct ActivityPhotosSheet: View {
     let activityId: UUID
     let tripId: UUID
     let activityTitle: String
+    /// When false, hides add affordances and per-tile edit actions (view-only gallery).
+    var canEditAttachments: Bool = true
 
     @Environment(\.dismiss) private var dismiss
     @Environment(DataService.self) private var dataService
@@ -51,7 +53,7 @@ struct ActivityPhotosSheet: View {
                     } else if let service, service.attachments.isEmpty {
                         emptyState
                     } else if let service {
-                        gridSection(attachments: service.attachments)
+                        gridSection(attachments: service.attachments, canEdit: canEditAttachments)
                     }
                 }
                 .padding(AppSpacing.lg)
@@ -61,21 +63,47 @@ struct ActivityPhotosSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.backward")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                            .frame(width: 36, height: 36)
+                            .background(AppColors.appSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+                            .shadow(color: Color.black.opacity(0.06), radius: 4, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(String(localized: "Back"))
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    PhotosPicker(
-                        selection: $pickerItems,
-                        maxSelectionCount: remainingSlots,
-                        matching: .images,
-                        photoLibrary: .shared()
-                    ) {
-                        Label("Add", systemImage: "plus.circle.fill")
+                    if canEditAttachments {
+                        PhotosPicker(
+                            selection: $pickerItems,
+                            maxSelectionCount: remainingSlots,
+                            matching: .images,
+                            photoLibrary: .shared()
+                        ) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text(String(localized: "Add"))
+                                    .font(.appBody.weight(.semibold))
+                            }
+                            .foregroundStyle(AppColors.appPrimary)
+                            .padding(.horizontal, 12)
+                            .frame(height: 36)
+                            .background(AppColors.appSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+                            .shadow(color: Color.black.opacity(0.06), radius: 4, x: 0, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(remainingSlots == 0)
+                        .accessibilityHint(remainingSlots == 0
+                            ? "Maximum 5 photos reached"
+                            : "Add up to \(remainingSlots) more photos to \(activityTitle)")
                     }
-                    .disabled(remainingSlots == 0)
-                    .accessibilityHint(remainingSlots == 0
-                        ? "Maximum 5 photos reached"
-                        : "Add up to \(remainingSlots) more photos to \(activityTitle)")
                 }
             }
             .alert(
@@ -131,38 +159,54 @@ struct ActivityPhotosSheet: View {
                 .font(.system(size: 48, weight: .regular))
                 .foregroundStyle(AppColors.textSecondary)
                 .accessibilityHidden(true)
-            Text("Capture this moment")
-                .font(.appBody.weight(.semibold))
-                .foregroundStyle(AppColors.textPrimary)
-            Text("Add up to 5 photos to remember \(activityTitle).")
-                .font(.appCaption)
-                .foregroundStyle(AppColors.textSecondary)
-                .multilineTextAlignment(.center)
-            PhotosPicker(
-                selection: $pickerItems,
-                maxSelectionCount: 5,
-                matching: .images,
-                photoLibrary: .shared()
-            ) {
-                Label("Add photo", systemImage: "plus")
+            if canEditAttachments {
+                Text("Capture this moment")
                     .font(.appBody.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
+                    .foregroundStyle(AppColors.textPrimary)
+                Text("Add up to 5 photos to remember \(activityTitle).")
+                    .font(.appCaption)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .multilineTextAlignment(.center)
+                PhotosPicker(
+                    selection: $pickerItems,
+                    maxSelectionCount: 5,
+                    matching: .images,
+                    photoLibrary: .shared()
+                ) {
+                    Label("Add photo", systemImage: "plus")
+                        .font(.appBody.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .foregroundStyle(Color.white)
+                        .background(AppColors.appPrimary)
+                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.12), radius: 4, x: 0, y: 2)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, AppSpacing.sm)
+            } else {
+                Text("No photos yet")
+                    .font(.appBody.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+                Text("Editors can add photos for \(activityTitle).")
+                    .font(.appCaption)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .multilineTextAlignment(.center)
             }
-            .buttonStyle(.borderedProminent)
-            .padding(.top, AppSpacing.sm)
         }
         .padding(.vertical, AppSpacing.xxxl)
         .frame(maxWidth: .infinity)
     }
 
-    private func gridSection(attachments: [ActivityAttachment]) -> some View {
+    private func gridSection(attachments: [ActivityAttachment], canEdit: Bool) -> some View {
         LazyVGrid(columns: gridColumns, spacing: AppSpacing.md) {
             ForEach(Array(attachments.enumerated()), id: \.element.id) { idx, att in
                 AttachmentTile(
                     attachment: att,
                     index: idx,
                     total: attachments.count,
+                    canEdit: canEdit,
                     onSetCover: {
                         Task { await service?.setCover(attachmentId: att.id) }
                     },
@@ -233,6 +277,7 @@ private struct AttachmentTile: View {
     let attachment: ActivityAttachment
     let index: Int
     let total: Int
+    var canEdit: Bool = true
     let onSetCover: () -> Void
     let onDelete: () -> Void
 
@@ -257,17 +302,19 @@ private struct AttachmentTile: View {
         }
         .clipped()
         .contextMenu {
-            if !attachment.isCover && attachment.isImage {
-                Button {
-                    onSetCover()
-                } label: {
-                    Label("Set as cover", systemImage: "star")
+            if canEdit {
+                if !attachment.isCover && attachment.isImage {
+                    Button {
+                        onSetCover()
+                    } label: {
+                        Label("Set as cover", systemImage: "star")
+                    }
                 }
-            }
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Label("Delete", systemImage: "trash")
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
             }
         }
         .task(id: attachment.signedURL?.absoluteString) {

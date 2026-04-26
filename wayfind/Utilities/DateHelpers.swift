@@ -35,11 +35,33 @@ private enum DateFormatters {
         formatter.locale = .autoupdatingCurrent
         return formatter
     }()
+
+    static let monthDayYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        formatter.locale = .autoupdatingCurrent
+        return formatter
+    }()
 }
 
 extension Date {
     var shortFormatted: String {
         DateFormatters.short.string(from: self)
+    }
+
+    /// Note list footer: Today / Yesterday / MMM d (this year) / MMM d, yyyy.
+    var noteListCaption: String {
+        let cal = Calendar.current
+        if cal.isDateInToday(self) {
+            return String(localized: "Today")
+        }
+        if cal.isDateInYesterday(self) {
+            return String(localized: "Yesterday")
+        }
+        if cal.component(.year, from: self) == cal.component(.year, from: Date()) {
+            return DateFormatters.short.string(from: self)
+        }
+        return DateFormatters.monthDayYear.string(from: self)
     }
 
     var timeFormatted: String {

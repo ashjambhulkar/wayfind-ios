@@ -6,19 +6,20 @@
 //
 //  Layout — phone:
 //      Native navigation search
+//      Trailing nav bar "+" (Menu: photo library / Files)
 //      [Scrollable category chips row]
 //      Grid (2-col) of document tiles
-//      Floating "+" FAB anchored bottom-trailing.
 //
 //  Layout — iPad regular width:
-//      Same shell but the grid widens to 3 columns and the FAB stays
-//      bottom-trailing. We rely on `LazyVGrid` adaptive layout instead
-//      of branching on `horizontalSizeClass` for a single source of truth.
+//      Same shell but the grid widens to 3 columns. We rely on
+//      `LazyVGrid` adaptive layout instead of branching on
+//      `horizontalSizeClass` for a single source of truth.
 //
 //  Pro-gating (Wave 4.5):
 //      • Free users: HARD-capped at `perUserSoftLimit` (5) docs they
-//        themselves uploaded for this trip. The +/FAB is disabled at
-//        the cap and tapping the cap pill presents the paywall.
+//        themselves uploaded for this trip. The nav + is disabled at
+//        the trip ceiling; at the per-user cap, + presents the paywall
+//        and the cap pill does the same.
 //      • Pro users: only the per-trip ceiling (25) applies — the
 //        per-user check is skipped server-side and client-side.
 //      • Hitting the trip ceiling (25) is a hard error for both tiers
@@ -60,13 +61,17 @@ struct TripDocumentsView: View {
     ]
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            content
-            fab
-        }
+        content
         .navigationTitle("Documents")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if let service {
+                    addDocumentToolbar(service: service)
+                }
+            }
+        }
         .searchable(
             text: documentSearchText,
             placement: .navigationBarDrawer(displayMode: .always),
@@ -183,7 +188,6 @@ struct TripDocumentsView: View {
                         categoryChipsHeader(service: service)
                     }
                 }
-                .padding(.bottom, 96) // FAB clearance
             }
             .refreshable { await service.reload() }
         } else {
@@ -247,41 +251,47 @@ struct TripDocumentsView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - FAB
+    // MARK: - Navigation bar add
 
+    /// Wave 4.5 — three states for the trailing + control:
+    ///   1. Trip ceiling hit (Pro & Free) → disabled, no menu.
+    ///   2. Free user at per-user cap → tap opens paywall (same as cap pill).
+    ///   3. Otherwise → Menu with Photos / Files.
     @ViewBuilder
-    private var fab: some View {
-        // Wave 4.5 — three states for the FAB:
-        //   1. Trip ceiling hit (Pro & Free)  → disabled, no menu.
-        //   2. Free user at per-user cap      → tappable but routes
-        //      directly to the paywall instead of the upload menu, so
-        //      the user understands *why* they can't add more.
-        //   3. Otherwise                      → normal Menu with
-        //      Photos / Files options.
-        if service?.quotaSnapshot.hitsHardCeiling == true {
-            fabButton(label: "Add document")
-                .disabled(true)
+    private func addDocumentToolbar(service: TripDocumentsService) -> some View {
+        if service.quotaSnapshot.hitsHardCeiling {
+            Button {
+                // No-op: trip document ceiling reached.
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(AppColors.textTertiary)
+            }
+            .disabled(true)
+            .accessibilityLabel("Add document")
         } else if isFreeUserAtCap {
             Button {
+                HapticManager.light()
                 PaywallPresenter.shared.present(
                     .documents,
                     dataService: dataService,
                     metadata: [
                         "trip_id": trip.id.uuidString,
-                        "user_doc_count": "\(service?.quotaSnapshot.perUserUploadCount ?? 0)",
-                        "trigger": "documents_fab",
+                        "user_doc_count": "\(service.quotaSnapshot.perUserUploadCount)",
+                        "trigger": "documents_nav_add",
                     ]
                 )
             } label: {
-                fabButton(label: "Upgrade to add more documents")
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(AppColors.appPrimary)
             }
-            .padding(.trailing, AppSpacing.lg)
-            .padding(.bottom, AppSpacing.lg)
+            .accessibilityLabel("Upgrade to add more documents")
         } else {
             Menu {
                 PhotosPicker(
                     selection: $photoItems,
-                    maxSelectionCount: max(0, TripDocumentsService.tripCeiling - (service?.documents.count ?? 0)),
+                    maxSelectionCount: max(0, TripDocumentsService.tripCeiling - service.documents.count),
                     matching: .images,
                     photoLibrary: .shared()
                 ) {
@@ -293,21 +303,12 @@ struct TripDocumentsView: View {
                     Label("File from Files app", systemImage: "doc.badge.plus")
                 }
             } label: {
-                fabButton(label: "Add document")
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(AppColors.appPrimary)
             }
-            .padding(.trailing, AppSpacing.lg)
-            .padding(.bottom, AppSpacing.lg)
+            .accessibilityLabel("Add document")
         }
-    }
-
-    private func fabButton(label: String) -> some View {
-        Image(systemName: "plus")
-            .font(.system(size: 22, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 56, height: 56)
-            .background(AppColors.appPrimary, in: Circle())
-            .shadow(color: AppColors.appPrimary.opacity(0.35), radius: 12, y: 4)
-            .accessibilityLabel(label)
     }
 
     // MARK: - Category sheet (after picking a file)

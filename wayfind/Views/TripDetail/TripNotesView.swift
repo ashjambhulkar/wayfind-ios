@@ -1,15 +1,69 @@
 import SwiftUI
 
-private func tripNoteCardHeadline(_ note: TripNote) -> String {
-    let t = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !t.isEmpty { return t }
-    let first =
-        note.body
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? ""
-    if first.isEmpty { return "New Note" }
-    return first.count > 80 ? String(first.prefix(80)) + "…" : first
+// MARK: - List row (title · body preview · timestamp)
+
+private struct TripNoteListRow: View {
+    let note: TripNote
+
+    private var titleText: String {
+        note.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var bodyText: String {
+        note.body.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasTitle: Bool { !titleText.isEmpty }
+    private var hasBody: Bool { !bodyText.isEmpty }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: AppSpacing.md) {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    if hasTitle {
+                        Text(titleText)
+                            .font(.cardTitle.weight(.semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+
+                    if hasBody {
+                        Text(bodyText)
+                            .font(.appBody)
+                            .foregroundStyle(hasTitle ? AppColors.textSecondary : AppColors.textPrimary)
+                            .lineLimit(3)
+                            .multilineTextAlignment(.leading)
+                            .lineSpacing(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Text(note.updatedAt.noteListCaption)
+                    .font(.appCaption)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppColors.textTertiary.opacity(0.55))
+                .accessibilityHidden(true)
+        }
+        .padding(.vertical, AppSpacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        var parts: [String] = []
+        if hasTitle { parts.append(titleText) }
+        if hasBody { parts.append(bodyText) }
+        parts.append(note.updatedAt.noteListCaption)
+        return parts.joined(separator: ". ")
+    }
 }
 
 struct TripNotesView: View {
@@ -33,7 +87,7 @@ struct TripNotesView: View {
                     .foregroundStyle(AppColors.appError)
                     .multilineTextAlignment(.center)
                     .padding(AppSpacing.xl)
-            } else if notes.isEmpty {
+            } else if displayNotes.isEmpty {
                 // The empty-state CTA is the same write surface as the
                 // toolbar's "New note" button — both gated together by
                 // `canEditNotes`. Viewers see the empty state messaging
@@ -59,26 +113,17 @@ struct TripNotesView: View {
                 }
             } else {
                 List {
-                    ForEach(notes) { note in
+                    ForEach(displayNotes) { note in
                         Button {
+                            HapticManager.selection()
                             noteToEdit = note
                         } label: {
-                            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                                Text(tripNoteCardHeadline(note))
-                                    .font(.cardTitle)
-                                    .foregroundStyle(AppColors.textPrimary)
-                                    .lineLimit(2)
-                                Text(note.updatedAt.shortFormatted)
-                                    .font(.appCaption)
-                                    .foregroundStyle(AppColors.textTertiary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, AppSpacing.xs)
+                            TripNoteListRow(note: note)
                         }
-                        .listRowBackground(AppColors.appSurface)
+                        .buttonStyle(.plain)
                     }
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
             }
         }
@@ -93,8 +138,10 @@ struct TripNotesView: View {
                         Task { await createNoteAndOpen() }
                     } label: {
                         Image(systemName: "square.and.pencil")
+                            .font(.system(size: 17, weight: .regular))
                             .foregroundStyle(AppColors.appPrimary)
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("New note")
                 }
             }
@@ -109,11 +156,26 @@ struct TripNotesView: View {
         }
     }
 
+    /// Notes with at least a title or body — never show placeholder rows for blank server records.
+    private var displayNotes: [TripNote] {
+        notes.filter { !$0.isVisuallyEmpty }
+    }
+
     private func reload() async {
         isLoading = true
         loadError = nil
         defer { isLoading = false }
-        notes = await dataService.listTripNotes(tripId: trip.id)
+        var loaded = await dataService.listTripNotes(tripId: trip.id)
+        if collaborationStore.canEditNotes {
+            let blanks = loaded.filter(\.isVisuallyEmpty)
+            if !blanks.isEmpty {
+                for n in blanks {
+                    await dataService.deleteTripNote(noteId: n.id)
+                }
+                loaded = await dataService.listTripNotes(tripId: trip.id)
+            }
+        }
+        notes = loaded
     }
 
     private func createNoteAndOpen() async {

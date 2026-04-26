@@ -16,6 +16,11 @@ extension Font {
         .system(.title3, design: .rounded).weight(.semibold)
     }
 
+    /// Trip detail cover / hero headline (above date range).
+    static var tripDetailHeroTitle: Font {
+        .system(.title, design: .rounded).weight(.bold)
+    }
+
     static var cardTitle: Font {
         .system(.headline, design: .rounded)
     }

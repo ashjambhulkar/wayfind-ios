@@ -8,6 +8,8 @@ import SwiftUI
 /// the user can feel the day at a glance instead of reading every card.
 struct DaySummaryView: View {
     let places: [Place]
+    /// Shown when the day has no stops (quiet empty day); ongoing cross-day rows are handled in the parent.
+    var showNoPlansYet: Bool = false
 
     private var totalDurationMinutes: Int {
         places.reduce(0) { sum, place in
@@ -49,7 +51,14 @@ struct DaySummaryView: View {
     }
 
     var body: some View {
-        if !summaryParts.isEmpty {
+        if showNoPlansYet {
+            Text("No plans yet")
+                .font(.appCaption)
+                .foregroundStyle(AppColors.textTertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.bottom, AppSpacing.sm)
+        } else if !summaryParts.isEmpty {
             Text(summaryParts.joined(separator: " · "))
                 .font(.appCaption)
                 .foregroundStyle(AppColors.textTertiary)

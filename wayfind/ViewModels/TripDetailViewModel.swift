@@ -43,6 +43,21 @@ final class TripDetailViewModel {
         places(for: day).count
     }
 
+    /// Place ids for non-booking activities on the timeline (and ideas), for activity photo stacks.
+    func nonBookingTimelineActivityIds() -> [UUID] {
+        var ids: [UUID] = []
+        ids.reserveCapacity(24)
+        for day in scheduledDays {
+            for place in places(for: day) where !place.isBooking {
+                ids.append(place.id)
+            }
+        }
+        for place in wishlistPlaces where !place.isBooking {
+            ids.append(place.id)
+        }
+        return ids
+    }
+
     func isDayCollapsed(_ day: ItineraryDay) -> Bool {
         collapsedDayIds.contains(day.id)
     }
@@ -55,11 +70,15 @@ final class TripDetailViewModel {
         }
     }
 
-    func dayStatusText(for day: ItineraryDay) -> String {
+    /// Primary line segment for day headers, e.g. `Day 1`.
+    func dayHeaderDayLabel(for day: ItineraryDay) -> String {
+        "Day \(day.dayNumber)"
+    }
+
+    /// Secondary segment, e.g. `Tue, Apr 21` (abbreviated weekday + month/day).
+    func dayHeaderDateLabel(for day: ItineraryDay) -> String {
         let date = day.date ?? dateForScheduledDay(day.dayNumber)
-        let weekday = date.dayOfWeekFull
-        let monthDay = date.shortFormatted
-        return "Day \(day.dayNumber) — \(weekday), \(monthDay)"
+        return "\(date.dayOfWeekShort), \(date.shortFormatted)"
     }
 
     var totalBookingsCount: Int {
