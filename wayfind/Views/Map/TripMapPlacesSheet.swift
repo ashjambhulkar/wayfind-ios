@@ -16,41 +16,56 @@ struct TripMapPlacesExpandedSheet: View {
     let onSelectPlace: (Place) -> Void
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                filterChrome
+        VStack(spacing: 0) {
+            expandedSheetDragGrabber
 
-                Divider()
+            NavigationStack {
+                VStack(spacing: 0) {
+                    filterChrome
 
-                TripMapPlacesDayListContent(
-                    trip: trip,
-                    selectedDayFilter: $selectedDayFilter,
-                    allPlacesForList: allPlacesForList,
-                    dayNumberByDayId: dayNumberByDayId,
-                    onSelectPlace: onSelectPlace,
-                    showsDayTabs: false
-                )
-            }
-            .navigationTitle(String(localized: "Activities"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.regularMaterial, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        HapticManager.light()
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title3)
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.secondary)
+                    Divider()
+
+                    TripMapPlacesDayListContent(
+                        trip: trip,
+                        selectedDayFilter: $selectedDayFilter,
+                        allPlacesForList: allPlacesForList,
+                        dayNumberByDayId: dayNumberByDayId,
+                        onSelectPlace: onSelectPlace,
+                        showsDayTabs: false
+                    )
+                }
+                .navigationTitle(String(localized: "Activities"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.regularMaterial, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            HapticManager.light()
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel(String(localized: "Close"))
                     }
-                    .accessibilityLabel(String(localized: "Close"))
                 }
             }
         }
         .background(.regularMaterial)
         .ignoresSafeArea()
+    }
+
+    /// Wider than the system sheet grabber (`presentationDragIndicator` has no public width API).
+    private var expandedSheetDragGrabber: some View {
+        Capsule()
+            .fill(Color.secondary.opacity(0.45))
+            .frame(width: 52, height: 5)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+            .accessibilityHidden(true)
     }
 
     private var filterChrome: some View {
@@ -74,23 +89,26 @@ struct MapPlacesMinimizedAccessory: View {
     var onExpand: () -> Void
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack {
             DayFilterChipsView(
                 selectedDay: $selectedDayFilter,
                 dayCount: max(trip.dayCount, 1),
-                controlSize: .small
+                controlSize: .regular
             )
-            .frame(maxHeight: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .padding(.horizontal, AppSpacing.xs)
-            .padding(.top, AppSpacing.sm)
 
-            Capsule()
-                .fill(Color.secondary.opacity(0.45))
-                .frame(width: 36, height: 5)
-                .padding(.top, 6)
-                .accessibilityHidden(true)
+            VStack(spacing: 0) {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.45))
+                    .frame(width: 36, height: 5)
+                    .padding(.top, 6)
+                Spacer(minLength: 0)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
-        .frame(height: 60)
+        .frame(height: 65)
         .background(.regularMaterial)
         .clipShape(Capsule())
         .overlay {
@@ -402,7 +420,7 @@ private struct TripMapPlacesExpandedSheetPreviewHost: View {
                     onSelectPlace: { _ in }
                 )
                 .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
             }
     }
 }

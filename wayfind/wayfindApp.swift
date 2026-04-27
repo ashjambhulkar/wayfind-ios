@@ -742,7 +742,7 @@ private struct MapTabWrapper: View {
             .presentationDetents([.medium, .large])
             .presentationContentInteraction(.scrolls)
             .presentationBackground(.regularMaterial)
-            .presentationDragIndicator(.visible)
+            .presentationDragIndicator(.hidden)
             .tint(AppColors.appPrimary)
         }
     }

@@ -733,7 +733,8 @@ struct TripMapView: View {
             .presentationDetents([.height(220), .medium])
             .presentationDragIndicator(.visible)
             .presentationBackground(.regularMaterial)
-            .presentationBackgroundInteraction(.enabled)
+            // `.enabled` forwards taps to the map and blocks the usual backdrop dismiss.
+            .presentationBackgroundInteraction(.disabled)
     }
 
     private var searchOverlaySheet: some View {
@@ -1049,47 +1050,36 @@ struct TripMapView: View {
         .accessibilityLabel("Map of places for \(trip.title)")
     }
 
-    /// Compact vertical pill — right edge, just below the navigation bar.
+    /// Apple Maps–style vertical glass pill (one capsule, hairline dividers, light icons).
     private var mapControlStack: some View {
         VStack(spacing: 0) {
             Button {
                 HapticManager.light()
                 centerOnUserLocation()
             } label: {
-                Image(systemName: "location.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(AppColors.appPrimary)
-                    .frame(width: 44, height: 40)
+                mapPillIcon("location.fill")
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Current location")
 
-            Color(UIColor.separator)
-                .frame(width: 26, height: 0.5)
+            mapPillDivider
 
             Button {
                 HapticManager.light()
                 showMapModesSheet = true
             } label: {
-                Image(systemName: mapMode == .hybrid ? "globe.americas.fill" : "map")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 44, height: 40)
+                mapPillIcon(mapMode == .hybrid ? "globe.americas.fill" : "map")
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Map style")
 
-            Color(UIColor.separator)
-                .frame(width: 26, height: 0.5)
+            mapPillDivider
 
             Button {
                 HapticManager.light()
                 showTransportPicker = true
             } label: {
-                Image(systemName: transportMode.sfSymbol)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 44, height: 40)
+                mapPillIcon(transportMode.sfSymbol)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Transport mode")
@@ -1114,12 +1104,37 @@ struct TripMapView: View {
                 Text(transportMode.pickerSubtitle)
             }
         }
-        .fixedSize()
-        .background(.regularMaterial)
+        .frame(width: 42)
+        .environment(\.colorScheme, .dark)
+        .background {
+            Capsule()
+                .fill(.ultraThinMaterial)
+        }
         .clipShape(Capsule())
-        .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
-        .padding(.top, KeyWindowSafeArea.topInset + 52)
-        .padding(.trailing, AppSpacing.sm)
+        .overlay {
+            Capsule()
+                .strokeBorder(Color.white.opacity(0.28), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
+        .padding(.top, KeyWindowSafeArea.topInset)
+        .offset(y: -54)
+        .padding(.trailing, AppSpacing.md)
+    }
+
+    private var mapPillDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.28))
+            .frame(height: 0.33)
+            .padding(.horizontal, 8)
+    }
+
+    private func mapPillIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 16, weight: .medium))
+            .symbolRenderingMode(.hierarchical)
+            .foregroundStyle(.white)
+            .frame(width: 42, height: 42)
+            .contentShape(Rectangle())
     }
 
     // MARK: - Search result selected from autocomplete

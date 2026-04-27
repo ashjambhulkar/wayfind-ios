@@ -77,7 +77,6 @@ struct MapSearchOverlay: View {
     @State private var ownedRows: [MapSearchPreview] = []
     @State private var ownedRowsTask: Task<Void, Never>?
     @State private var pendingResolve = false
-    @FocusState private var isQueryFocused: Bool
     /// Set when the user taps a suggestion whose resolved coordinate
     /// landed far outside the bias region (Apple's silent global
     /// fallback). Drives a non-blocking inline banner so the tap
@@ -104,8 +103,6 @@ struct MapSearchOverlay: View {
     private var suggestedPlacesTaskKey: String {
         "\(cityProfileId?.uuidString ?? "_")|\(excludedPlaceIds.sorted().joined(separator: ","))"
     }
-
-    private let searchChromeHeight: CGFloat = 126
 
     init(
         country: String?,
@@ -136,24 +133,39 @@ struct MapSearchOverlay: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
-                resultsList
-
-                searchChrome
-            }
-            .background(AppColors.appBackground)
-            .toolbar(.hidden, for: .navigationBar)
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationTitle("")
+            resultsListContainer
+                .background(AppColors.appBackground)
+                .navigationBarTitleDisplayMode(.inline)
+                .navigationTitle(String(localized: "Search Items"))
+                .searchable(
+                    text: $query,
+                    placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: String(localized: "Search...")
+                )
+                .onSubmit(of: .search) {
+                    submitCurrentQueryToMap()
+                }
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            HapticManager.light()
+                            onCancel()
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityLabel(String(localized: "Close"))
+                    }
+                }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    categoryPillsInset
+                }
         }
         .onAppear {
-            isQueryFocused = true
             if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 refreshSuggestions(for: query)
             }
-        }
-        .task {
-            isQueryFocused = true
         }
         .task(id: suggestedPlacesTaskKey) {
             await loadSuggestedIfNeeded()
@@ -187,96 +199,22 @@ struct MapSearchOverlay: View {
         .tint(AppColors.appPrimary)
     }
 
-    private var searchChrome: some View {
-        VStack(spacing: AppSpacing.sm) {
-            searchHeader
-
-            CategoryPillsRow { pill in
-                HapticManager.selection()
-                runCategorySearch(pill)
-            }
-            .padding(.bottom, AppSpacing.sm)
-        }
-        .background(alignment: .top) {
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(.regularMaterial)
-                    .frame(height: searchChromeHeight - 22)
-
-                LinearGradient(
-                    colors: [
-                        AppColors.appBackground.opacity(0.94),
-                        AppColors.appBackground.opacity(0.0),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 22)
-            }
-            .ignoresSafeArea(edges: .top)
-        }
-    }
-
-    private var searchHeader: some View {
-        HStack(spacing: AppSpacing.sm) {
-            HStack(spacing: AppSpacing.sm) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-
-                TextField("Search places", text: $query)
-                    .font(.body)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                    .focused($isQueryFocused)
-                    .onSubmit(submitCurrentQueryToMap)
-
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                        isQueryFocused = true
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 17, weight: .semibold))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            .padding(.horizontal, AppSpacing.md)
-            .frame(height: 46)
-            .background(.regularMaterial, in: Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-            }
-
-            Button {
-                onCancel()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title2)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 46, height: 46)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close search")
+    private var categoryPillsInset: some View {
+        CategoryPillsRow { pill in
+            HapticManager.selection()
+            runCategorySearch(pill)
         }
         .padding(.horizontal, AppSpacing.lg)
-        .padding(.top, AppSpacing.xl)
+        .padding(.vertical, AppSpacing.sm)
+        .frame(maxWidth: .infinity)
+        .background(AppColors.appBackground)
     }
 
     // MARK: - Results list
 
     @ViewBuilder
-    private var resultsList: some View {
+    private var resultsListContainer: some View {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-
         if trimmed.isEmpty {
             recentsAndDefaults
         } else {
@@ -335,7 +273,6 @@ struct MapSearchOverlay: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .contentMargins(.top, searchChromeHeight, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
     }
 
@@ -494,7 +431,6 @@ struct MapSearchOverlay: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
-        .contentMargins(.top, searchChromeHeight, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
         .environment(\.defaultMinListRowHeight, 58)
     }
@@ -773,7 +709,6 @@ struct MapSearchOverlay: View {
         // and will populate its `searchResults` on completion.
         let q = pill.id
         query = pill.label
-        isQueryFocused = true
         rememberRecent(pill.label)
         let category = pill.matchingPlaceCategory
 
@@ -1153,5 +1088,33 @@ private enum SearchRowIconHeuristic {
         onSubmitSearch: { _, _ in },
         onCancel: {}
     )
+}
+
+/// Same presentation chrome as `TripMapView.searchOverlaySheet` — use this in Canvas for a realistic sheet.
+#Preview("Search overlay — in sheet (Canvas)") {
+    @Previewable @State var showSheet = true
+    Color.clear
+        .sheet(isPresented: $showSheet) {
+            MapSearchOverlay(
+                country: "FR",
+                initialQuery: "",
+                cityProfileId: nil,
+                region: .init(
+                    center: .init(latitude: 48.8566, longitude: 2.3522),
+                    span: .init(latitudeDelta: 0.05, longitudeDelta: 0.05)
+                ),
+                excludedPlaceIds: [],
+                onPickResult: { _ in },
+                onPickSuggestedResult: { _ in },
+                onPickSuggestedBrowserResult: { _ in },
+                onPickCategory: { _, _ in },
+                onSubmitSearch: { _, _ in },
+                onCancel: {}
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+            .presentationBackground(.regularMaterial)
+        }
 }
 #endif
