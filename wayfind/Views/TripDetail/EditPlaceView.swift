@@ -4,10 +4,8 @@ struct EditPlaceView: View {
     let place: Place
     var onSave: ((Place) -> Void)?
 
-    @Environment(\.dismiss) var dismiss
+    @Environment(\.dismiss) private var dismiss
 
-    @State private var name: String
-    @State private var address: String
     @State private var selectedCategory: PlaceCategory
     @State private var notes: String
     @State private var showTimeFields: Bool
@@ -17,8 +15,6 @@ struct EditPlaceView: View {
     init(place: Place, onSave: ((Place) -> Void)? = nil) {
         self.place = place
         self.onSave = onSave
-        _name = State(initialValue: place.name)
-        _address = State(initialValue: place.address ?? "")
         _selectedCategory = State(initialValue: place.categoryEnum)
         _notes = State(initialValue: place.notes ?? "")
         _showTimeFields = State(initialValue: place.startTime != nil)
@@ -27,105 +23,103 @@ struct EditPlaceView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                Text("Edit Place")
-                    .font(.sectionHeader)
-                    .foregroundStyle(AppColors.textPrimary)
+        NavigationStack {
+            Form {
+                Section {
+                    Text(place.name)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityHint(String(localized: "The activity title can’t be edited."))
+                } header: {
+                    Text(String(localized: "Activity"))
+                        .textCase(nil)
+                } footer: {
+                    Text(String(localized: "The activity title can’t be edited."))
+                        .font(.footnote)
+                }
 
-                FormField(label: "Name", placeholder: "Place name", text: $name)
-                FormField(label: "Address", placeholder: "Address or location", text: $address)
-
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text("Category")
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
-                    Picker("Category", selection: $selectedCategory) {
+                Section {
+                    Picker(String(localized: "Category"), selection: $selectedCategory) {
                         ForEach(PlaceCategory.allCases, id: \.self) { category in
                             Text(category.label).tag(category)
                         }
                     }
                     .pickerStyle(.menu)
-                    .tint(AppColors.appPrimary)
                 }
 
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text("Notes")
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
-                    TextEditor(text: $notes)
-                        .font(.appBody)
-                        .scrollContentBackground(.hidden)
-                        .frame(height: 80)
-                        .padding(.horizontal, AppSpacing.sm)
-                        .padding(.vertical, AppSpacing.xs)
-                        .background(AppColors.appSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                                .strokeBorder(AppColors.appDivider, lineWidth: 1)
+                Section {
+                    TextField(
+                        String(localized: "Add notes"),
+                        text: $notes,
+                        axis: .vertical
+                    )
+                    .lineLimit(3...10)
+                } header: {
+                    Text(String(localized: "Notes"))
+                        .textCase(nil)
+                }
+
+                Section {
+                    if showTimeFields {
+                        DatePicker(
+                            String(localized: "Start"),
+                            selection: $startTime,
+                            displayedComponents: .hourAndMinute
                         )
-                }
-
-                if !showTimeFields {
-                    AppButton(title: "Add Time", style: .outline, action: {
-                        withAnimation(AppSpring.smooth) {
-                            showTimeFields = true
-                        }
-                    })
-                } else {
-                    VStack(alignment: .leading, spacing: AppSpacing.md) {
-                        compactTimeRow(title: "Start Time", selection: $startTime)
-                        compactTimeRow(title: "End Time", selection: $endTime)
-                        Button {
+                        DatePicker(
+                            String(localized: "End"),
+                            selection: $endTime,
+                            displayedComponents: .hourAndMinute
+                        )
+                        Button(String(localized: "Remove Time"), role: .destructive) {
                             withAnimation(AppSpring.smooth) {
                                 showTimeFields = false
                             }
-                        } label: {
-                            Text("Remove Time")
-                                .font(.appButton)
-                                .foregroundStyle(AppColors.appError)
-                                .padding(.horizontal, AppSpacing.sm)
-                                .padding(.vertical, AppSpacing.xs)
                         }
-                        .buttonStyle(.plain)
+                    } else {
+                        Button {
+                            withAnimation(AppSpring.smooth) {
+                                showTimeFields = true
+                            }
+                        } label: {
+                            Label(String(localized: "Add times"), systemImage: "clock")
+                        }
+                    }
+                } header: {
+                    Text(String(localized: "Schedule"))
+                        .textCase(nil)
+                } footer: {
+                    if showTimeFields {
+                        Text(String(localized: "Shown on your itinerary timeline."))
+                            .font(.footnote)
                     }
                 }
-
-                AppButton(title: "Save Changes", style: .primary, action: save)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, AppSpacing.xl)
-            .padding(.horizontal, AppSpacing.lg)
-            .padding(.bottom, AppSpacing.xxl)
+            .tint(AppColors.appPrimary)
+            .navigationTitle(String(localized: "Edit activity"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "Close")) {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "Save")) {
+                        save()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
         }
-        .background(AppColors.appBackground)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
-    private func compactTimeRow(title: String, selection: Binding<Date>) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            FormSectionTitle(title)
-            DatePicker(title, selection: selection, displayedComponents: [.date, .hourAndMinute])
-                .labelsHidden()
-                .datePickerStyle(.compact)
-                .tint(AppColors.appPrimary)
-                .padding(.horizontal, AppSpacing.md)
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                .background(AppColors.appSurface)
-                .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                        .strokeBorder(AppColors.appDivider, lineWidth: 1)
-                )
-        }
-    }
-
     private func save() {
         var updated = place
-        updated.name = name
-        updated.address = address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : address
         updated.category = selectedCategory.rawValue
         let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.notes = trimmedNotes.isEmpty ? nil : trimmedNotes
@@ -141,6 +135,10 @@ struct EditPlaceView: View {
     }
 }
 
+#if DEBUG
+#Preview("Edit activity") {
+    EditPlaceView(place: .previewAttraction) { _ in }
+}
+#endif
 
 // =============================================================================
-

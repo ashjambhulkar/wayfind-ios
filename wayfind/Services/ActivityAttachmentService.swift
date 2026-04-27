@@ -280,6 +280,7 @@ final class ActivityAttachmentService {
                 .execute()
             attachments.removeAll { $0.id == attachmentId }
             signedURLCache.removeValue(forKey: attachmentId)
+            await ActivityAttachmentImageCache.shared.remove(for: attachmentId)
         } catch {
             lastError = error.localizedDescription
         }

@@ -59,25 +59,15 @@ struct ActivityPhotosSheet: View {
                 .padding(AppSpacing.lg)
             }
             .background(AppColors.appBackground.ignoresSafeArea())
-            .navigationTitle("Photos")
+            .navigationTitle(String(localized: "Photos"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "Close")) {
                         dismiss()
-                    } label: {
-                        Image(systemName: "chevron.backward")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(AppColors.textPrimary)
-                            .frame(width: 36, height: 36)
-                            .background(AppColors.appSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                            .shadow(color: Color.black.opacity(0.06), radius: 4, x: 0, y: 2)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(String(localized: "Back"))
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .primaryAction) {
                     if canEditAttachments {
                         PhotosPicker(
                             selection: $pickerItems,
@@ -85,36 +75,18 @@ struct ActivityPhotosSheet: View {
                             matching: .images,
                             photoLibrary: .shared()
                         ) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "plus.circle.fill")
-                                    .font(.system(size: 16, weight: .semibold))
-                                Text(String(localized: "Add"))
-                                    .font(.appBody.weight(.semibold))
-                            }
-                            .foregroundStyle(AppColors.appPrimary)
-                            .padding(.leading, 12)
-                            .padding(.trailing, 10)
-                            .frame(height: 36)
-                            .background(AppColors.appSurface)
-                            .clipShape(
-                                UnevenRoundedRectangle(
-                                    topLeadingRadius: 0,
-                                    bottomLeadingRadius: 0,
-                                    bottomTrailingRadius: AppCornerRadius.medium,
-                                    topTrailingRadius: AppCornerRadius.medium,
-                                    style: .continuous
-                                )
-                            )
-                            .shadow(color: Color.black.opacity(0.06), radius: 4, x: 0, y: 2)
+                            Label(String(localized: "Add"), systemImage: "plus.circle.fill")
+                                .labelStyle(.iconOnly)
                         }
-                        .buttonStyle(.plain)
                         .disabled(remainingSlots == 0)
+                        .accessibilityLabel(String(localized: "Add"))
                         .accessibilityHint(remainingSlots == 0
                             ? "Maximum 5 photos reached"
                             : "Add up to \(remainingSlots) more photos to \(activityTitle)")
                     }
                 }
             }
+            .tint(AppColors.appPrimary)
             .alert(
                 "Couldn't add photo",
                 isPresented: Binding(
@@ -326,7 +298,7 @@ private struct AttachmentTile: View {
                 }
             }
         }
-        .task(id: attachment.signedURL?.absoluteString) {
+        .task(id: "\(attachment.id.uuidString)-\(attachment.signedURL?.absoluteString ?? "")") {
             await loadImage()
         }
         .accessibilityElement(children: .ignore)
@@ -356,14 +328,18 @@ private struct AttachmentTile: View {
     }
 
     private func loadImage() async {
-        guard image == nil, let url = attachment.signedURL else { return }
+        if let cached = await ActivityAttachmentImageCache.shared.image(for: attachment.id) {
+            await MainActor.run { self.image = cached }
+            return
+        }
+        guard let url = attachment.signedURL else { return }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            if let img = UIImage(data: data) {
-                await MainActor.run { self.image = img }
-            }
+            guard !data.isEmpty, let img = UIImage(data: data) else { return }
+            await ActivityAttachmentImageCache.shared.store(data: data, for: attachment.id)
+            await MainActor.run { self.image = img }
         } catch {
-            // Tile shows skeleton; surfacing per-tile errors would be noisy.
+            // Tile keeps skeleton; per-tile errors would be noisy.
         }
     }
 }

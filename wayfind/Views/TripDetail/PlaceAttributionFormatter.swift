@@ -2,13 +2,12 @@
 //  PlaceAttributionFormatter.swift
 //  wayfind
 //
-//  Phase I.3 — Stateless helper that turns the raw `image_source` +
-//  `thumbnail_attribution` + `ai_source_attribution` payload from
-//  `city_places` into a small set of human-readable lines.
+//  Phase I.3 — Stateless helper that turns the raw `ai_source_attribution`
+//  payload from `city_places` into human-readable footer lines (editorial
+//  sources). Photo credit is handled in the photo UI, not duplicated here.
 //
-//  Why a separate file: this logic is reused by PlaceDetailSheet (visible
-//  caption) and by FullscreenPhotoViewer's overlay (Phase F.5). Centralising
-//  it means CC-BY-SA + DSA disclosure copy stays consistent and is easy to
+//  Why a separate file: PlaceDetailSheet uses this for the visible footer
+//  caption; keeping it here makes DSA disclosure copy consistent and easy to
 //  unit test in isolation.
 //
 //  The formatter never invents text. If the underlying row has no
@@ -19,54 +18,10 @@
 import Foundation
 
 enum PlaceAttributionFormatter {
-    /// Returns one line per non-empty attribution category.
-    /// Order: photo first (most visible signal), then editorial sources.
-    static func lines(
-        imageSource: String?,
-        thumbnailAttribution: String?,
-        ai: SupabaseManager.JSONValue?
-    ) -> [String] {
-        var out: [String] = []
-
-        if let line = photoLine(
-            imageSource: imageSource,
-            thumbnailAttribution: thumbnailAttribution
-        ) {
-            out.append(line)
-        }
-
-        for line in editorialLines(from: ai) {
-            out.append(line)
-        }
-
-        return out
-    }
-
-    // MARK: – Photo
-
-    private static func photoLine(
-        imageSource: String?,
-        thumbnailAttribution: String?
-    ) -> String? {
-        guard let imageSource else { return nil }
-        switch imageSource {
-        case "user":
-            // We credit the uploader on the photo itself (carousel
-            // attribution chip from F.5), so the footer just notes the
-            // photo is community-sourced.
-            return "Photo by Wayfind community"
-        case "wikimedia":
-            if let credit = thumbnailAttribution, !credit.isEmpty {
-                return "Photo: \(credit)"
-            }
-            return "Photo via Wikimedia Commons (CC)"
-        case "google", "serpapi":
-            return "Photo via Google Maps"
-        case "unknown":
-            return nil
-        default:
-            return nil
-        }
+    /// Returns one line per non-empty attribution category (editorial / AI sources only).
+    /// Photo credit is shown on the carousel / fullscreen viewer, not repeated in the place footer.
+    static func lines(ai: SupabaseManager.JSONValue?) -> [String] {
+        editorialLines(from: ai)
     }
 
     // MARK: – Editorial / AI

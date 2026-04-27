@@ -30,6 +30,34 @@ struct PlaceDetailSheet: View {
     @State private var showingExpandedMap = false
     @State private var aboutSummaryExpanded = false
 
+    init(
+        place: Place,
+        previousPlace: Place?,
+        tripId: UUID? = nil,
+        initialEnrichment: SupabaseManager.CityPlaceEnrichmentRow? = nil,
+        onEdit: @escaping () -> Void = {},
+        onMove: @escaping () -> Void = {},
+        onDelete: @escaping () -> Void = {}
+    ) {
+        self.place = place
+        self.previousPlace = previousPlace
+        self.tripId = tripId
+        self.onEdit = onEdit
+        self.onMove = onMove
+        self.onDelete = onDelete
+        _liveEnrichment = State(initialValue: initialEnrichment)
+        _enrichmentLoadAttempted = State(initialValue: false)
+        _showingReportSheet = State(initialValue: false)
+        _reportToastVisible = State(initialValue: false)
+        _showingPhotosSheet = State(initialValue: false)
+        _selectedPopularDayKey = State(initialValue: nil)
+        _venueTimeZone = State(initialValue: nil)
+        _mapPosition = State(initialValue: .automatic)
+        _mapPitchEnabled = State(initialValue: true)
+        _showingExpandedMap = State(initialValue: false)
+        _aboutSummaryExpanded = State(initialValue: false)
+    }
+
     // MARK: - Derived Data
 
     private var isLikelyLoadingEnrichment: Bool {
@@ -145,11 +173,7 @@ struct PlaceDetailSheet: View {
     }
 
     private var attributionCaption: String? {
-        let lines = PlaceAttributionFormatter.lines(
-            imageSource: liveEnrichment?.image_source,
-            thumbnailAttribution: liveEnrichment?.thumbnail_attribution,
-            ai: liveEnrichment?.ai_source_attribution
-        )
+        let lines = PlaceAttributionFormatter.lines(ai: liveEnrichment?.ai_source_attribution)
         return lines.isEmpty ? nil : lines.joined(separator: " · ")
     }
 
@@ -270,6 +294,10 @@ struct PlaceDetailSheet: View {
                             aboutSkeleton
                         }
 
+                        if let notes = place.notes, !notes.isEmpty {
+                            notesCard(notes)
+                        }
+
                         popularTimesAndVisitSection
                         if let why = effectiveWhyGo, !why.isEmpty {
                             bulletCardSection(
@@ -296,10 +324,6 @@ struct PlaceDetailSheet: View {
                         }
 
                         practicalSection
-
-                        if let notes = place.notes, !notes.isEmpty {
-                            notesCard(notes)
-                        }
 
                         if let caption = attributionCaption {
                             attributionFooter(caption: caption)
@@ -401,7 +425,7 @@ struct PlaceDetailSheet: View {
                         showingExpandedMap = true
                     } label: {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 15, weight: .medium))
+                            .font(.subheadline.weight(.medium))
                             .foregroundStyle(.primary)
                             .frame(width: 36, height: 36)
                             .background(.ultraThinMaterial)
@@ -428,7 +452,7 @@ struct PlaceDetailSheet: View {
 
             VStack(spacing: 12) {
                 Image(systemName: "map")
-                    .font(.system(size: 28, weight: .medium))
+                    .font(.title.weight(.medium))
                     .foregroundStyle(.secondary)
 
                 Text("Map preview unavailable")
@@ -446,20 +470,18 @@ struct PlaceDetailSheet: View {
 
     private var topMapChrome: some View {
         HStack {
+            Spacer()
             Button {
                 dismiss()
             } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 15, weight: .semibold))
+                Image(systemName: "xmark")
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .frame(width: 38, height: 38)
-                    .background(.ultraThinMaterial)
-                    .clipShape(Circle())
+                    .frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(String(localized: "Close"))
-
-            Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -538,7 +560,8 @@ struct PlaceDetailSheet: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(place.name)
-                        .font(.system(size: 30, weight: .semibold, design: .rounded))
+                        .font(.title.weight(.semibold))
+                        .fontDesign(.rounded)
                         .foregroundStyle(.primary)
                         .lineLimit(3)
 
@@ -562,7 +585,7 @@ struct PlaceDetailSheet: View {
                     .frame(width: 44, height: 44)
                     .overlay {
                         Image(systemName: categorySymbol)
-                            .font(.system(size: 18, weight: .medium))
+                            .font(.headline.weight(.medium))
                             .foregroundStyle(AppColors.appPrimary)
                     }
             }
@@ -610,25 +633,21 @@ struct PlaceDetailSheet: View {
             if showVisit || previousForRoute != nil {
                 VStack(alignment: .leading, spacing: AppSpacing.xl) {
                     if showVisit {
-                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                            sectionTitle("Visit")
+                        HStack(alignment: .top, spacing: AppSpacing.sm) {
+                            if let scheduledTimeText {
+                                visitMetricTile(
+                                    title: String(localized: "Schedule"),
+                                    value: scheduledTimeText,
+                                    icon: "clock"
+                                )
+                            }
 
-                            HStack(alignment: .top, spacing: AppSpacing.md) {
-                                if let scheduledTimeText {
-                                    visitMetricTile(
-                                        title: String(localized: "Time"),
-                                        value: scheduledTimeText,
-                                        icon: "clock"
-                                    )
-                                }
-
-                                if let durationText {
-                                    visitMetricTile(
-                                        title: String(localized: "Duration"),
-                                        value: durationText,
-                                        icon: "timer"
-                                    )
-                                }
+                            if let durationText {
+                                visitMetricTile(
+                                    title: String(localized: "Visit length"),
+                                    value: durationText,
+                                    icon: "timer"
+                                )
                             }
                         }
                     }
@@ -685,30 +704,33 @@ struct PlaceDetailSheet: View {
 
     /// Single surface per metric — no outer card wrapper.
     private func visitMetricTile(title: String, value: String, icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(AppColors.appPrimary)
 
                 Text(title)
-                    .font(.caption.weight(.medium))
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.tertiary)
                     .textCase(.uppercase)
-                    .kerning(0.6)
+                    .kerning(0.45)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
 
             Text(value)
-                .font(.system(size: 22, weight: .medium, design: .rounded))
+                .font(.subheadline.weight(.semibold))
+                .fontDesign(.rounded)
                 .foregroundStyle(.primary)
                 .minimumScaleFactor(0.85)
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, AppSpacing.lg)
-        .padding(.vertical, 14)
+        .padding(.horizontal, AppSpacing.md)
+        .padding(.vertical, 10)
         .background(Color(uiColor: .tertiarySystemFill))
-        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
     }
 
     private func travelModeEstimateTile(
@@ -717,18 +739,10 @@ struct PlaceDetailSheet: View {
         to: CLLocationCoordinate2D
     ) -> some View {
         let mins = HaversineDistance.estimateTravelTime(from: from, to: to, mode: mode)
-        return VStack(spacing: 8) {
+        return VStack(spacing: 6) {
             Image(systemName: mode.sfSymbol)
-                .font(.system(size: 17, weight: .medium))
+                .font(.headline.weight(.medium))
                 .foregroundStyle(AppColors.appPrimary)
-
-            Text(travelModeShortLabel(mode))
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-                .kerning(0.45)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
 
             Text("\(mins) min")
                 .font(.subheadline.weight(.semibold))
@@ -761,7 +775,7 @@ struct PlaceDetailSheet: View {
                         if let visit {
                             HStack(spacing: 10) {
                                 Image(systemName: "clock.arrow.circlepath")
-                                    .font(.system(size: 16))
+                                    .font(.callout)
                                     .foregroundStyle(AppColors.appPrimary)
 
                                 Text(visit)
@@ -917,7 +931,7 @@ struct PlaceDetailSheet: View {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 10) {
                                 Image(systemName: "clock")
-                                    .font(.system(size: 16))
+                                    .font(.callout)
                                     .foregroundStyle(AppColors.appPrimary)
                                     .frame(width: 22)
                                 Text("Hours")
@@ -1014,7 +1028,7 @@ struct PlaceDetailSheet: View {
                         Image(systemName: "xmark.circle.fill")
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(.secondary)
-                            .font(.system(size: 22))
+                            .font(.title3)
                     }
                     .buttonStyle(.plain)
                 }
@@ -1033,13 +1047,13 @@ struct PlaceDetailSheet: View {
                     .frame(width: 60, height: 60)
 
                 Image(systemName: categorySymbol)
-                    .font(.system(size: 24, weight: .medium))
+                    .font(.title2.weight(.medium))
                     .foregroundStyle(place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(place.name)
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(.primary)
 
                 if let provider = bookingProvider {
@@ -1059,7 +1073,8 @@ struct PlaceDetailSheet: View {
                         .kerning(0.5)
 
                     Text(conf)
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .font(.footnote.weight(.semibold))
+                        .monospaced()
                         .foregroundStyle(place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
                 }
             }
@@ -1105,7 +1120,8 @@ struct PlaceDetailSheet: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(f.departureAirport)
-                                .font(.system(size: 32, weight: .semibold, design: .rounded))
+                                .font(.largeTitle.weight(.semibold))
+                                .fontDesign(.rounded)
                             if let t = f.departureTime {
                                 Text(t.timeFormatted)
                                     .font(.title3.weight(.medium))
@@ -1118,14 +1134,15 @@ struct PlaceDetailSheet: View {
                         Spacer()
 
                         Image(systemName: "airplane")
-                            .font(.system(size: 22))
+                            .font(.title3)
                             .foregroundStyle(BookingCategory.flight.color)
 
                         Spacer()
 
                         VStack(alignment: .trailing, spacing: 4) {
                             Text(f.arrivalAirport)
-                                .font(.system(size: 32, weight: .semibold, design: .rounded))
+                                .font(.largeTitle.weight(.semibold))
+                                .fontDesign(.rounded)
                             if let t = f.arrivalTime {
                                 Text(t.timeFormatted)
                                     .font(.title3.weight(.medium))
@@ -1261,7 +1278,7 @@ struct PlaceDetailSheet: View {
     private func detailRow(icon: String, title: String, value: String, tint: Color) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .font(.callout)
                 .foregroundStyle(tint)
                 .frame(width: 22)
 
@@ -1391,7 +1408,7 @@ struct PlaceDetailSheet: View {
 
     private func attributionFooter(caption: String) -> some View {
         Text(caption)
-            .font(.system(size: 11))
+            .font(.caption2)
             .foregroundStyle(AppColors.textTertiary)
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
@@ -1403,7 +1420,7 @@ struct PlaceDetailSheet: View {
 
     private func sectionTitle(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 13, weight: .medium))
+            .font(.footnote.weight(.medium))
             .foregroundStyle(.secondary)
             .textCase(.uppercase)
             .kerning(0.5)
@@ -1451,7 +1468,7 @@ private struct ReportThankYouToast: View {
                 .foregroundStyle(.white)
 
             Text("Thanks — we’ll take a look.")
-                .font(.system(size: 14, weight: .medium))
+                .font(.footnote.weight(.medium))
                 .foregroundStyle(.white)
         }
         .padding(.horizontal, 16)
@@ -1464,3 +1481,127 @@ private struct ReportThankYouToast: View {
         .accessibilityLabel("Report submitted, thank you.")
     }
 }
+
+#if DEBUG
+#Preview("Place detail — activity") {
+    PlaceDetailSheetPreviewHost()
+}
+
+/// Canvas / Preview host with representative enrichment and visit + route sections.
+private struct PlaceDetailSheetPreviewHost: View {
+    @State private var dataService = DataService()
+
+    var body: some View {
+        PlaceDetailSheet(
+            place: Self.previewPlace,
+            previousPlace: Self.previewPreviousPlace,
+            tripId: UUID(),
+            initialEnrichment: SupabaseManager.CityPlaceEnrichmentRow(
+                previewPlaceId: "ChIJp7MPT3HyGGARMRIJgeCSzM4",
+                popular_times: .string(FrescoPopularTimesPreviewData.jsonString)
+            ),
+            onEdit: {},
+            onMove: {},
+            onDelete: {}
+        )
+        .environment(dataService)
+    }
+
+    private static let itineraryDayId = UUID()
+
+    private static var previewPreviousPlace: Place {
+        Place(
+            id: UUID(),
+            itineraryDayId: itineraryDayId,
+            name: "Trafalgar Square",
+            address: "Trafalgar Sq, London",
+            lat: 51.5080,
+            lng: -0.1281,
+            category: "attraction",
+            notes: nil,
+            sortOrder: 0,
+            startTime: nil,
+            endTime: nil,
+            isBooking: false,
+            bookingType: nil,
+            confirmationNumber: nil,
+            bookingDetails: nil,
+            googlePlaceId: nil,
+            bookingAmount: nil,
+            bookingCurrencyCode: nil,
+            heroImageUrl: nil,
+            rating: nil,
+            userRatingsTotal: nil,
+            priceLevel: nil,
+            website: nil,
+            phoneNumber: nil,
+            isOpenNow: nil,
+            openingHoursText: nil,
+            aiSummary: nil,
+            aiShortSummary: nil,
+            whyGo: nil,
+            knowBeforeYouGo: nil,
+            reviewsTags: nil,
+            durationMinutes: nil,
+            subtypes: nil,
+            travelFromPreviousMinutes: nil,
+            travelMode: nil
+        )
+    }
+
+    private static var previewPlace: Place {
+        let cal = Calendar.current
+        let start = cal.date(bySettingHour: 10, minute: 30, second: 0, of: Date())!
+        let end = cal.date(bySettingHour: 13, minute: 0, second: 0, of: Date())!
+        return Place(
+            id: UUID(),
+            itineraryDayId: itineraryDayId,
+            name: "British Museum",
+            address: "Great Russell St, London WC1B 3DG, United Kingdom",
+            lat: 51.5194,
+            lng: -0.1269,
+            category: "attraction",
+            notes: "Bring headphones for the audio guide.",
+            sortOrder: 1,
+            startTime: start,
+            endTime: end,
+            isBooking: false,
+            bookingType: nil,
+            confirmationNumber: nil,
+            bookingDetails: nil,
+            googlePlaceId: nil,
+            bookingAmount: nil,
+            bookingCurrencyCode: nil,
+            heroImageUrl: nil,
+            rating: 4.7,
+            userRatingsTotal: 89_432,
+            priceLevel: 0,
+            website: "https://www.britishmuseum.org",
+            phoneNumber: "+44 20 7323 8299",
+            isOpenNow: true,
+            openingHoursText: "Open · Closes 17:00",
+            aiSummary: """
+            The British Museum documents the story of human culture from its beginnings to the present. \
+            Its collections, which number more than eight million objects, are amongst the largest and most comprehensive \
+            in existence and originate from all continents, illustrating and documenting the story of human culture from \
+            its beginning to the present. This preview paragraph is long enough to exercise the About “More” control.
+            """,
+            aiShortSummary: nil,
+            whyGo: [
+                "One of the world’s greatest museums",
+                "Rosetta Stone and Egyptian mummies",
+                "Free general admission",
+            ],
+            knowBeforeYouGo: [
+                "Peak hours on weekends — arrive early or book a timed exhibition ticket.",
+                "Backpacks over cabin size may need to be cloaked.",
+            ],
+            reviewsTags: ["museum", "history", "free"],
+            durationMinutes: 150,
+            subtypes: ["museum", "tourist_attraction"],
+            travelFromPreviousMinutes: nil,
+            travelMode: nil
+        )
+    }
+}
+#endif

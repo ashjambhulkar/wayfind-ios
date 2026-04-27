@@ -160,15 +160,18 @@ struct PopularTimesBarChart: View {
     let slots: [PopularTimesHourSlot]
 
     private let barMaxHeight: CGFloat = 128
+    /// Fixed width so each hour reads as a vertical capsule (not a wide slab).
+    private let barWidth: CGFloat = 7
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .bottom, spacing: 3) {
                 ForEach(slots) { slot in
                     VStack(spacing: 6) {
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        Capsule(style: .continuous)
                             .fill(barFill(for: slot.busynessPercent))
-                            .frame(height: barHeight(slot.busynessPercent))
+                            .frame(width: barWidth, height: barHeight(slot.busynessPercent))
+                            .frame(maxWidth: .infinity)
                             .accessibilityLabel("\(slot.timeLabel), \(slot.busynessPercent) percent as busy as peak")
 
                         if shouldShowTimeLabel(slot) {

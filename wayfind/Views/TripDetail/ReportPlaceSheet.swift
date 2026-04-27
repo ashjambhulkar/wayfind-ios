@@ -1,25 +1,7 @@
-//
-//  ReportPlaceSheet.swift
-//  wayfind
-//
-//  Phase E.3 — Airbnb-style 4-option report half-sheet for `city_places`.
-//
-//  Triggered from `PlaceDetailSheet` ("Report this place" overflow item).
-//  Always returns immediately on tap with a thank-you toast — we never block
-//  on the network because the report RPC is fire-and-forget anyway (3
-//  distinct reporters trip the threshold, not one).
-//
-
 import SwiftUI
 
+/// Half-sheet for reporting a place issue (closed, incorrect, etc.).
 struct ReportPlaceSheet: View {
-    let placeName: String
-    let googlePlaceId: String
-
-    /// Called after the user makes a selection. The handler is responsible
-    /// for showing the thank-you toast in the parent context.
-    var onSubmit: (Reason) -> Void
-
     @Environment(\.dismiss) private var dismiss
 
     enum Reason: String, CaseIterable, Identifiable {
@@ -30,111 +12,185 @@ struct ReportPlaceSheet: View {
 
         var id: String { rawValue }
 
-        var label: String {
+        var title: String {
             switch self {
-            case .closed: return "It's permanently closed"
-            case .incorrect: return "Information is wrong"
-            case .inappropriate: return "It's inappropriate or unsafe"
-            case .other: return "Something else"
-            }
-        }
-
-        var subtitle: String {
-            switch self {
-            case .closed: return "Out of business or no longer operating"
-            case .incorrect: return "Wrong address, hours, photos, or details"
-            case .inappropriate: return "Hate, harassment, scam, or unsafe content"
-            case .other: return "Tell us in a follow-up"
+            case .closed: String(localized: "Place is closed or doesn't exist")
+            case .incorrect: String(localized: "Information is incorrect")
+            case .inappropriate: String(localized: "Inappropriate or offensive")
+            case .other: String(localized: "Something else")
             }
         }
 
         var icon: String {
             switch self {
-            case .closed: return "lock.fill"
-            case .incorrect: return "exclamationmark.triangle.fill"
-            case .inappropriate: return "hand.raised.fill"
-            case .other: return "ellipsis.bubble.fill"
+            case .closed: "xmark.circle"
+            case .incorrect: "exclamationmark.triangle"
+            case .inappropriate: "hand.raised"
+            case .other: "ellipsis.circle"
+            }
+        }
+
+        var accessibilityHint: String {
+            switch self {
+            case .closed:
+                String(localized: "Report that this place is closed or missing.")
+            case .incorrect:
+                String(localized: "Report wrong hours, address, or other details.")
+            case .inappropriate:
+                String(localized: "Report offensive or unsafe content.")
+            case .other:
+                String(localized: "Report a different issue.")
             }
         }
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                Text("Report a problem")
-                    .font(.sectionHeader)
-                    .foregroundStyle(AppColors.textPrimary)
-                Text("What's wrong with \"\(placeName)\"?")
-                    .font(.appCaption)
-                    .foregroundStyle(AppColors.textSecondary)
-            }
+    let placeName: String
+    let googlePlaceId: String
+    let onSubmit: (Reason) -> Void
 
-            VStack(spacing: AppSpacing.sm) {
-                ForEach(Reason.allCases) { reason in
-                    reasonRow(reason)
+    @State private var selectedReason: Reason?
+    @State private var isSubmitting = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(alignment: .top, spacing: AppSpacing.md) {
+                        Image(systemName: "flag.fill")
+                            .font(.title3)
+                            .foregroundStyle(AppColors.appPrimary)
+                            .symbolRenderingMode(.hierarchical)
+                            .accessibilityHidden(true)
+                            .frame(width: 28, alignment: .center)
+
+                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                            Text(String(localized: "Tell us what’s wrong"))
+                                .font(.appBody.weight(.semibold))
+                                .foregroundStyle(AppColors.textPrimary)
+
+                            Text(String(localized: "What's wrong with \"\(placeName)\"?"))
+                                .font(.appCaption)
+                                .foregroundStyle(AppColors.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                Section {
+                    ForEach(Reason.allCases) { reason in
+                        reasonRow(reason)
+                    }
+                } header: {
+                    Text(String(localized: "Issue"))
+                        .textCase(nil)
+                } footer: {
+                    Text(String(localized: "Reports are reviewed to keep listings accurate. This won’t share your name with the place."))
+                        .font(.footnote)
                 }
             }
-
-            Button {
-                dismiss()
-            } label: {
-                Text("Cancel")
-                    .font(.appBody)
-                    .foregroundStyle(AppColors.textSecondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, AppSpacing.md)
+            .navigationTitle(String(localized: "Report a problem"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "Cancel")) {
+                        dismiss()
+                    }
+                    .disabled(isSubmitting)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSubmitting {
+                        ProgressView()
+                            .controlSize(.regular)
+                    } else {
+                        Button(String(localized: "Submit")) {
+                            submitSelected()
+                        }
+                        .fontWeight(.semibold)
+                        .disabled(selectedReason == nil)
+                    }
+                }
             }
-
-            Spacer(minLength: 0)
         }
-        .padding(.top, AppSpacing.xl)
-        .padding(.horizontal, AppSpacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColors.appBackground)
-        .presentationDetents([.medium])
+        .tint(AppColors.appPrimary)
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
-    @ViewBuilder
     private func reasonRow(_ reason: Reason) -> some View {
-        Button {
-            // Submit immediately, dismiss, let the parent show the toast.
-            onSubmit(reason)
-            dismiss()
-        } label: {
-            HStack(alignment: .top, spacing: AppSpacing.md) {
-                Image(systemName: reason.icon)
-                    .font(.title3)
-                    .foregroundStyle(AppColors.appPrimary)
-                    .frame(width: 28)
+        let isSelected = selectedReason == reason
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(reason.label)
-                        .font(.cardTitle)
-                        .foregroundStyle(AppColors.textPrimary)
-                    Text(reason.subtitle)
-                        .font(.appSmall)
-                        .foregroundStyle(AppColors.textSecondary)
-                        .multilineTextAlignment(.leading)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.footnote)
-                    .foregroundStyle(AppColors.textTertiary)
+        return Button {
+            withAnimation(AppSpring.smooth) {
+                selectedReason = reason
             }
-            .padding(AppSpacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                    .fill(AppColors.appSurface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                    .stroke(AppColors.appDivider, lineWidth: 0.5)
-            )
+        } label: {
+            HStack(alignment: .center, spacing: AppSpacing.md) {
+                Image(systemName: reason.icon)
+                    .font(.body)
+                    .foregroundStyle(isSelected ? AppColors.appPrimary : AppColors.textSecondary)
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(width: 28, alignment: .center)
+                    .accessibilityHidden(true)
+
+                Text(reason.title)
+                    .font(.appBody)
+                    .foregroundStyle(AppColors.textPrimary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AppColors.appPrimary)
+                        .accessibilityLabel(String(localized: "Selected"))
+                }
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, AppSpacing.xs)
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(reason.label)
-        .accessibilityHint(reason.subtitle)
+        .accessibilityHint(reason.accessibilityHint)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private func submitSelected() {
+        guard let reason = selectedReason, !isSubmitting else { return }
+        isSubmitting = true
+
+        onSubmit(reason)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            dismiss()
+        }
     }
 }
+
+#if DEBUG
+private struct ReportPlaceSheetSheetPreviewHost: View {
+    @State private var showSheet = true
+
+    var body: some View {
+        Color.clear
+            .sheet(isPresented: $showSheet) {
+                ReportPlaceSheet(
+                    placeName: "Museum of Modern Art",
+                    googlePlaceId: "ChIJpreview",
+                    onSubmit: { _ in }
+                )
+            }
+    }
+}
+
+#Preview("Report place") {
+    ReportPlaceSheet(
+        placeName: "Café Example",
+        googlePlaceId: "ChIJpreview",
+        onSubmit: { _ in }
+    )
+}
+
+#Preview("Report place — sheet") {
+    ReportPlaceSheetSheetPreviewHost()
+}
+#endif

@@ -120,32 +120,22 @@ struct TripDetailView: View {
                 toastManager.show(ToastData(message: "Trip updated", type: .success))
             }
         }
-        .sheet(item: $placeToEdit) { place in
-            if place.isBooking {
-                NavigationStack {
-                    AddBookingView(
-                        editingPlace: place,
-                        onSave: { updatedPlace, cost in
-                            Task {
-                                await dataService.updatePlace(updatedPlace)
-                                await viewModel?.loadTripData()
-                                await refreshItineraryPhotoStacks()
-                                await trackBookingExpenseIfNeeded(place: updatedPlace, cost: cost)
-                            }
-                            toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: true))
-                        },
-                        targetDayId: place.itineraryDayId
-                    )
-                }
-            } else {
-                EditPlaceView(place: place) { updatedPlace in
-                    Task {
-                        await dataService.updatePlace(updatedPlace)
-                        await viewModel?.loadTripData()
-                        await refreshItineraryPhotoStacks()
+        .sheet(item: $selectedPlace) { place in
+            PlaceDetailSheet(
+                place: place,
+                previousPlace: selectedPlacePrevious,
+                tripId: viewModel?.trip.id ?? trip.id,
+                onEdit: { placeToEdit = place },
+                onMove: { placeToMove = place },
+                onDelete: {
+                    if let vm = viewModel {
+                        deletePlace(place, viewModel: vm)
                     }
-                    toastManager.show(ToastData(message: "Updated", type: .success))
+                    selectedPlace = nil
                 }
+            )
+            .onDisappear {
+                Task { await refreshItineraryPhotoStacks() }
             }
         }
         .sheet(item: $placeToMove) { place in
@@ -179,22 +169,32 @@ struct TripDetailView: View {
                 }
             }
         }
-        .sheet(item: $selectedPlace) { place in
-            PlaceDetailSheet(
-                place: place,
-                previousPlace: selectedPlacePrevious,
-                tripId: viewModel?.trip.id ?? trip.id,
-                onEdit: { placeToEdit = place; selectedPlace = nil },
-                onMove: { placeToMove = place; selectedPlace = nil },
-                onDelete: {
-                    if let vm = viewModel {
-                        deletePlace(place, viewModel: vm)
-                    }
-                    selectedPlace = nil
+        .sheet(item: $placeToEdit) { place in
+            if place.isBooking {
+                NavigationStack {
+                    AddBookingView(
+                        editingPlace: place,
+                        onSave: { updatedPlace, cost in
+                            Task {
+                                await dataService.updatePlace(updatedPlace)
+                                await viewModel?.loadTripData()
+                                await refreshItineraryPhotoStacks()
+                                await trackBookingExpenseIfNeeded(place: updatedPlace, cost: cost)
+                            }
+                            toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: true))
+                        },
+                        targetDayId: place.itineraryDayId
+                    )
                 }
-            )
-            .onDisappear {
-                Task { await refreshItineraryPhotoStacks() }
+            } else {
+                EditPlaceView(place: place) { updatedPlace in
+                    Task {
+                        await dataService.updatePlace(updatedPlace)
+                        await viewModel?.loadTripData()
+                        await refreshItineraryPhotoStacks()
+                    }
+                    toastManager.show(ToastData(message: "Updated", type: .success))
+                }
             }
         }
         .sheet(item: $bookingForAttachments) { place in

@@ -2357,5 +2357,37 @@ extension SupabaseManager.CityPlaceEnrichmentRow {
     }
 }
 
+#if DEBUG
+extension SupabaseManager.CityPlaceEnrichmentRow {
+    /// Canvas / previews: only `place_id` and columns you set; everything else nil.
+    init(previewPlaceId place_id: String, popular_times: SupabaseManager.JSONValue?) {
+        self.place_id = place_id
+        self.rating = nil
+        self.user_ratings_total = nil
+        self.price_level = nil
+        self.thumbnail_url = nil
+        self.ai_short_summary = nil
+        self.subtypes = nil
+        self.time_spent_min = nil
+        self.time_spent_max = nil
+        self.website = nil
+        self.formatted_phone_number = nil
+        self.opening_hours = nil
+        self.ai_editorial_summary = nil
+        self.ai_review_summary = nil
+        self.ai_why_go = nil
+        self.ai_know_before_you_go = nil
+        self.details_enriched_at = nil
+        self.ai_enriched_at = nil
+        self.image_source = nil
+        self.images_refreshed_at = nil
+        self.thumbnail_attribution = nil
+        self.images = nil
+        self.popular_times = popular_times
+        self.ai_source_attribution = nil
+    }
+}
+#endif
+
 // =============================================================================
 
