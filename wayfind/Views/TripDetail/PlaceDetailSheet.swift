@@ -1,6 +1,7 @@
 import CoreLocation
 import MapKit
 import SwiftUI
+import UIKit
 
 struct PlaceDetailSheet: View {
     let place: Place
@@ -269,7 +270,7 @@ struct PlaceDetailSheet: View {
         .overlay(alignment: .top) {
             if reportToastVisible {
                 ReportThankYouToast()
-                    .padding(.top, 60)
+                    .safeAreaPadding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
@@ -342,12 +343,16 @@ struct PlaceDetailSheet: View {
                     .offset(y: -18)
                 }
             }
-            .background(Color(uiColor: .systemBackground))
-            .toolbar(.hidden, for: .navigationBar)
+            .ignoresSafeArea(edges: .top)
+            .placeDetailHideTopScrollEdgeEffect()
+            .background(Color.clear)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
+                placeDetailDismissToolbarItem
                 placeDetailBottomToolbarItems
             }
         }
+        .background(PlaceDetailTransparentNavBarHook())
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .fullScreenCover(isPresented: $showingExpandedMap) {
@@ -384,20 +389,14 @@ struct PlaceDetailSheet: View {
     // MARK: - Map Stage Header
 
     private var mapStageHeader: some View {
-        ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: 0, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemBackground))
-                .frame(height: 300)
-
-            if let coordinate {
+        Group {
+            if hasCoordinates {
                 mapStage
                     .frame(height: 300)
             } else {
                 unavailableMapStage
                     .frame(height: 300)
             }
-
-            topMapChrome
         }
         .frame(height: 300)
         .clipped()
@@ -411,7 +410,7 @@ struct PlaceDetailSheet: View {
                         .tint(AppColors.appPrimary)
                 }
             }
-            .mapStyle(.standard(elevation: .realistic, emphasis: .muted))
+            .mapStyle(.standard(elevation: .realistic, emphasis: .automatic))
             .mapControlVisibility(.hidden)
             .onTapGesture {
                 showingExpandedMap = true
@@ -468,23 +467,18 @@ struct PlaceDetailSheet: View {
         }
     }
 
-    private var topMapChrome: some View {
-        HStack {
-            Spacer()
+    @ToolbarContentBuilder
+    private var placeDetailDismissToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
             Button {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .font(.system(size: 17, weight: .semibold))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(String(localized: "Close"))
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
     }
 
     @ToolbarContentBuilder
@@ -1023,15 +1017,7 @@ struct PlaceDetailSheet: View {
             .navigationTitle(categoryLabel)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.secondary)
-                            .font(.title3)
-                    }
-                    .buttonStyle(.plain)
-                }
+                placeDetailDismissToolbarItem
                 placeDetailBottomToolbarItems
             }
         }
@@ -1455,6 +1441,110 @@ struct PlaceDetailSheet: View {
             }
         }
     }
+}
+
+// MARK: - Transparent nav + scroll edge (remove light-mode top fade over map)
+
+private extension View {
+    @ViewBuilder
+    func placeDetailHideTopScrollEdgeEffect() -> some View {
+        if #available(iOS 26.0, *) {
+            self.scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            self
+        }
+    }
+}
+
+/// Strips the navigation bar’s scroll-edge blur/tint that reads as a white gradient over the map (pre–iOS 26).
+private struct PlaceDetailTransparentNavBarHook: UIViewControllerRepresentable {
+    final class Coordinator {
+        var didInstall = false
+        weak var navigationBar: UINavigationBar?
+        var standard: UINavigationBarAppearance?
+        var scrollEdge: UINavigationBarAppearance?
+        var compact: UINavigationBarAppearance?
+        var compactScroll: UINavigationBarAppearance?
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        let controller = UIViewController()
+        controller.view.backgroundColor = .clear
+        controller.view.isUserInteractionEnabled = false
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        if #available(iOS 26.0, *) {
+            return
+        }
+
+        DispatchQueue.main.async {
+            let coordinator = context.coordinator
+            if coordinator.didInstall { return }
+
+            guard let navigationController = placeDetailEnclosingNavigationController(from: uiViewController) else {
+                return
+            }
+
+            let bar = navigationController.navigationBar
+            coordinator.didInstall = true
+            coordinator.navigationBar = bar
+            coordinator.standard = bar.standardAppearance
+            coordinator.scrollEdge = bar.scrollEdgeAppearance
+            coordinator.compact = bar.compactAppearance
+            coordinator.compactScroll = bar.compactScrollEdgeAppearance
+
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithTransparentBackground()
+            appearance.backgroundColor = .clear
+            appearance.backgroundEffect = nil
+            appearance.shadowColor = .clear
+            appearance.shadowImage = UIImage()
+
+            bar.standardAppearance = appearance
+            bar.scrollEdgeAppearance = appearance
+            bar.compactAppearance = appearance
+            bar.compactScrollEdgeAppearance = appearance
+            bar.isTranslucent = true
+        }
+    }
+
+    static func dismantleUIViewController(_ uiViewController: UIViewController, coordinator: Coordinator) {
+        guard coordinator.didInstall, let bar = coordinator.navigationBar else { return }
+        if let appearance = coordinator.standard {
+            bar.standardAppearance = appearance
+        }
+        if let appearance = coordinator.scrollEdge {
+            bar.scrollEdgeAppearance = appearance
+        }
+        if let appearance = coordinator.compact {
+            bar.compactAppearance = appearance
+        }
+        if let appearance = coordinator.compactScroll {
+            bar.compactScrollEdgeAppearance = appearance
+        }
+        coordinator.didInstall = false
+        coordinator.navigationBar = nil
+    }
+}
+
+private func placeDetailEnclosingNavigationController(from controller: UIViewController) -> UINavigationController? {
+    var current: UIViewController? = controller
+    while let visit = current {
+        if let navigation = visit as? UINavigationController {
+            return navigation
+        }
+        if let navigation = visit.navigationController {
+            return navigation
+        }
+        current = visit.parent
+    }
+    return nil
 }
 
 extension HaversineDistance.TravelMode: CaseIterable {
