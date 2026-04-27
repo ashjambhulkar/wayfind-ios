@@ -47,18 +47,12 @@ struct MapChromeIconButton: View {
     @ViewBuilder
     private var label: some View {
         if legacyDiskFill {
-            if #available(iOS 26.0, *) {
-                Image(systemName: systemName)
-                    .font(iconFont)
-                    .symbolRenderingMode(symbolRenderingMode)
-                    .foregroundStyle(monochromeForeground)
-            } else {
-                Image(systemName: systemName)
-                    .font(iconFont)
-                    .symbolRenderingMode(symbolRenderingMode)
-                    .foregroundStyle(monochromeForeground)
-                    .background(Color(UIColor.tertiarySystemFill), in: Circle())
-            }
+            Image(systemName: systemName)
+                .font(iconFont)
+                .symbolRenderingMode(symbolRenderingMode)
+                .foregroundStyle(monochromeForeground)
+                .frame(width: minTouchSize, height: minTouchSize)
+                .background(Color(UIColor.tertiarySystemFill), in: Circle())
         } else {
             Image(systemName: systemName)
                 .font(iconFont)

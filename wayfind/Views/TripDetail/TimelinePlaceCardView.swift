@@ -105,24 +105,38 @@ struct TimelinePlaceCardView: View {
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
                     Image(systemName: inlineIcon)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(familyColor)
-                        .frame(width: 16, alignment: .center)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(familyColor.opacity(0.72))
+                        .frame(width: 14, alignment: .center)
 
                     // Use `Color.primary` (true system-black in light, true white
                     // in dark) for the strongest, Apple-correct title contrast.
                     // `AppColors.textPrimary` reads slightly washed at 0x1A1A1A.
                     Text(place.name)
-                        .font(.cardTitle)
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(1)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .lineLimit(2)
                 }
 
                 if !subtitleParts.isEmpty {
                     Text(subtitleParts.joined(separator: " · "))
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
+                }
+
+                if let addressLine {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(AppColors.textTertiary.opacity(0.78))
+                            .frame(width: 12, alignment: .center)
+                        Text(addressLine)
+                            .font(.caption)
+                            .foregroundStyle(Color.secondary.opacity(0.8))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
 
                 // Phase 3 — only renders when a recent realtime change has
@@ -149,13 +163,14 @@ struct TimelinePlaceCardView: View {
     // MARK: - Type-aware subtitle
     //
     // We compose a 1-line "tag string" tuned per category so each card carries
-    // the metadata most useful for that kind of place. Order is: identifying
-    // signal first (rating / price), shape signal next (duration), then a quiet
-    // place anchor (neighborhood or category label) so the row always ends
-    // with where-or-what-it-is.
+    // the metadata most useful for that kind of place. The activity type leads
+    // the row so users can scan "Restaurant", "Museum", "Attraction", etc.
+    // before reading rating, price, or duration.
 
     private var subtitleParts: [String] {
         var parts: [String] = []
+
+        parts.append(activityTypeLabel)
 
         if let r = place.rating {
             parts.append(String(format: "★ %.1f", r))
@@ -172,19 +187,19 @@ struct TimelinePlaceCardView: View {
             }
         }
 
-        // Trailing tag: prefer the most specific Google subtype (e.g.
-        // "Shopping mall", "Cocktail bar") over the broad category label so
-        // every card carries a sharper "what is this" signal. Otherwise fall
-        // back to neighborhood, then to the category label.
-        if let kind = place.placeKindLabel {
-            parts.append(kind)
-        } else if let area = neighborhood(from: place.address) {
-            parts.append(area)
-        } else {
-            parts.append(place.categoryEnum.label)
-        }
-
         return parts
+    }
+
+    private var activityTypeLabel: String {
+        place.placeKindLabel ?? place.categoryEnum.label
+    }
+
+    private var addressLine: String? {
+        guard let address = place.address?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !address.isEmpty else {
+            return nil
+        }
+        return address
     }
 
     /// Prefer the actual scheduled duration (start→end) since that reflects

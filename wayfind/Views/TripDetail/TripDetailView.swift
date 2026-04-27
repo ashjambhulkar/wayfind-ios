@@ -10,10 +10,20 @@ private struct TripDetailScrollOffsetKey: PreferenceKey {
     }
 }
 
-private struct TripDetailDayHeaderMinYKey: PreferenceKey {
-    static var defaultValue: CGFloat = .infinity
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = min(value, nextValue())
+private struct TripDetailDayHeaderNavigationCandidate: Equatable {
+    let id: UUID
+    let title: String
+    let minY: CGFloat
+    let maxY: CGFloat
+}
+
+private struct TripDetailDayHeaderNavigationKey: PreferenceKey {
+    static var defaultValue: [TripDetailDayHeaderNavigationCandidate] = []
+    static func reduce(
+        value: inout [TripDetailDayHeaderNavigationCandidate],
+        nextValue: () -> [TripDetailDayHeaderNavigationCandidate]
+    ) {
+        value.append(contentsOf: nextValue())
     }
 }
 
@@ -58,7 +68,7 @@ struct TripDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    @State private var isDayHeaderPinnedToNavigation = false
+    @State private var activeItineraryNavigationTitle: String?
     /// Hide the inline nav title while the hero shows the trip name; reveal after scrolling.
     @State private var showInlineTripTitle = false
 
@@ -110,7 +120,7 @@ struct TripDetailView: View {
     }
 
     private var shouldShowOpaqueNavigationBar: Bool {
-        !tripDetailShowsHeroWithContent || showInlineTripTitle || isDayHeaderPinnedToNavigation
+        !tripDetailShowsHeroWithContent || showInlineTripTitle || activeItineraryNavigationTitle != nil
     }
 
     private var shouldCollapseNavigationToolbarActions: Bool {
@@ -118,7 +128,10 @@ struct TripDetailView: View {
     }
 
     private var navigationBarTitle: String {
-        shouldShowOpaqueNavigationBar ? (viewModel?.trip.title ?? trip.title) : ""
+        if let activeItineraryNavigationTitle {
+            return activeItineraryNavigationTitle
+        }
+        return shouldShowOpaqueNavigationBar ? (viewModel?.trip.title ?? trip.title) : ""
     }
 
     private var navigationToolbarColorScheme: ColorScheme {
@@ -343,7 +356,7 @@ struct TripDetailView: View {
                 }
             )
             .onDisappear {
-                Task { await refreshItineraryPhotoStacks() }
+                Task { await refreshItineraryPhotoStacks(forceRefresh: true) }
             }
         }
         .sheet(item: $placeToMove) { place in
@@ -629,7 +642,7 @@ struct TripDetailView: View {
                 }
             }
             .onDisappear {
-                Task { await refreshItineraryPhotoStacks() }
+                Task { await refreshItineraryPhotoStacks(forceRefresh: true) }
             }
         }
         .sheet(isPresented: $showCalendarOnboarding) {
@@ -641,14 +654,17 @@ struct TripDetailView: View {
 
     // MARK: - Activity photos (timeline)
 
-    private func refreshItineraryPhotoStacks() async {
+    private func refreshItineraryPhotoStacks(forceRefresh: Bool = false) async {
         guard let vm = viewModel else { return }
         let ids = vm.nonBookingTimelineActivityIds()
         guard !ids.isEmpty else {
             itineraryPhotoStacks = [:]
             return
         }
-        let stacks = await ActivityAttachmentService.fetchFeedPhotoStacks(activityIds: ids)
+        let stacks = await ActivityAttachmentService.fetchFeedPhotoStacks(
+            activityIds: ids,
+            forceRefresh: forceRefresh
+        )
         itineraryPhotoStacks = stacks
     }
 
@@ -722,7 +738,7 @@ struct TripDetailView: View {
                         onInviteMembers: { showMembersSheet = true }
                     )
 
-                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    LazyVStack(spacing: 0) {
                         if !viewModel.scheduledDays.isEmpty {
                             HStack(alignment: .center, spacing: AppSpacing.md) {
                                 Text(String(localized: "Itinerary"))
@@ -814,10 +830,14 @@ struct TripDetailView: View {
                     showInlineTripTitle = next
                 }
             }
-            .onPreferenceChange(TripDetailDayHeaderMinYKey.self) { minY in
-                let next = minY <= TripDetailOverlayMetrics.stickyDayHeaderTop + 1
-                if next != isDayHeaderPinnedToNavigation {
-                    isDayHeaderPinnedToNavigation = next
+            .onPreferenceChange(TripDetailDayHeaderNavigationKey.self) { candidates in
+                let threshold = TripDetailOverlayMetrics.stickyDayHeaderTop + 1
+                let next = candidates
+                    .filter { $0.minY <= threshold && $0.maxY > threshold }
+                    .max(by: { $0.minY < $1.minY })?
+                    .title
+                if next != activeItineraryNavigationTitle {
+                    activeItineraryNavigationTitle = next
                 }
             }
             .onChange(of: viewModel.isLoading) { _, isLoading in
@@ -887,12 +907,14 @@ struct TripDetailView: View {
         let isQuietEmptyDay = places.isEmpty && ongoingForDay.isEmpty
         let emptyDayPrompt = emptyDayPrompt(for: day, isQuietEmptyDay: isQuietEmptyDay, viewModel: viewModel)
         let preview = collapsedDayPreview(places: places, ongoingBookings: ongoingForDay.map(\.place))
+        let dayNavigationTitle = "\(viewModel.dayHeaderDayLabel(for: day)) · \(viewModel.dayHeaderDateLabel(for: day, timelineTimeZone: dayTZ))"
+        let isActiveNavigationDay = activeItineraryNavigationTitle == dayNavigationTitle
 
         Section {
             if !viewModel.isDayCollapsed(day) {
                 VStack(spacing: 0) {
                     Spacer()
-                        .frame(height: AppSpacing.md)
+                        .frame(height: isActiveNavigationDay ? AppSpacing.xs : AppSpacing.md)
 
                     DaySummaryView(
                         places: places,
@@ -994,39 +1016,45 @@ struct TripDetailView: View {
                 }
             }
         } header: {
-            DaySectionHeaderView(
-                day: day,
-                dayLabel: viewModel.dayHeaderDayLabel(for: day),
-                dateLabel: viewModel.dayHeaderDateLabel(for: day, timelineTimeZone: dayTZ),
-                isCollapsed: viewModel.isDayCollapsed(day),
-                contentPreview: preview,
-                isQuietEmptyDay: isQuietEmptyDay,
-                emptyDayPrompt: emptyDayPrompt
-            ) {
-                viewModel.toggleDayCollapse(day)
-            }
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(
-                        key: TripDetailDayHeaderMinYKey.self,
-                        value: geo.frame(in: .global).minY
-                    )
+            if isActiveNavigationDay && !viewModel.isDayCollapsed(day) {
+                Color.clear
+                    .frame(height: 0)
+                    .accessibilityHidden(true)
+            } else {
+                DaySectionHeaderView(
+                    day: day,
+                    dayLabel: viewModel.dayHeaderDayLabel(for: day),
+                    dateLabel: viewModel.dayHeaderDateLabel(for: day, timelineTimeZone: dayTZ),
+                    isCollapsed: viewModel.isDayCollapsed(day),
+                    contentPreview: preview,
+                    isQuietEmptyDay: isQuietEmptyDay,
+                    emptyDayPrompt: emptyDayPrompt
+                ) {
+                    viewModel.toggleDayCollapse(day)
                 }
-            )
-            .visualEffect { content, proxy in
-                content.offset(
-                    y: max(
-                        0,
-                        TripDetailOverlayMetrics.stickyDayHeaderTop - proxy.frame(in: .global).minY
-                    )
-                )
+                .id(day.id)
             }
-            .id(day.id)
         } footer: {
             Color.clear
                 .frame(height: AppSpacing.lg)
                 .accessibilityHidden(true)
         }
+        .background(
+            GeometryReader { geo in
+                let frame = geo.frame(in: .global)
+                Color.clear.preference(
+                    key: TripDetailDayHeaderNavigationKey.self,
+                    value: [
+                        TripDetailDayHeaderNavigationCandidate(
+                            id: day.id,
+                            title: dayNavigationTitle,
+                            minY: frame.minY,
+                            maxY: frame.maxY
+                        )
+                    ]
+                )
+            }
+        )
         .accessibilityElement(children: .contain)
     }
 

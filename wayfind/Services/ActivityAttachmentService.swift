@@ -86,6 +86,13 @@ final class ActivityAttachmentService {
     /// Refreshed signed URLs cache, keyed by attachment id.
     private var signedURLCache: [UUID: (url: URL, expiry: Date)] = [:]
 
+    private struct FeedPhotoStackCacheEntry {
+        let items: [ActivityFeedPhotoStackItem]
+        let expiry: Date
+    }
+
+    private static var feedPhotoStackCache: [UUID: FeedPhotoStackCacheEntry] = [:]
+
     private(set) var attachments: [ActivityAttachment] = []
     private(set) var isLoading: Bool = false
     private(set) var lastError: String?
@@ -291,9 +298,29 @@ final class ActivityAttachmentService {
     /// Fetches photo attachments for many activities in one query, returns up to
     /// **5** signed URLs per activity (cover first, then chronological).
     @MainActor
-    static func fetchFeedPhotoStacks(activityIds: [UUID]) async -> [UUID: [ActivityFeedPhotoStackItem]] {
+    static func fetchFeedPhotoStacks(
+        activityIds: [UUID],
+        forceRefresh: Bool = false
+    ) async -> [UUID: [ActivityFeedPhotoStackItem]] {
         let unique = Array(Set(activityIds))
         guard let client = AuthSessionService.shared.client, !unique.isEmpty else { return [:] }
+        let now = Date()
+        var result: [UUID: [ActivityFeedPhotoStackItem]] = [:]
+        var idsToFetch: [UUID] = []
+
+        for activityId in unique {
+            if !forceRefresh,
+               let cached = feedPhotoStackCache[activityId],
+               cached.expiry > now {
+                if !cached.items.isEmpty {
+                    result[activityId] = cached.items
+                }
+            } else {
+                idsToFetch.append(activityId)
+            }
+        }
+
+        guard !idsToFetch.isEmpty else { return result }
 
         struct Row: Decodable, Sendable {
             let id: String
@@ -308,7 +335,7 @@ final class ActivityAttachmentService {
                 .from("trip_activity_attachments")
                 .select("id, activity_id, storage_path, is_cover, created_at")
                 .eq("attachment_type", value: "photo")
-                .in("activity_id", values: unique.map { $0.uuidString.lowercased() })
+                .in("activity_id", values: idsToFetch.map { $0.uuidString.lowercased() })
                 .execute()
                 .value
 
@@ -342,7 +369,7 @@ final class ActivityAttachmentService {
             }
 
             let byActivity = Dictionary(grouping: sortables, by: \.activityId)
-            var result: [UUID: [ActivityFeedPhotoStackItem]] = [:]
+            var fetchedStacks: [UUID: [ActivityFeedPhotoStackItem]] = [:]
 
             for (actId, items) in byActivity {
                 let ordered = Array(items.sorted {
@@ -374,7 +401,16 @@ final class ActivityAttachmentService {
                     return ActivityFeedPhotoStackItem(id: item.attachmentId, url: u)
                 }
                 if !stack.isEmpty {
-                    result[actId] = stack
+                    fetchedStacks[actId] = stack
+                }
+            }
+
+            let expiry = now.addingTimeInterval(50 * 60)
+            for activityId in idsToFetch {
+                let stack = fetchedStacks[activityId] ?? []
+                feedPhotoStackCache[activityId] = FeedPhotoStackCacheEntry(items: stack, expiry: expiry)
+                if !stack.isEmpty {
+                    result[activityId] = stack
                 }
             }
             return result

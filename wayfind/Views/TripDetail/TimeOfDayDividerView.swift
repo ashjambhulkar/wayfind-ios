@@ -60,7 +60,7 @@ struct TimeOfDayDividerView: View {
             HStack(spacing: 6) {
                 Image(systemName: chapter.icon)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(chapter.tint)
+                    .foregroundStyle(chapter.tint.opacity(0.9))
                 Text(chapter.title.uppercased())
                     .font(.appSmall)
                     .tracking(0.8)

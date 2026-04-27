@@ -13,9 +13,9 @@ import SwiftUI
 
 // MARK: - Time pin (Apple-Maps callout balloon)
 
-/// Compact rounded balloon with a right-pointing tail, evoking an Apple Maps
-/// callout. Renders the start time as a single-line 24-hour `HH:mm` glyph so
-/// every pin in a day is the same width — a clean leading column of times.
+/// Compact neutral balloon with a right-pointing tail. Renders the start time
+/// as a single-line 24-hour `HH:mm` glyph so every pin in a day is the same
+/// width while category color stays reserved for the card stripe and icon.
 struct TimePinView: View {
     let time: Date
     let tint: Color
@@ -36,11 +36,11 @@ struct TimePinView: View {
             .padding(.vertical, 5)
             .background(
                 BalloonShape(tailSize: Self.tailSize, cornerRadius: Self.cornerRadius)
-                    .fill(tint.opacity(0.16))
+                    .fill(AppColors.appSurface)
             )
             .overlay(
                 BalloonShape(tailSize: Self.tailSize, cornerRadius: Self.cornerRadius)
-                    .strokeBorder(tint.opacity(0.4), lineWidth: 0.6)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 0.6)
             )
     }
 }
@@ -53,7 +53,7 @@ struct UnscheduledMarkerView: View {
 
     var body: some View {
         Circle()
-            .fill(tint.opacity(0.55))
+            .fill(AppColors.textTertiary.opacity(0.45))
             .frame(width: 8, height: 8)
             .padding(.horizontal, 14)
     }

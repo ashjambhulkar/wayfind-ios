@@ -76,7 +76,7 @@ struct TimelineBookingCardView: View {
                 // Use `Color.primary` for true system-correct contrast,
                 // matching `TimelinePlaceCardView`. See note there.
                 Text(place.name)
-                    .font(.cardTitle)
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
                     .foregroundStyle(Color.primary)
                     .lineLimit(1)
             }

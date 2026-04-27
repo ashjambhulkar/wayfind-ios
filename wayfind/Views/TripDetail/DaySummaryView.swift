@@ -46,7 +46,7 @@ struct DaySummaryView: View {
             parts.append("\(duration) planned")
         }
         if let distance = formattedDistance(totalDistanceKm) {
-            parts.append("~\(distance)")
+            parts.append("\(distance) total")
         }
         return parts
     }

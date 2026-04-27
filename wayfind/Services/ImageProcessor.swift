@@ -65,8 +65,11 @@ enum ImageProcessorError: LocalizedError, Sendable {
 
 enum ImageProcessor {
     enum Constants {
-        static let maxLongEdge: CGFloat = 2_048
-        static let jpegQuality: CGFloat = 0.8
+        static let maxLongEdge: CGFloat = 1_600
+        static let targetByteCount: Int = 1 * 1024 * 1024
+        static let maxJpegQuality: CGFloat = 0.8
+        static let minJpegQuality: CGFloat = 0.68
+        static let jpegQualityStep: CGFloat = 0.04
         static let maxByteCount: Int = 25 * 1024 * 1024
         static let defaultFileName = "photo.jpg"
     }
@@ -111,8 +114,17 @@ enum ImageProcessor {
         }
 
         let uiImage = UIImage(cgImage: cg)
-        guard let jpeg = uiImage.jpegData(compressionQuality: Constants.jpegQuality) else {
-            throw ImageProcessorError.encodingFailed
+        let jpeg = try encodeJPEG(
+            uiImage,
+            targetByteCount: Constants.targetByteCount,
+            maxQuality: Constants.maxJpegQuality,
+            minQuality: Constants.minJpegQuality,
+            step: Constants.jpegQualityStep
+        )
+
+        if jpeg.count > Constants.targetByteCount {
+            // We intentionally keep the best result above the target rather
+            // than over-compressing below the visual quality floor.
         }
 
         if jpeg.count > Constants.maxByteCount {
@@ -130,6 +142,32 @@ enum ImageProcessor {
             width: cg.width,
             height: cg.height
         )
+    }
+
+    private static func encodeJPEG(
+        _ image: UIImage,
+        targetByteCount: Int,
+        maxQuality: CGFloat,
+        minQuality: CGFloat,
+        step: CGFloat
+    ) throws -> Data {
+        var best: Data?
+        var quality = maxQuality
+        while quality >= minQuality {
+            guard let candidate = image.jpegData(compressionQuality: quality) else {
+                throw ImageProcessorError.encodingFailed
+            }
+            best = candidate
+            if candidate.count <= targetByteCount {
+                return candidate
+            }
+            quality -= step
+        }
+
+        guard let best else {
+            throw ImageProcessorError.encodingFailed
+        }
+        return best
     }
 
     /// Strip directory components, replace whitespace + slashes, force the
