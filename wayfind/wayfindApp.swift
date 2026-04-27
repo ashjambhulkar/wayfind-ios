@@ -213,13 +213,13 @@ struct InviteJoinResult: Identifiable, Hashable, Sendable {
     let role: TripRole
 }
 
-// MARK: - Root tab bar
+// MARK: - Trip detail hub (single stack + root bottom actions)
 
-/// Hashable tab identifier for the trip-detail TabView. Drives both the
-/// iOS 18+ `Tab(value:)` API and the iOS 17 fallback's `.tag`, and lets
-/// the AI Day Planner handoff route the user to `.map` after Apply.
-enum TripDetailTab: Hashable {
-    case home, map, budget, bookings, ai
+/// Pushed modules from trip itinerary (`TripDetailView` root). Budget stays
+/// on the root bar even when `canViewExpenses` is false — the destination
+/// shows a native `ContentUnavailableView` explainers.
+private enum TripDetailModule: Hashable {
+    case budget, bookings, documents, map
 }
 
 private struct AppRootTabView: View {
@@ -250,17 +250,11 @@ private struct AppRootTabView: View {
     /// realtime service holds a `weak` reference; the strong owner here
     /// keeps it alive across tab switches inside the trip.
     @State private var activeBudgetViewModel: BudgetViewModel?
-    /// Hoisted to the trip tab-view root so the AI Day Planner sheet can be
-    /// launched identically from both the Itinerary and Map tabs and survives
-    /// tab switches without each tab re-instantiating its own copy.
+    /// AI Day Planner sheet — presented from the root bottom bar (not a tab).
     @State private var showAIPlanner = false
-    /// Bound to the trip-detail TabView so the Phase C apply-handoff can
-    /// programmatically switch the user to the Map tab.
-    @State private var selectedTab: TripDetailTab = .home
-    /// The AI tab is a launch affordance, not a destination. Keep track of
-    /// the real tab so tapping AI can present the sheet without leaving the
-    /// user on an empty tab.
-    @State private var lastContentTab: TripDetailTab = .home
+    /// Hub-and-spoke navigation: empty at itinerary root; one element when a
+    /// module (Budget / Bookings / Map) is pushed.
+    @State private var tripModulePath: [TripDetailModule] = []
     /// iOS 26 map places-sheet state is hoisted so the map, sheet, and
     /// tab-level wrapper can coordinate selection and detent changes.
     @State private var mapTabState = MapTabSharedState()
@@ -286,10 +280,43 @@ private struct AppRootTabView: View {
 
     var body: some View {
         Group {
-            if #available(iOS 18.0, *) {
-                dynamicTabView_iOS18
+            if let trip = coordinator.activeTrip {
+                NavigationStack(path: $tripModulePath) {
+                    TripDetailView(
+                        trip: trip,
+                        onViewModelCreated: { viewModel in
+                            activeTripDetailViewModel = viewModel
+                            attachRealtimeIfReady()
+                        },
+                        onOpenBudgetTab: { tripModulePath = [.budget] },
+                        budgetViewModel: activeBudgetViewModel
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                coordinator.returnToList()
+                            } label: {
+                                Label("Trips", systemImage: "chevron.backward")
+                            }
+                        }
+                        if tripModulePath.isEmpty {
+                            TripDetailHubBottomBar(
+                                showsAI: collaborationStore.canEdit,
+                                showsDocuments: collaborationStore.canViewDocuments,
+                                onMap: { tripModulePath = [.map] },
+                                onBudget: { tripModulePath = [.budget] },
+                                onBookings: { tripModulePath = [.bookings] },
+                                onDocuments: { tripModulePath = [.documents] },
+                                onAI: { showAIPlanner = true }
+                            )
+                        }
+                    }
+                    .navigationDestination(for: TripDetailModule.self) { module in
+                        tripModuleDestination(module: module, trip: trip)
+                    }
+                }
             } else {
-                dynamicTabView_fallback
+                TripsListView()
             }
         }
         .tint(AppColors.appPrimary)
@@ -336,6 +363,7 @@ private struct AppRootTabView: View {
         // (no blur) — see `KickFadeOverlay`.
         .overlay(KickFadeOverlay(isActive: isKickFading))
         .onChange(of: coordinator.activeTrip?.id, initial: true) { _, newTripId in
+            tripModulePath = []
             if let newTripId {
                 collaborationStore.bind(to: newTripId)
                 collaborationUi.bind(to: newTripId)
@@ -358,7 +386,6 @@ private struct AppRootTabView: View {
                 realtimeService.unbind()
                 activeTripDetailViewModel = nil
                 activeBudgetViewModel = nil
-                lastContentTab = .home
                 isKickFading = false
             }
         }
@@ -368,29 +395,21 @@ private struct AppRootTabView: View {
         .onChange(of: activeTripDetailViewModel?.trip.id) { _, _ in
             attachRealtimeIfReady()
         }
-        // Per-surface access revocation (Phase 1.5): if the owner removes
-        // a collaborator's access to expenses while they're sitting on the
-        // Budget tab, hop them to .home FIRST. SwiftUI evaluates the tab
-        // body *before* the conditional removal, so without this hop we'd
-        // briefly render an "empty selection" state. Owners always pass
-        // `canViewExpenses` so this is a no-op for them.
+        // Per-surface access revocation: pop back to itinerary if Budget was
+        // pushed and expense access is removed.
         .onChange(of: collaborationStore.canViewExpenses) { _, canView in
-            if !canView, selectedTab == .budget {
-                selectedTab = .home
+            if !canView, tripModulePath.contains(.budget) {
+                tripModulePath = []
             }
         }
-        .onChange(of: selectedTab) { oldValue, newValue in
-            if newValue == .ai {
-                if collaborationStore.canEdit {
-                    HapticManager.light()
-                    showAIPlanner = true
-                }
-                selectedTab = lastContentTab
-            } else {
-                lastContentTab = newValue
-                if oldValue == .ai {
-                    selectedTab = newValue
-                }
+        .onChange(of: collaborationStore.canViewDocuments) { _, canView in
+            if !canView, tripModulePath.contains(.documents) {
+                tripModulePath = []
+                toastManager.show(ToastData(
+                    message: "The owner removed your access to documents",
+                    type: .warning,
+                    duration: 3
+                ))
             }
         }
         .sheet(isPresented: $showAIPlanner) {
@@ -543,14 +562,10 @@ private struct AppRootTabView: View {
         }
     }
 
-    /// Phase C handoff. Server has already committed the ops by the time
-    /// this fires; we just need to (1) tear down the sheet, (2) route the
-    /// user to the Map tab so they can see their new stops in spatial
-    /// context, and (3) confirm with a toast. Order matters — set the
-    /// tab BEFORE dismissing so the user lands on Map (not the previous
-    /// tab while the sheet is still animating away).
+    /// Phase C handoff: dismiss the wizard and push Map so new stops are
+    /// visible in spatial context, then toast.
     private func handleAIPlanApplied(_ count: Int) {
-        selectedTab = .map
+        tripModulePath = [.map]
         showAIPlanner = false
         let message: String
         switch count {
@@ -564,143 +579,37 @@ private struct AppRootTabView: View {
         toastManager.show(ToastData(message: message, type: .success, duration: 3.5))
     }
 
-    // MARK: iOS 18+ — uses Tab() API
-
-    @available(iOS 18.0, *)
-    @ViewBuilder
-    private var dynamicTabView_iOS18: some View {
-        if let trip = coordinator.activeTrip {
-            // DETAIL MODE
-            TabView(selection: $selectedTab) {
-                Tab("Home", systemImage: "house.fill", value: TripDetailTab.home) {
-                    tripListReturnView
-                }
-
-                TabSection("Trip") {
-                    // Budget tab is per-surface gated (Phase 1.5). Owner
-                    // always sees it; viewers / editors only see it when
-                    // their `can_access_expenses` flag is on. We omit the
-                    // entire Tab from the TabView so SwiftUI's selection
-                    // routing never lands on a tab the user can't open.
-                    if collaborationStore.canViewExpenses {
-                        Tab("Budget", systemImage: "creditcard", value: TripDetailTab.budget) {
-                            NavigationStack {
-                                TripBudgetTabView(
-                                    trip: trip,
-                                    viewModel: activeBudgetViewModel
-                                )
-                                .navigationTitle("Budget")
-                            }
-                        }
-                    }
-
-                    Tab("Bookings", systemImage: "airplane", value: TripDetailTab.bookings) {
-                        NavigationStack {
-                            BookingsScreenView(
-                                trip: trip,
-                                onOpenBudgetTab: collaborationStore.canViewExpenses ? { selectedTab = .budget } : nil
-                            )
-                        }
-                    }
-
-                    Tab("Map", systemImage: "map.fill", value: TripDetailTab.map, role: .search) {
-                        if #available(iOS 26.0, *) {
-                            MapTabWrapper(trip: trip, mapState: mapTabState)
-                        } else {
-                            NavigationStack {
-                                TripMapView(trip: trip)
-                            }
-                        }
-                    }
-                }
-
-                if collaborationStore.canEdit {
-                    Tab("AI", systemImage: "sparkles", value: TripDetailTab.ai) {
-                        Color.clear
-                    }
-                }
-            }
-            .modifier(ScrollDownMinimizeTabBarModifier())
-        } else {
-            // LIST MODE — no tab bar; create button lives in the nav toolbar
-            TripsListView()
-        }
-    }
-
-    // MARK: iOS 17 fallback
+    // MARK: - Trip detail pushed destinations
 
     @ViewBuilder
-    private var dynamicTabView_fallback: some View {
-        if let trip = coordinator.activeTrip {
-            TabView(selection: $selectedTab) {
-                tripListReturnView
-                    .tabItem { Label("Home", systemImage: "house.fill") }
-                    .tag(TripDetailTab.home)
-
-                if collaborationStore.canViewExpenses {
-                    NavigationStack {
-                        TripBudgetTabView(
-                            trip: trip,
-                            viewModel: activeBudgetViewModel
-                        )
-                        .navigationTitle("Budget")
-                    }
-                    .tabItem { Label("Budget", systemImage: "creditcard") }
-                    .tag(TripDetailTab.budget)
+    private func tripModuleDestination(module: TripDetailModule, trip: Trip) -> some View {
+        switch module {
+        case .budget:
+            if collaborationStore.canViewExpenses {
+                TripBudgetTabView(trip: trip, viewModel: activeBudgetViewModel)
+                    .navigationTitle("Budget")
+            } else {
+                ContentUnavailableView {
+                    Label("Budget locked", systemImage: "lock.fill")
+                } description: {
+                    Text("You don’t have access to trip expenses. Ask the trip owner if you need access.")
                 }
-
-                NavigationStack {
-                    BookingsScreenView(
-                        trip: trip,
-                        onOpenBudgetTab: collaborationStore.canViewExpenses ? { selectedTab = .budget } : nil
-                    )
-                }
-                .tabItem { Label("Bookings", systemImage: "airplane") }
-                .tag(TripDetailTab.bookings)
-
-                NavigationStack {
-                    TripMapView(trip: trip)
-                }
-                .tabItem { Label("Map", systemImage: "map.fill") }
-                .tag(TripDetailTab.map)
-
-                if collaborationStore.canEdit {
-                    Color.clear
-                        .tabItem { Label("AI", systemImage: "sparkles") }
-                        .tag(TripDetailTab.ai)
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .navigationTitle("Budget")
             }
-        } else {
-            TripsListView()
-        }
-    }
-
-    // MARK: Home tab in detail mode — returns to trip list
-
-    private var tripListReturnView: some View {
-        NavigationStack {
-            TripDetailView(
-                trip: coordinator.activeTrip!,
-                onViewModelCreated: { viewModel in
-                    activeTripDetailViewModel = viewModel
-                    attachRealtimeIfReady()
-                },
-                onOpenBudgetTab: { selectedTab = .budget },
-                budgetViewModel: activeBudgetViewModel
+        case .bookings:
+            BookingsScreenView(
+                trip: trip,
+                onOpenBudgetTab: { tripModulePath = [.budget] }
             )
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            coordinator.returnToList()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.left")
-                                Text("Trips")
-                            }
-                            .foregroundStyle(AppColors.appPrimary)
-                        }
-                    }
-                }
+        case .documents:
+            TripDocumentsView(trip: trip)
+        case .map:
+            if #available(iOS 26.0, *) {
+                MapTabWrapper(trip: trip, mapState: mapTabState)
+            } else {
+                TripMapView(trip: trip)
+            }
         }
     }
 }
@@ -716,35 +625,33 @@ private struct MapTabWrapper: View {
     let mapState: MapTabSharedState
 
     var body: some View {
-        NavigationStack {
-            TripMapView(trip: trip, sharedState: mapState)
-        }
-        .onDisappear {
-            mapState.showPlacesSheet = false
-        }
-        .sheet(isPresented: Binding(
-            get: { mapState.showPlacesSheet },
-            set: { mapState.showPlacesSheet = $0 }
-        )) {
-            TripMapPlacesExpandedSheet(
-                trip: trip,
-                selectedDayFilter: Binding(
-                    get: { mapState.selectedDayFilter },
-                    set: { mapState.selectedDayFilter = $0 }
-                ),
-                allPlacesForList: mapState.mappablePlaces,
-                dayNumberByDayId: mapState.dayNumberByDayId,
-                onSelectPlace: { place in
-                    mapState.showPlacesSheet = false
-                    mapState.selectedPlaceToFocus = place
-                }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationContentInteraction(.scrolls)
-            .presentationBackground(.regularMaterial)
-            .presentationDragIndicator(.hidden)
-            .tint(AppColors.appPrimary)
-        }
+        TripMapView(trip: trip, sharedState: mapState)
+            .onDisappear {
+                mapState.showPlacesSheet = false
+            }
+            .sheet(isPresented: Binding(
+                get: { mapState.showPlacesSheet },
+                set: { mapState.showPlacesSheet = $0 }
+            )) {
+                TripMapPlacesExpandedSheet(
+                    trip: trip,
+                    selectedDayFilter: Binding(
+                        get: { mapState.selectedDayFilter },
+                        set: { mapState.selectedDayFilter = $0 }
+                    ),
+                    allPlacesForList: mapState.mappablePlaces,
+                    dayNumberByDayId: mapState.dayNumberByDayId,
+                    onSelectPlace: { place in
+                        mapState.showPlacesSheet = false
+                        mapState.selectedPlaceToFocus = place
+                    }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationContentInteraction(.scrolls)
+                .presentationBackground(.regularMaterial)
+                .presentationDragIndicator(.hidden)
+                .tint(AppColors.appPrimary)
+            }
     }
 }
 
@@ -939,14 +846,3 @@ private struct DisplayNamePromptView: View {
     }
 }
 
-// MARK: - Tab bar minimize on scroll (iOS 26+)
-
-private struct ScrollDownMinimizeTabBarModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.tabBarMinimizeBehavior(.onScrollDown)
-        } else {
-            content
-        }
-    }
-}

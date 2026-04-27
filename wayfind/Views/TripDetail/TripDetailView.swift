@@ -26,7 +26,6 @@ struct TripDetailView: View {
     // Sheet state
     @State private var showTripNotes = false
     @State private var showTripChecklists = false
-    @State private var showTripDocuments = false
     @State private var showAddPlace = false
     @State private var showAddBooking = false
     @State private var addPlaceTargetDay: Int = 1
@@ -207,9 +206,6 @@ struct TripDetailView: View {
         .navigationDestination(isPresented: $showTripNotes) {
             TripNotesView(trip: viewModel?.trip ?? trip)
         }
-        .navigationDestination(isPresented: $showTripDocuments) {
-            TripDocumentsView(trip: viewModel?.trip ?? trip)
-        }
         .navigationDestination(isPresented: $showTripChecklists) {
             TripChecklistsView(trip: viewModel?.trip ?? trip)
         }
@@ -224,26 +220,14 @@ struct TripDetailView: View {
             }
         }
         // Per-surface access revocation (Phase 1.5): if the owner removes
-        // access while a member is currently in Notes or Documents, the
-        // realtime layer (Phase 3) flips the gate and we gracefully bail
-        // out of the pushed view + show an explanatory toast. The toast
-        // copy leads with what happened (not "permission error") and
-        // names the surface so the user knows exactly what's gone.
+        // access while a member is currently in Notes, the realtime layer
+        // (Phase 3) flips the gate and we bail out of the pushed view +
+        // toast. Documents is popped from the hub stack in `AppRootTabView`.
         .onChange(of: collaborationStore.canViewNotes) { _, canView in
             if !canView, showTripNotes {
                 showTripNotes = false
                 toastManager.show(ToastData(
                     message: "The owner removed your access to notes",
-                    type: .warning,
-                    duration: 3
-                ))
-            }
-        }
-        .onChange(of: collaborationStore.canViewDocuments) { _, canView in
-            if !canView, showTripDocuments {
-                showTripDocuments = false
-                toastManager.show(ToastData(
-                    message: "The owner removed your access to documents",
                     type: .warning,
                     duration: 3
                 ))
@@ -349,23 +333,12 @@ struct TripDetailView: View {
         .background(AppColors.appBackground)
         .navigationTitle(showInlineTripTitle ? (viewModel?.trip.title ?? trip.title) : "")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        // Use the app's solid background color rather than the system's
-        // translucent material so scrolled content (e.g. the forwarding
-        // banner) cannot ghost through the nav as it scrolls past.
-        .toolbarBackground(AppColors.appBackground, for: .navigationBar)
-        .toolbarBackground(
-            (showInlineTripTitle || isDayHeaderPinnedToNavigation) ? .visible : .hidden,
-            for: .navigationBar
-        )
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if showTripMembersInNavigationBar {
-                    HStack(spacing: AppSpacing.sm) {
-                        TripMembersAvatarStack(onTap: {}, heroOnPhoto: false, allowsTap: false)
-                        TripMembersInviteButton(heroOnPhoto: false) {
-                            showMembersSheet = true
-                        }
+                    TripMembersAvatarStack(onTap: {}, heroOnPhoto: false, allowsTap: false)
+                    TripMembersInviteButton(heroOnPhoto: false) {
+                        showMembersSheet = true
                     }
                 }
 
@@ -436,8 +409,6 @@ struct TripDetailView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 17))
-                        .foregroundStyle(AppColors.appPrimary)
                 }
                 .accessibilityLabel("Trip actions")
             }
@@ -697,10 +668,10 @@ struct TripDetailView: View {
                     showTripChecklists = true
                 }
                 // Per-surface access (Phase 1.5): the owner can revoke a
-                // member's view of Notes / Documents independently of the
-                // member's edit role. When revoked the pill disappears
-                // entirely so the member doesn't tap into a screen they
-                // can't open. Owners always see all pills.
+                // member's view of Notes independently of the member's edit
+                // role. When revoked the pill disappears entirely. Documents
+                // lives on the trip hub bottom bar; revocation pops that push
+                // from `AppRootTabView`.
                 if collaborationStore.canViewNotes {
                     PillButtonView(
                         sfSymbol: "note.text",
@@ -711,18 +682,6 @@ struct TripDetailView: View {
                     ) {
                         HapticManager.light()
                         showTripNotes = true
-                    }
-                }
-                if collaborationStore.canViewDocuments {
-                    PillButtonView(
-                        sfSymbol: "doc.text",
-                        label: "Documents",
-                        trailingDetail: nil,
-                        isActive: true,
-                        iconTint: TripToolPillIconAccent.documents
-                    ) {
-                        HapticManager.light()
-                        showTripDocuments = true
                     }
                 }
             }
@@ -1329,6 +1288,102 @@ extension TripDetailView {
     }
 }
 
+// Lives in this file so SwiftUI canvas typechecking (single-file) always sees the hub next to `#Preview`.
+/// iOS 26+: Map | spacer | Budget + Bookings + Documents | spacer | AI. Earlier OS: one `ToolbarItemGroup` (no spacers).
+struct TripDetailHubBottomBar: ToolbarContent {
+    var showsAI: Bool
+    var showsDocuments: Bool
+    var onMap: () -> Void
+    var onBudget: () -> Void
+    var onBookings: () -> Void
+    var onDocuments: () -> Void
+    var onAI: () -> Void
+
+    var body: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItemGroup(placement: .bottomBar) {
+                mapButton
+            }
+            ToolbarSpacer(.flexible, placement: .bottomBar)
+            ToolbarItemGroup(placement: .bottomBar) {
+                budgetBookingsDocumentsButtons
+            }
+            if showsAI {
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItem(placement: .bottomBar) {
+                    aiButton
+                }
+            }
+        } else {
+            ToolbarItemGroup(placement: .bottomBar) {
+                mapButton
+                budgetBookingsDocumentsButtons
+                if showsAI {
+                    aiButton
+                }
+            }
+        }
+    }
+
+    private var mapButton: some View {
+        Button(action: onMap) {
+            Image(systemName: "map.fill")
+        }
+        .tint(.primary)
+        .accessibilityLabel(String(localized: "Map"))
+        .accessibilityHint(
+            String(localized: "Opens the map for this trip. Tap Back to return to the itinerary.")
+        )
+    }
+
+    private var budgetBookingsDocumentsButtons: some View {
+        Group {
+            Button(action: onBudget) {
+                Image(systemName: "creditcard")
+            }
+            .tint(.primary)
+            .accessibilityLabel(String(localized: "Budget"))
+            .accessibilityHint(
+                String(localized: "Opens the budget for this trip. Tap Back to return to the itinerary.")
+            )
+
+            Button(action: onBookings) {
+                Image(systemName: "suitcase.fill")
+            }
+            .tint(.primary)
+            .accessibilityLabel(String(localized: "Bookings"))
+            .accessibilityHint(
+                String(localized: "Opens bookings for this trip. Tap Back to return to the itinerary.")
+            )
+
+            if showsDocuments {
+                Button(action: onDocuments) {
+                    Image(systemName: "doc.text")
+                }
+                .tint(.primary)
+                .accessibilityLabel(String(localized: "Documents"))
+                .accessibilityHint(
+                    String(localized: "Opens documents for this trip. Tap Back to return to the itinerary.")
+                )
+            }
+        }
+    }
+
+    private var aiButton: some View {
+        Button {
+            HapticManager.light()
+            onAI()
+        } label: {
+            Image(systemName: "sparkles")
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(AppColors.appPrimary)
+        }
+        .tint(AppColors.appPrimary)
+        .accessibilityLabel(String(localized: "AI"))
+        .accessibilityHint(String(localized: "Opens the day planner for this trip."))
+    }
+}
+
 #if DEBUG
 private enum TripDetailView_Previews {}
 
@@ -1344,11 +1399,26 @@ private struct TripDetailPreviewHost: View {
     var body: some View {
         NavigationStack {
             TripDetailView(trip: trip)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Label("Trips", systemImage: "chevron.backward")
+                            .allowsHitTesting(false)
+                    }
+                    TripDetailHubBottomBar(
+                        showsAI: true,
+                        showsDocuments: true,
+                        onMap: {},
+                        onBudget: {},
+                        onBookings: {},
+                        onDocuments: {},
+                        onAI: {}
+                    )
+                }
         }
         .environment(dataService)
         .environment(toastManager)
         .environment(collaborationStore)
-        .onAppear {
+        .task(id: trip.id) {
             collaborationStore.bind(to: trip.id)
         }
     }
@@ -1356,10 +1426,12 @@ private struct TripDetailPreviewHost: View {
 
 #Preview("Trip detail — Paris (mock timeline)") {
     TripDetailPreviewHost(trip: .preview)
+        .frame(width: 402, height: 874)
 }
 
 #Preview("Trip detail — active dates") {
     TripDetailPreviewHost(trip: .previewActive)
+        .frame(width: 402, height: 874)
 }
 #endif
 
