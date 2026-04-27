@@ -2,9 +2,9 @@
 //  TripMembersAvatarStack.swift
 //  wayfind
 //
-//  Overlapping collaborator avatars beside the trip Share control. Avatars
+//  Overlapping collaborator avatars beside the trip Invite control. Avatars
 //  show accepted collaborators only (not the owner). Tap-to-open-members
-//  is handled by `TripMembersShareButton`; set `allowsTap` to false so the
+//  is handled by `TripMembersInviteButton`; set `allowsTap` to false so the
 //  stack is display-only.
 //
 
@@ -15,7 +15,7 @@ struct TripMembersAvatarStack: View {
     let onTap: () -> Void
     /// High-contrast styling for overlapping avatars on the trip hero (dark scrim / photo).
     var heroOnPhoto: Bool = false
-    /// When false, avatars are not a button (Share opens the members sheet).
+    /// When false, avatars are not a button (Invite opens the members sheet).
     var allowsTap: Bool = true
 
     private let displayLimit = 3
@@ -133,10 +133,10 @@ struct TripMembersAvatarStack: View {
     }
 }
 
-// MARK: - Share → members sheet
+// MARK: - Invite → members sheet
 
 /// Opens `TripMembersSheet` (bottom sheet). Placed to the right of collaborator avatars.
-struct TripMembersShareButton: View {
+struct TripMembersInviteButton: View {
     var heroOnPhoto: Bool
     let action: () -> Void
 
@@ -146,9 +146,9 @@ struct TripMembersShareButton: View {
             action()
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: "square.and.arrow.up")
+                Image(systemName: "person.badge.plus")
                     .font(.system(size: 14, weight: .semibold))
-                Text("Share")
+                Text(String(localized: "Invite"))
                     .font(.subheadline.weight(.semibold))
             }
             .foregroundStyle(heroOnPhoto ? Color.white : AppColors.appPrimary)
@@ -160,8 +160,8 @@ struct TripMembersShareButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(String(localized: "Share"))
-        .accessibilityHint(String(localized: "Opens trip members"))
+        .accessibilityLabel(String(localized: "Invite"))
+        .accessibilityHint(String(localized: "Opens trip members and invite options"))
     }
 
     private var shareBackground: some View {

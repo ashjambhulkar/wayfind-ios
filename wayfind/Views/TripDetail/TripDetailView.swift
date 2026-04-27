@@ -363,7 +363,7 @@ struct TripDetailView: View {
                 if showTripMembersInNavigationBar {
                     HStack(spacing: AppSpacing.sm) {
                         TripMembersAvatarStack(onTap: {}, heroOnPhoto: false, allowsTap: false)
-                        TripMembersShareButton(heroOnPhoto: false) {
+                        TripMembersInviteButton(heroOnPhoto: false) {
                             showMembersSheet = true
                         }
                     }
@@ -556,7 +556,7 @@ struct TripDetailView: View {
                         trip: viewModel.trip,
                         topBleed: KeyWindowSafeArea.topInset,
                         showMembersCluster: !showInlineTripTitle,
-                        onShareMembers: { showMembersSheet = true }
+                        onInviteMembers: { showMembersSheet = true }
                     )
 
                     LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
@@ -1139,7 +1139,7 @@ private struct TripDetailHeroHeader: View {
     let trip: Trip
     var topBleed: CGFloat = 0
     var showMembersCluster: Bool = false
-    var onShareMembers: () -> Void = {}
+    var onInviteMembers: () -> Void = {}
 
     private var statusLabel: String {
         switch trip.status {
@@ -1215,7 +1215,7 @@ private struct TripDetailHeroHeader: View {
                     if showMembersCluster {
                         HStack(alignment: .center, spacing: AppSpacing.sm) {
                             TripMembersAvatarStack(onTap: {}, heroOnPhoto: true, allowsTap: false)
-                            TripMembersShareButton(heroOnPhoto: true, action: onShareMembers)
+                            TripMembersInviteButton(heroOnPhoto: true, action: onInviteMembers)
                         }
                         .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 2)
                     }

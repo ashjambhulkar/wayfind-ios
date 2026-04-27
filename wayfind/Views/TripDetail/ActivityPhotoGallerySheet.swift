@@ -43,29 +43,28 @@ struct ActivityPhotoGallerySheet: View {
             }
             .navigationTitle(activityTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    if imageAttachments.count > 1 {
-                        Text("\(pageIndex + 1) / \(imageAttachments.count)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.9))
-                    }
-                }
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "chevron.backward")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 36, height: 36)
-                            .background(Color.white.opacity(0.14))
-                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(String(localized: "Back"))
+                    .accessibilityLabel(String(localized: "Close"))
+                }
+                if imageAttachments.count > 1 {
+                    ToolbarItem(placement: .primaryAction) {
+                        Text("\(pageIndex + 1) / \(imageAttachments.count)")
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .accessibilityLabel(
+                                String(localized: "Photo \(pageIndex + 1) of \(imageAttachments.count)")
+                            )
+                    }
                 }
             }
             .task {
@@ -85,6 +84,8 @@ struct ActivityPhotoGallerySheet: View {
                 }
             }
         }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 }
 

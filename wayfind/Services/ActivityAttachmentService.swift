@@ -394,7 +394,7 @@ final class ActivityAttachmentService {
             try? await Task.sleep(nanoseconds: 200_000_000)
             switch pending.status {
             case .completed:
-                await reload()
+                await reloadAfterUpload()
                 return
             case .failed:
                 return
@@ -402,6 +402,14 @@ final class ActivityAttachmentService {
                 continue
             }
         }
+    }
+
+    /// Post-upload list refresh: immediate + short delayed pass so the new row
+    /// and signed URLs show up without closing the sheet (read lag / observation).
+    private func reloadAfterUpload() async {
+        await reload()
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        await reload()
     }
 }
 

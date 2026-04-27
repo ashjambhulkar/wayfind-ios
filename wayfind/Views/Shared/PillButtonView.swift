@@ -21,7 +21,7 @@ enum TripToolPillIconAccent {
     )
 }
 
-// MARK: - Trip tool capsule metrics (aligned with `TripMembersShareButton`)
+// MARK: - Trip tool capsule metrics (aligned with `TripMembersInviteButton`)
 
 private enum TripToolCapsuleMetrics {
     static let horizontalPadding: CGFloat = 12

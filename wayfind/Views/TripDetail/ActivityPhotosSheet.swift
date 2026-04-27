@@ -63,9 +63,14 @@ struct ActivityPhotosSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(String(localized: "Close")) {
+                    Button {
                         dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 17, weight: .semibold))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(String(localized: "Close"))
                 }
                 ToolbarItem(placement: .primaryAction) {
                     if canEditAttachments {
@@ -114,6 +119,8 @@ struct ActivityPhotosSheet: View {
                 Task { await handlePicked(items: newItems) }
             }
         }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 
     // MARK: - Sections
@@ -121,7 +128,13 @@ struct ActivityPhotosSheet: View {
     private var uploadProgressSection: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             ForEach(pendingUploads) { upload in
-                UploadProgressRow(upload: upload, onClear: { clearUpload(id: upload.id) })
+                UploadProgressRow(
+                    upload: upload,
+                    onClear: { clearUpload(id: upload.id) },
+                    onUploadFinished: {
+                        Task { await service?.reload() }
+                    }
+                )
             }
         }
     }
@@ -129,7 +142,12 @@ struct ActivityPhotosSheet: View {
     private var skeletonGrid: some View {
         LazyVGrid(columns: gridColumns, spacing: AppSpacing.md) {
             ForEach(0..<6, id: \.self) { _ in
-                SkeletonView(cornerRadius: AppCornerRadius.medium, height: tileSize)
+                GeometryReader { geo in
+                    let side = geo.size.width
+                    SkeletonView(cornerRadius: AppCornerRadius.medium, height: side)
+                        .frame(width: side, height: side)
+                }
+                .aspectRatio(1, contentMode: .fit)
             }
         }
     }
@@ -183,19 +201,23 @@ struct ActivityPhotosSheet: View {
     private func gridSection(attachments: [ActivityAttachment], canEdit: Bool) -> some View {
         LazyVGrid(columns: gridColumns, spacing: AppSpacing.md) {
             ForEach(Array(attachments.enumerated()), id: \.element.id) { idx, att in
-                AttachmentTile(
-                    attachment: att,
-                    index: idx,
-                    total: attachments.count,
-                    canEdit: canEdit,
-                    onSetCover: {
-                        Task { await service?.setCover(attachmentId: att.id) }
-                    },
-                    onDelete: {
-                        Task { await service?.delete(attachmentId: att.id) }
-                    }
-                )
-                .frame(height: tileSize)
+                GeometryReader { geo in
+                    let side = geo.size.width
+                    AttachmentTile(
+                        attachment: att,
+                        index: idx,
+                        total: attachments.count,
+                        canEdit: canEdit,
+                        onSetCover: {
+                            Task { await service?.setCover(attachmentId: att.id) }
+                        },
+                        onDelete: {
+                            Task { await service?.delete(attachmentId: att.id) }
+                        }
+                    )
+                    .frame(width: side, height: side)
+                }
+                .aspectRatio(1, contentMode: .fit)
             }
         }
     }
@@ -205,10 +227,6 @@ struct ActivityPhotosSheet: View {
     private var gridColumns: [GridItem] {
         let count = sizeClass == .regular ? 4 : 3
         return Array(repeating: GridItem(.flexible(), spacing: AppSpacing.md), count: count)
-    }
-
-    private var tileSize: CGFloat {
-        sizeClass == .regular ? 140 : 110
     }
 
     private var remainingSlots: Int {
@@ -268,20 +286,26 @@ private struct AttachmentTile: View {
         ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
                 .fill(AppColors.appSurface)
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-            } else {
-                SkeletonView(cornerRadius: AppCornerRadius.medium, height: 200)
+            Group {
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    GeometryReader { geo in
+                        SkeletonView(cornerRadius: AppCornerRadius.medium, height: geo.size.height)
+                    }
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
             if attachment.isCover {
                 coverBadge
                     .padding(AppSpacing.xs)
             }
         }
-        .clipped()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
         .contextMenu {
             if canEdit {
                 if !attachment.isCover && attachment.isImage {
@@ -349,6 +373,10 @@ private struct AttachmentTile: View {
 private struct UploadProgressRow: View {
     let upload: PendingAttachmentUpload
     let onClear: () -> Void
+    /// Fired once when the upload reaches `.completed` so the parent can refresh the grid.
+    var onUploadFinished: (() -> Void)? = nil
+
+    @State private var didNotifyCompletion = false
 
     var body: some View {
         HStack(spacing: AppSpacing.md) {
@@ -375,6 +403,11 @@ private struct UploadProgressRow: View {
         .padding(.horizontal, AppSpacing.md)
         .padding(.vertical, AppSpacing.sm)
         .background(AppColors.appSurface, in: RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+        .onChange(of: upload.status) { _, newStatus in
+            guard !didNotifyCompletion, case .completed = newStatus else { return }
+            didNotifyCompletion = true
+            onUploadFinished?()
+        }
     }
 
     @ViewBuilder

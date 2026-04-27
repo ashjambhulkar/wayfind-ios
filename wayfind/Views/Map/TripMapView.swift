@@ -1789,4 +1789,27 @@ private extension CategoryPill {
     }
 }
 
+#if DEBUG
+// MARK: - Previews
+
+/// Canvas / `#Preview` host: same shape as the Map tab (`NavigationStack` + shared state for the places strip).
+/// Uses `Trip.preview` so `MockDataService` timeline loads when `AppConfig.useRealBackend` is `false`.
+private struct TripMapViewPreviewHost: View {
+    @State private var dataService = DataService()
+    @State private var mapTabState = MapTabSharedState()
+
+    var body: some View {
+        NavigationStack {
+            TripMapView(trip: .preview, sharedState: mapTabState)
+        }
+        .environment(dataService)
+        .tint(AppColors.appPrimary)
+    }
+}
+
+#Preview("Trip map — Paris") {
+    TripMapViewPreviewHost()
+}
+#endif
+
 // =============================================================================

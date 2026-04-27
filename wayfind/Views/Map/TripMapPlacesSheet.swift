@@ -4,11 +4,11 @@ import UIKit
 
 // MARK: - Places Sheet
 
-/// Day-list-only sheet shown above the tab bar when the user expands the
-/// accessory. Search now lives in the floating `MapSearchPill` on top of
-/// the map (Phase 3), so this sheet has only one job: list the places we
-/// already added to each day.
+/// Day-list-only sheet: day filters + places list. Owns a `NavigationStack` with an
+/// inline title and dismiss control when presented from `.sheet`.
 struct TripMapPlacesExpandedSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
     let trip: Trip
     @Binding var selectedDayFilter: Int?
     let allPlacesForList: [Place]
@@ -16,63 +16,52 @@ struct TripMapPlacesExpandedSheet: View {
     let onSelectPlace: (Place) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            expandedHeader
+        NavigationStack {
+            VStack(spacing: 0) {
+                filterChrome
 
-            Divider().opacity(0.45)
+                Divider()
 
-            TripMapPlacesDayListContent(
-                trip: trip,
-                selectedDayFilter: $selectedDayFilter,
-                allPlacesForList: allPlacesForList,
-                dayNumberByDayId: dayNumberByDayId,
-                onSelectPlace: onSelectPlace,
-                showsDayTabs: false
-            )
+                TripMapPlacesDayListContent(
+                    trip: trip,
+                    selectedDayFilter: $selectedDayFilter,
+                    allPlacesForList: allPlacesForList,
+                    dayNumberByDayId: dayNumberByDayId,
+                    onSelectPlace: onSelectPlace,
+                    showsDayTabs: false
+                )
+            }
+            .navigationTitle(String(localized: "Activities"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.regularMaterial, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        HapticManager.light()
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel(String(localized: "Close"))
+                }
+            }
         }
         .background(.regularMaterial)
+        .ignoresSafeArea()
     }
 
-    private var expandedHeader: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
-            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Places")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(.primary)
-                    Text(expandedSubtitle)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 0)
-
-                Text("\(allPlacesForList.count)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, AppSpacing.sm)
-                    .padding(.vertical, 5)
-                    .background(Color(UIColor.tertiarySystemFill), in: Capsule())
-                    .accessibilityLabel("\(allPlacesForList.count) places")
-            }
-            .padding(.horizontal, AppSpacing.lg)
-
-            DayFilterChipsView(
-                selectedDay: $selectedDayFilter,
-                dayCount: max(trip.dayCount, 1),
-                unselectedSystemFill: true
-            )
-            .padding(.horizontal, AppSpacing.md)
-        }
-        .padding(.top, AppSpacing.lg)
-        .padding(.bottom, AppSpacing.md)
-    }
-
-    private var expandedSubtitle: String {
-        if let selectedDayFilter {
-            return "Showing Day \(selectedDayFilter)"
-        }
-        return "All days on this map"
+    private var filterChrome: some View {
+        DayFilterChipsView(
+            selectedDay: $selectedDayFilter,
+            dayCount: max(trip.dayCount, 1),
+            controlSize: .regular
+        )
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.top, AppSpacing.xs)
+        .padding(.bottom, AppSpacing.sm)
     }
 }
 
@@ -89,7 +78,7 @@ struct MapPlacesMinimizedAccessory: View {
             DayFilterChipsView(
                 selectedDay: $selectedDayFilter,
                 dayCount: max(trip.dayCount, 1),
-                unselectedSystemFill: true
+                controlSize: .small
             )
             .frame(maxHeight: .infinity, alignment: .center)
             .padding(.horizontal, AppSpacing.xs)
@@ -125,8 +114,10 @@ struct MapPlacesMinimizedAccessory: View {
             }
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(allPlacesForList.count) places on map. Double tap to expand.")
-        .accessibilityAction(named: Text("Expand places")) {
+        .accessibilityLabel(
+            String(localized: "\(allPlacesForList.count) activities on map. Double tap to expand.")
+        )
+        .accessibilityAction(named: Text(String(localized: "Expand activities"))) {
             onExpand()
         }
     }
@@ -228,13 +219,14 @@ private struct TripMapPlacesDayListContent: View {
                 Section {
                     ForEach(places) { place in
                         placeRow(place)
-                            .listRowInsets(EdgeInsets(top: AppSpacing.xs, leading: AppSpacing.lg, bottom: AppSpacing.xs, trailing: AppSpacing.lg))
+                            .listRowInsets(EdgeInsets(top: 10, leading: AppSpacing.lg, bottom: 10, trailing: AppSpacing.lg))
                             .listRowBackground(AppColors.appSurface)
                     }
                 }
             }
         }
         .listStyle(.insetGrouped)
+        .listRowSpacing(6)
         .scrollContentBackground(.hidden)
         .background(.clear)
         .scrollDismissesKeyboard(.interactively)
@@ -245,7 +237,7 @@ private struct TripMapPlacesDayListContent: View {
             HapticManager.light()
             onSelectPlace(place)
         } label: {
-            HStack(spacing: 14) {
+            HStack(alignment: .center, spacing: AppSpacing.md) {
                 let iconColor: Color = place.isBooking
                     ? (place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
                     : categoryColor(for: place)
@@ -255,38 +247,38 @@ private struct TripMapPlacesDayListContent: View {
 
                 ZStack {
                     RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                        .fill(iconColor.opacity(0.12))
-                        .frame(width: 42, height: 42)
+                        .fill(iconColor.opacity(0.14))
+                        .frame(width: 44, height: 44)
                     Image(systemName: iconName)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 18, weight: .medium))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(iconColor)
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(place.name)
-                        .font(.body.weight(.semibold))
+                        .font(.body)
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                     if let addr = place.address, !addr.isEmpty {
                         Text(addr)
-                            .font(.footnote)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                            .lineLimit(2)
                     } else {
                         Text(place.isBooking ? "Booking" : place.categoryEnum.label)
-                            .font(.footnote)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
 
-                Spacer(minLength: 8)
+                Spacer(minLength: AppSpacing.sm)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color(UIColor.tertiaryLabel))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .padding(.vertical, AppSpacing.sm)
+            .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -307,19 +299,22 @@ private struct TripMapPlacesDayListContent: View {
     }
 
     private var emptyDayState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "mappin.slash.circle")
-                .font(.system(size: 40))
+        VStack(spacing: AppSpacing.md) {
+            Image(systemName: "mappin.and.ellipse")
+                .font(.system(size: 36))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.secondary)
-            Text("No places yet").font(.headline).foregroundStyle(.primary)
-            Text("Places you add with a location will appear here.")
+            Text(String(localized: "No activities yet"))
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(String(localized: "Activities you add to your itinerary with a location will appear here."))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .padding(.horizontal, AppSpacing.lg)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
+        .padding(.vertical, AppSpacing.xxl)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -385,6 +380,31 @@ private enum TripMapPlacesSheet_Previews {}
         dayNumberByDayId: TripMapPlacesSheet_Previews.dayNumberByDayId,
         onSelectPlace: { _ in }
     )
+}
+
+/// Presents the expanded places UI in a `.sheet` with detents — closest to the map tab experience for Xcode Canvas.
+#Preview("Places sheet — in sheet (Canvas)") {
+    TripMapPlacesExpandedSheetPreviewHost()
+}
+
+private struct TripMapPlacesExpandedSheetPreviewHost: View {
+    @State private var showSheet = true
+    @State private var dayFilter: Int? = nil
+
+    var body: some View {
+        Color.clear
+            .sheet(isPresented: $showSheet) {
+                TripMapPlacesExpandedSheet(
+                    trip: TripMapPlacesSheet_Previews.sampleTrip,
+                    selectedDayFilter: $dayFilter,
+                    allPlacesForList: TripMapPlacesSheet_Previews.samplePlaces,
+                    dayNumberByDayId: TripMapPlacesSheet_Previews.dayNumberByDayId,
+                    onSelectPlace: { _ in }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+    }
 }
 
 #Preview("Places sheet — minimized accessory") {
