@@ -145,6 +145,7 @@ final class SupabaseManager {
 
         let status = SupabaseModelMapping.inferTripStatus(startDate: trip.startDate, endDate: trip.endDate, calendar: calendar)
         let isActive = SupabaseModelMapping.isTripActive(startDate: trip.startDate, endDate: trip.endDate, calendar: calendar)
+        let cityProfile = await resolvedCityProfileForTripCover(trip)
 
         let insert = TripInsert(
             user_id: userId,
@@ -161,9 +162,9 @@ final class SupabaseManager {
             privacy: "private",
             total_budget: trip.totalBudget.map(DecimalCodec.init),
             budget_currency: trip.budgetCurrencyCode,
-            city_profile_id: trip.cityProfileId,
-            lat: trip.lat,
-            lng: trip.lng
+            city_profile_id: cityProfile.id,
+            lat: cityProfile.lat,
+            lng: cityProfile.lng
         )
 
         let created: TripRow = try await client
@@ -196,7 +197,117 @@ final class SupabaseManager {
             )
         }
         try await client.from("trip_days").insert([ideasRow] + scheduledRows).execute()
-        return Self.mapTripRow(created)
+
+        var mapped = Self.mapTripRow(created)
+        if mapped.coverImageUrl == nil, let cityProfileId = cityProfile.id {
+            if let cover = await pickCachedCityCover(
+                cityProfileId: cityProfileId,
+                tripId: created.id
+            ) {
+                let didPatch = await patchTripCover(
+                    client: client,
+                    tripId: created.id,
+                    cover: cover
+                )
+                if didPatch {
+                    mapped.coverImageUrl = cover.imageUrl
+                    mapped.coverImageAttribution = cover.attribution
+                }
+            }
+        }
+        return mapped
+    }
+
+    private func resolvedCityProfileForTripCover(_ trip: Trip) async -> (id: UUID?, lat: Double?, lng: Double?) {
+        if let id = trip.cityProfileId {
+            if let lat = trip.lat, let lng = trip.lng {
+                return (id, lat, lng)
+            }
+            if let coords = await fetchCityProfileCenterCoords(id: id) {
+                return (id, coords.lat, coords.lng)
+            }
+            return (id, trip.lat, trip.lng)
+        }
+
+        guard let id = await resolveCityProfileId(forTrip: trip) else {
+            return (nil, trip.lat, trip.lng)
+        }
+        if let coords = await fetchCityProfileCenterCoords(id: id) {
+            return (id, coords.lat, coords.lng)
+        }
+        return (id, trip.lat, trip.lng)
+    }
+
+    private struct CityProfileCoverSelection: Sendable {
+        let imageUrl: String
+        let attribution: String?
+    }
+
+    private func pickCachedCityCover(
+        cityProfileId: UUID,
+        tripId: UUID
+    ) async -> CityProfileCoverSelection? {
+        guard let client = AuthSessionService.shared.client else { return nil }
+
+        nonisolated struct Params: Encodable, Sendable {
+            let p_city_profile_id: String
+            let p_trip_id: String
+        }
+        struct Row: Decodable {
+            let image_url: String
+            let cover_attribution: String?
+        }
+
+        do {
+            let rows: [Row] = try await client
+                .rpc(
+                    "pick_city_profile_cover_image",
+                    params: Params(
+                        p_city_profile_id: cityProfileId.uuidString.lowercased(),
+                        p_trip_id: tripId.uuidString.lowercased()
+                    )
+                )
+                .execute()
+                .value
+            guard let row = rows.first, !row.image_url.isEmpty else { return nil }
+            return CityProfileCoverSelection(
+                imageUrl: row.image_url,
+                attribution: row.cover_attribution
+            )
+        } catch {
+            #if DEBUG
+            print("[city_profile_covers] pick failed: \(error)")
+            #endif
+            return nil
+        }
+    }
+
+    private func patchTripCover(
+        client: SupabaseClient,
+        tripId: UUID,
+        cover: CityProfileCoverSelection
+    ) async -> Bool {
+        nonisolated struct Patch: Encodable, Sendable {
+            let cover_image_url: String
+            let cover_attribution: String?
+        }
+
+        do {
+            try await client
+                .from("trips")
+                .update(Patch(
+                    cover_image_url: cover.imageUrl,
+                    cover_attribution: cover.attribution
+                ))
+                .eq("id", value: tripId.uuidString.lowercased())
+                .execute()
+            return true
+        } catch {
+            #if DEBUG
+            print("[city_profile_covers] trip cover patch failed: \(error)")
+            #endif
+            return false
+        }
     }
 
     func updateTrip(_ trip: Trip) async throws {

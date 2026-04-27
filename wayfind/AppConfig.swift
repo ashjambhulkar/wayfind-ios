@@ -42,6 +42,13 @@ enum AppConfig {
     /// Phase B.5.
     static let useNewPlacesAPIForAutocomplete: Bool = true
 
+    // MARK: - Launch access
+
+    /// Temporary launch switch: while `true`, every signed-in user gets
+    /// premium feature access without being treated as a paid subscriber.
+    /// Flip to `false` in the release that re-enables paid plans.
+    static let grantFreeLaunchPremiumAccess: Bool = true
+
     // MARK: - RevenueCat (Wave 4.2)
 
     /// Apple App Store **public** API key from the RevenueCat dashboard

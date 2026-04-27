@@ -81,6 +81,22 @@ struct TripDetailView: View {
         viewModel?.totalBookingsCount ?? 0
     }
 
+    private var checklistToolbarAccessibilityLabel: String {
+        guard let viewModel, viewModel.checklistTotalCount > 0 else {
+            return String(localized: "Checklist")
+        }
+        return String(
+            localized: "Checklist, \(viewModel.checklistDoneCount) of \(viewModel.checklistTotalCount) complete"
+        )
+    }
+
+    private var notesToolbarAccessibilityLabel: String {
+        guard let viewModel, viewModel.noteCount > 0 else {
+            return String(localized: "Notes")
+        }
+        return String(localized: "Notes, \(viewModel.noteCount)")
+    }
+
     /// Hero (cover + title) is on-screen only after the initial timeline load.
     private var tripDetailShowsHeroWithContent: Bool {
         guard let viewModel else { return false }
@@ -342,6 +358,28 @@ struct TripDetailView: View {
                     }
                 }
 
+                Button {
+                    HapticManager.light()
+                    showTripChecklists = true
+                } label: {
+                    Image(systemName: "checklist")
+                }
+                .tint(.primary)
+                .accessibilityLabel(checklistToolbarAccessibilityLabel)
+                .accessibilityHint("Opens the checklist for this trip.")
+
+                if collaborationStore.canViewNotes {
+                    Button {
+                        HapticManager.light()
+                        showTripNotes = true
+                    } label: {
+                        Image(systemName: "note.text")
+                    }
+                    .tint(.primary)
+                    .accessibilityLabel(notesToolbarAccessibilityLabel)
+                    .accessibilityHint("Opens notes for this trip.")
+                }
+
                 Menu {
                     if collaborationStore.canManage {
                         // Owner-only: Edit Trip wraps a destructive cascade
@@ -531,8 +569,6 @@ struct TripDetailView: View {
                     )
 
                     LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        pillsRow(viewModel: viewModel)
-
                         if !viewModel.scheduledDays.isEmpty {
                             HStack(alignment: .center, spacing: AppSpacing.md) {
                                 Text(String(localized: "Itinerary"))
@@ -646,47 +682,6 @@ struct TripDetailView: View {
             .task(id: tripTimelineTimeZoneRefreshKey(viewModel)) {
                 await refreshTripTimelineGeocodedTimeZone(for: viewModel)
             }
-        }
-    }
-
-    // MARK: - Pills Row
-
-    private func pillsRow(viewModel: TripDetailViewModel) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            // Trip tool pills: neutral capsule; icon accents via `TripToolPillIconAccent`.
-            HStack(spacing: AppSpacing.md) {
-                PillButtonView(
-                    sfSymbol: "checklist",
-                    label: "Checklist",
-                    trailingDetail: viewModel.checklistTotalCount > 0
-                        ? " \(viewModel.checklistDoneCount)/\(viewModel.checklistTotalCount)"
-                        : nil,
-                    isActive: true,
-                    iconTint: TripToolPillIconAccent.checklist
-                ) {
-                    HapticManager.light()
-                    showTripChecklists = true
-                }
-                // Per-surface access (Phase 1.5): the owner can revoke a
-                // member's view of Notes independently of the member's edit
-                // role. When revoked the pill disappears entirely. Documents
-                // lives on the trip hub bottom bar; revocation pops that push
-                // from `AppRootTabView`.
-                if collaborationStore.canViewNotes {
-                    PillButtonView(
-                        sfSymbol: "note.text",
-                        label: "Notes",
-                        trailingDetail: viewModel.noteCount > 0 ? " \(viewModel.noteCount)" : nil,
-                        isActive: true,
-                        iconTint: TripToolPillIconAccent.notes
-                    ) {
-                        HapticManager.light()
-                        showTripNotes = true
-                    }
-                }
-            }
-            .padding(.horizontal, AppSpacing.lg)
-            .padding(.vertical, AppSpacing.md)
         }
     }
 
@@ -1265,12 +1260,10 @@ extension TripDetailView {
         return flightTracking.tint(of: status)
     }
 
-    /// Wave 4.5 — real entitlement check. Free users see the static
-    /// badge with a lock chip; Pro users see the live status pill that
-    /// pulses on update. Realtime fan-out is filtered server-side so
-    /// free clients don't receive frames they aren't allowed to render.
+    /// Wave 4.5 — effective premium access check. Free-launch and paid
+    /// users see the live status pill that pulses on update.
     fileprivate var isProUserForFlightTracking: Bool {
-        EntitlementService.shared.isPro
+        EntitlementService.shared.hasPremiumAccess
     }
 
     /// Wave 4.5 — central paywall presentation for flight tracking.

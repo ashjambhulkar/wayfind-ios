@@ -32,8 +32,8 @@ struct BudgetHomeCurrencyHeader: View {
     @State private var fallbackUsed: Bool = false
     @State private var error: String?
 
-    private var isPro: Bool {
-        EntitlementService.shared.isPro
+    private var hasPremiumAccess: Bool {
+        EntitlementService.shared.hasPremiumAccess
     }
 
     private var homeCurrency: String {
@@ -57,7 +57,7 @@ struct BudgetHomeCurrencyHeader: View {
             // we don't want their persisted `preferHomeCurrency=true`
             // to keep silently consuming the converted view. Reset
             // before refreshing so the gate is enforced top-down.
-            if !isPro && preferHomeCurrency {
+            if !hasPremiumAccess && preferHomeCurrency {
                 preferHomeCurrency = false
             }
             await refresh()
@@ -67,7 +67,7 @@ struct BudgetHomeCurrencyHeader: View {
     @ViewBuilder
     private var content: some View {
         Button {
-            if isPro {
+            if hasPremiumAccess {
                 preferHomeCurrency.toggle()
                 Task { await refresh() }
             } else {
@@ -105,7 +105,7 @@ struct BudgetHomeCurrencyHeader: View {
                     }
                 }
                 Spacer()
-                if isPro {
+                if hasPremiumAccess {
                     Image(systemName: "arrow.up.arrow.down")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AppColors.appPrimary)
@@ -134,7 +134,7 @@ struct BudgetHomeCurrencyHeader: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint(isPro
+        .accessibilityHint(hasPremiumAccess
             ? "Switches between trip and home currency."
             : "Wayfind Pro required. Opens upgrade screen.")
     }
@@ -160,7 +160,7 @@ struct BudgetHomeCurrencyHeader: View {
             if rateDate.isEmpty { return nil }
             return "Rate from \(rateDate)\(suffix)"
         }
-        return isPro
+        return hasPremiumAccess
             ? "Tap to view in \(homeCurrency)"
             : "Tap to unlock \(homeCurrency) view"
     }

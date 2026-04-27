@@ -129,7 +129,7 @@ struct AIPlanWizardSheet: View {
             }
             Button("Keep previewing", role: .cancel) {}
         } message: {
-            Text("Generating a new plan uses one of your monthly AI credits.")
+            Text(discardConfirmationMessage)
         }
         .onChange(of: vm.plannerState) { _, newState in
             // Phase C handoff: bubble up to the parent the moment the
@@ -162,6 +162,12 @@ struct AIPlanWizardSheet: View {
     private var needsDiscardConfirmation: Bool {
         if case .preview = vm.plannerState { return true }
         return false
+    }
+
+    private var discardConfirmationMessage: String {
+        vm.isProUser
+            ? "You can keep previewing this plan or add it to your itinerary."
+            : "Generating a new plan uses one of your monthly AI credits."
     }
 
     private func attemptDismiss() {

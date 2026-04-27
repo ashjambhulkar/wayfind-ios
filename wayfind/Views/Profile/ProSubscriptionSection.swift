@@ -64,8 +64,12 @@ struct ProSubscriptionSection: View {
     /// avoid double-fires while RevenueCat is in flight.
     @State private var isRestoring: Bool = false
 
-    private var isPro: Bool {
-        EntitlementService.shared.isPro
+    private var isPaidPro: Bool {
+        EntitlementService.shared.isPaidPro
+    }
+
+    private var hasLaunchAccess: Bool {
+        EntitlementService.shared.premiumAccessReason == .freeLaunch
     }
 
     private var revenueCatConfigured: Bool {
@@ -81,10 +85,12 @@ struct ProSubscriptionSection: View {
                 .tracking(1.5)
 
             VStack(spacing: 0) {
-                if isPro {
+                if isPaidPro {
                     proStatusRow
                     Divider().background(AppColors.appDivider)
                     manageSubscriptionRow
+                } else if hasLaunchAccess {
+                    launchAccessRow
                 } else {
                     upgradeRow
                 }
@@ -152,6 +158,41 @@ struct ProSubscriptionSection: View {
         .disabled(isRestoring || !revenueCatConfigured)
         .accessibilityLabel("Manage subscription")
         .accessibilityHint("Opens subscription management. Cancel, pause, or switch plans here.")
+    }
+
+    // MARK: - Free launch state
+
+    private var launchAccessRow: some View {
+        HStack(alignment: .top, spacing: AppSpacing.md) {
+            ZStack {
+                Circle()
+                    .fill(AppColors.appPrimaryLight)
+                    .frame(width: 44, height: 44)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(AppColors.appPrimary)
+            }
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Free during launch")
+                    .font(.cardTitle)
+                    .foregroundStyle(AppColors.textPrimary)
+                Text("Premium features are included while Wayfind launches. We'll share plan updates before payments return.")
+                    .font(.appSmall)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("No payment required right now")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppColors.appPrimary)
+                    .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.vertical, AppSpacing.md)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Free during launch. Premium features are included while Wayfind launches. No payment required right now.")
     }
 
     // MARK: - Free state
@@ -328,7 +369,7 @@ struct ProSubscriptionSection: View {
             // entitlement isn't active. We don't fail the call (the
             // SDK didn't), we just tell the user what happened so
             // they don't think it silently broke.
-            let entitlementActive = info.entitlements.active["wayfind_pro"]?.isActive == true
+            let entitlementActive = info.entitlements.active[EntitlementID.pro]?.isActive == true
             restoreOutcome = entitlementActive ? .restored : .nothingToRestore
         } catch {
             restoreOutcome = .failed(error.localizedDescription)

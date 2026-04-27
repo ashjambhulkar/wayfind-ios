@@ -675,7 +675,7 @@ extension TripBudgetTabView {
     /// hiding it, so users discover the feature exists. This is a
     /// "show, then upsell" pattern — opposite of "hide and surprise".
     fileprivate func exportCSV(viewModel: BudgetViewModel) {
-        if !EntitlementService.shared.isPro {
+        if !EntitlementService.shared.hasPremiumAccess {
             PaywallPresenter.shared.present(
                 .csvExport,
                 dataService: dataService,

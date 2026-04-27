@@ -16,17 +16,17 @@
 //      `horizontalSizeClass` for a single source of truth.
 //
 //  Pro-gating (Wave 4.5):
-//      • Free users: HARD-capped at `perUserSoftLimit` (5) docs they
-//        themselves uploaded for this trip. The nav + is disabled at
-//        the trip ceiling; at the per-user cap, + presents the paywall
-//        and the cap pill does the same.
-//      • Pro users: only the per-trip ceiling (25) applies — the
-//        per-user check is skipped server-side and client-side.
+//      • Users without premium access: HARD-capped at `perUserSoftLimit`
+//        (5) docs they themselves uploaded for this trip. The nav + is
+//        disabled at the trip ceiling; at the per-user cap, + presents
+//        the paywall and the cap pill does the same.
+//      • Paid Pro and free-launch users: only the per-trip ceiling (25)
+//        applies — the per-user check is skipped server-side and client-side.
 //      • Hitting the trip ceiling (25) is a hard error for both tiers
 //        — Pro doesn't unlock more storage, just removes the per-user
 //        cap. Copy in `TripDocumentError.ceilingReached` says so.
-//      • Every gate trip logs `pro_gate_attempted` with `is_pro:false`
-//        through `PaywallPresenter`, which centralises both the
+//      • Every gate trip logs `pro_gate_attempted` through
+//        `PaywallPresenter`, which centralises both the
 //        analytics shape and the placement-specific paywall offering.
 //
 
@@ -357,14 +357,12 @@ struct TripDocumentsView: View {
 
     // MARK: - Helpers
 
-    /// Wave 4.5 — Pro users have no per-user cap (just the trip
-    /// ceiling), so we only surface the upgrade banner / paywall to
-    /// free users. We re-read `EntitlementService.shared.isPro` on
-    /// every render via the @Observable machinery so flipping Pro
-    /// mid-session updates the gate without a re-mount.
+    /// Wave 4.5 — users with effective premium access have no per-user cap
+    /// (just the trip ceiling), so we only surface the upgrade banner /
+    /// paywall to users without launch or paid access.
     private var isFreeUserAtCap: Bool {
         guard let service else { return false }
-        if EntitlementService.shared.isPro { return false }
+        if EntitlementService.shared.hasPremiumAccess { return false }
         return service.quotaSnapshot.hitsPerUserSoftLimit
             && !service.quotaSnapshot.hitsHardCeiling
     }

@@ -27,7 +27,7 @@ Do not rely on memory for table shape. Open the latest migration that created or
 | Collaborative budget | `trip_expenses`, `expense_splits`, `trip_budgets`, `expense_settlements`, expense attachment tables | `BudgetService`, `BudgetViewModel` | Money values should use `DecimalCodec`; triggers denormalize split trip IDs and log collaboration activity. |
 | Collaboration | `trip_collaborators`, `trip_invites`, `trip_activity_log` | `CollaboratorService`, `InviteService`, `TripRealtimeService`, `ActivityFeedService` | Stores membership/access flags and activity feed events. |
 | Notifications | `fcm_tokens`, `notifications`, collaboration throttle tables | `PushNotificationService`, `NotificationManager` | Edge Functions send pushes through the shared notification worker. |
-| Places cache/search | `city_profiles`, `city_places`, `city_travel_times`, `place_cache`, `place_id_bridge`, usage telemetry tables | `CityPlacesSearchService`, `AppleTravelTimesService`, `PlaceIdBridgeService`, `SupabaseManager` | Powers suggested places, travel times, Apple-to-Google bridge, and usage rollups. |
+| Places cache/search | `city_profiles`, `city_places`, `city_profile_cover_images`, `city_profile_cover_fetch_jobs`, `city_profile_cover_assignments`, `city_travel_times`, `place_cache`, `place_id_bridge`, usage telemetry tables | `CityPlacesSearchService`, `AppleTravelTimesService`, `PlaceIdBridgeService`, `SupabaseManager` | Powers suggested places, trip cover pools, travel times, Apple-to-Google bridge, and usage rollups. |
 | User photos | `place_user_photos`, photo events/reports/appeals tables | `PlacePhotoUploadService`, `SupabaseManager` | Moderation and DSA flow lives in functions plus migration triggers. |
 | Payments/subscriptions | `user_subscriptions`, `usage_events`, `processed_webhook_events`, pro gate tables | `EntitlementService`, `PaywallPresenter` | RevenueCat webhook, reconciliation, validation, idempotency, and usage limits. |
 | Forwarded email/imports | `email_forwarding_queue`, `user_forwarding_addresses`, parsed booking tables | booking/import services and functions | Inbound email, extraction, processing, and notification flow. |
@@ -43,6 +43,7 @@ Do not rely on memory for table shape. Open the latest migration that created or
 | `lookup-place-id` | iOS place bridge flow | Resolve Apple/coordinate/name data to Google place IDs with rate limiting. |
 | `sync-city-place-from-trip` | app/backend after adding place-backed activities | Upsert trip places into the city place pool. |
 | `city-place-enricher` | cron/worker secret | Claim enrichment jobs and hydrate city place details. |
+| `city-cover-images` | cron/worker secret | Fill per-city Unsplash cover pools, enforce Unsplash quota, and track download events. |
 | `ingest-open-data-for-city` | service-role worker | Ingest open data sources for a city pool. |
 | `serp-consumer` / `ai-consumer` | queued workers | Consume enrichment/planning queues and shared pipeline modules. |
 | `commit-attachment` | uploader flow | Finalize uploaded files and metadata after background upload. |
@@ -68,8 +69,12 @@ Do not rely on memory for table shape. Open the latest migration that created or
 These are the places most likely to surprise future-you:
 
 - `city_place_enricher_cron` calls `city-place-enricher` through `pg_cron` + `pg_net` and Vault secrets.
+- `city-cover-images-every-15-minutes` calls `city-cover-images` with `backfill_missing` to seed/refill city cover pools under the Unsplash hourly budget. The function also drains pending Unsplash download tracking events from cover assignments.
 - `places_usage_telemetry` schedules rollups into usage daily tables.
 - `reconcile_revenuecat_cron`, `poll_flight_status_cron`, and `gc_storage_objects_cron` call Edge Functions from the database.
+- `claim_ai_usage` currently includes a temporary free-launch override for AI
+  planner access. See `docs/free-launch-paywall-runbook.md` before changing
+  paid-plan gates.
 - Collaboration activity triggers write `trip_activity_log` and may invoke `collaboration-notify`.
 - Budget triggers sync booking expenses, split trip IDs, updated timestamps, and collaboration log rows.
 - Storage cleanup triggers enqueue pending deletes instead of deleting files inline.

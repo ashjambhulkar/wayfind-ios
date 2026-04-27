@@ -60,10 +60,16 @@ import RevenueCat
 
 /// The single Pro entitlement id. Server-side webhook (`revenuecat-webhook`)
 /// also writes this id into `user_subscriptions.is_pro`. Anywhere the app
-/// asks "is this Pro?" we route through the singleton below — never read
-/// `Purchases.shared` directly from a view.
+/// asks about paid status or effective feature access should route through
+/// the singleton below — never read `Purchases.shared` directly from a view.
 enum EntitlementID {
     static let pro = "Wayfind Pro"
+}
+
+enum PremiumAccessReason: String, Sendable {
+    case freeLaunch = "free_launch"
+    case paidSubscription = "paid_subscription"
+    case none
 }
 
 /// AI feature key the server keys monthly usage off of. Mirrors
@@ -81,13 +87,11 @@ final class EntitlementService {
 
     // MARK: - Observable surface
 
-    /// True iff the active user has the RevenueCat Pro entitlement. Driven
-    /// by RevenueCat's `CustomerInfo` when the SDK is present and falls
-    /// back to a Supabase `user_subscriptions` poll otherwise. Default
-    /// `false` is the safe answer pre-binding — every gate will treat
-    /// pre-bind users as Free and log a soft-gate attempt rather than
-    /// silently unlock content.
-    private(set) var isPro: Bool = false
+    /// True iff the active user has the real paid RevenueCat Pro
+    /// entitlement. This intentionally excludes temporary launch access so
+    /// billing UI, restore flows, and analytics don't mistake launch users
+    /// for paying subscribers.
+    private(set) var isPaidPro: Bool = false
 
     /// Server-side cap for free users (Wave 4.4b lowers to 3). We hold
     /// the limit here so the AI wizard's "X of 3 free remaining" badge
@@ -109,11 +113,24 @@ final class EntitlementService {
     private(set) var purchasePending: Bool = false
 
     /// Mirrors `CustomerInfo.originalAppUserId`. Useful for diagnostic
-    /// logging and reconciliation jobs; never use this for gating —
-    /// always read `isPro` instead.
+    /// logging and reconciliation jobs; never use this for feature gating —
+    /// always read `hasPremiumAccess` instead.
     private(set) var revenueCatUserId: String?
 
     // MARK: - Derived
+
+    /// Effective premium access for feature gates. During the launch
+    /// campaign this is true for every signed-in user, while `isPaidPro`
+    /// remains the source of truth for real subscription state.
+    var hasPremiumAccess: Bool {
+        AppConfig.grantFreeLaunchPremiumAccess || isPaidPro
+    }
+
+    var premiumAccessReason: PremiumAccessReason {
+        if isPaidPro { return .paidSubscription }
+        if AppConfig.grantFreeLaunchPremiumAccess { return .freeLaunch }
+        return .none
+    }
 
     /// Convenience for the AI Plan wizard badge. Pro users see "Unlimited";
     /// Free users see "X of 3 free remaining".
@@ -122,11 +139,11 @@ final class EntitlementService {
     }
 
     /// `true` iff we should hard-block another generate attempt for a
-    /// Free user. Pro returns `false` always. The wizard uses this to
+    /// Free user. Premium access returns `false` always. The wizard uses this to
     /// flip the primary CTA into "Upgrade" when the cap is hit, instead
     /// of waiting for the server's 429.
     var aiHardCapReachedForFree: Bool {
-        !isPro && aiUsedThisMonth >= aiFreeMonthlyLimit
+        !hasPremiumAccess && aiUsedThisMonth >= aiFreeMonthlyLimit
     }
 
     // MARK: - Identity
@@ -139,7 +156,7 @@ final class EntitlementService {
     /// the correct entitlement record server-side. Safe to call again
     /// for the same id — RevenueCat dedupes.
     func bind(userId: UUID) async {
-        if boundUserId == userId, isPro { return }
+        if boundUserId == userId, isPaidPro { return }
         boundUserId = userId
 
         #if canImport(RevenueCat)
@@ -172,7 +189,7 @@ final class EntitlementService {
     /// receipt state.
     func unbind() async {
         boundUserId = nil
-        isPro = false
+        isPaidPro = false
         purchasePending = false
         aiUsedThisMonth = 0
         revenueCatUserId = nil
@@ -186,9 +203,9 @@ final class EntitlementService {
 
     /// Pulls the latest `CustomerInfo` from RevenueCat (cached locally,
     /// usually a no-op network call) and re-applies it. Call this from
-    /// any view that just returned from a purchase flow so its `isPro`
-    /// picks up the new entitlement immediately rather than waiting for
-    /// the next `bind`.
+    /// any view that just returned from a purchase flow so its paid
+    /// entitlement picks up immediately rather than waiting for the next
+    /// `bind`.
     func refreshCustomerInfo() async {
         #if canImport(RevenueCat)
         if let info = try? await Purchases.shared.customerInfo() {
@@ -219,7 +236,7 @@ final class EntitlementService {
     /// resilient to App Store Connect product renames as long as the
     /// entitlement id stays stable.
     private func apply(customerInfo info: CustomerInfo) {
-        isPro = info.entitlements.active[EntitlementID.pro] != nil
+        isPaidPro = info.entitlements.active[EntitlementID.pro] != nil
         revenueCatUserId = info.originalAppUserId
         purchasePending = info.entitlements.all[EntitlementID.pro]?.willRenew == false
             && info.entitlements.active[EntitlementID.pro] == nil
@@ -250,9 +267,9 @@ final class EntitlementService {
                 .execute()
                 .value
             if let row = rows.first {
-                isPro = row.is_pro
+                isPaidPro = row.is_pro
             } else {
-                isPro = false
+                isPaidPro = false
             }
         } catch {
             #if DEBUG
@@ -269,7 +286,7 @@ final class EntitlementService {
     /// will enforce. Pro users skip the round-trip — the badge isn't
     /// shown for them.
     private func refreshAIUsage(userId: UUID) async {
-        guard !isPro else {
+        guard !hasPremiumAccess else {
             aiUsedThisMonth = 0
             return
         }
@@ -312,10 +329,10 @@ final class EntitlementService {
 
 extension EntitlementService {
 
-    /// Snapshot of the current Pro state, safe to read from any actor.
-    /// Used by service-layer code (CSV export, attachment quota checks)
-    /// that doesn't want to hop to MainActor purely to read a flag.
-    nonisolated var isProSnapshot: Bool {
-        get async { await self.isPro }
+    /// Snapshot of the current effective premium access, safe to read from
+    /// any actor. Used by service-layer code that doesn't want to hop to
+    /// MainActor purely to read a flag.
+    nonisolated var hasPremiumAccessSnapshot: Bool {
+        get async { await self.hasPremiumAccess }
     }
 }

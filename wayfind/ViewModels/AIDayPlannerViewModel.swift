@@ -88,11 +88,10 @@ final class AIDayPlannerViewModel {
 
     // MARK: - Pro / quota badge (Wave 4.2)
 
-    /// Mirrors `EntitlementService.shared.isPro` at the moment the
-    /// wizard reads it. Re-read on every render via the @Observable
-    /// machinery, so flipping Pro mid-session updates the badge
-    /// without us having to re-bind anything here.
-    var isProUser: Bool { EntitlementService.shared.isPro }
+    /// Mirrors effective premium access at the moment the wizard reads
+    /// it. Launch access and paid subscriptions both show unlimited in
+    /// the client UI.
+    var isProUser: Bool { EntitlementService.shared.hasPremiumAccess }
 
     /// String to render in the wizard's quota badge. Pro users get
     /// "Unlimited"; Free users get "X of N free remaining" with the

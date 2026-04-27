@@ -144,7 +144,9 @@ final class PaywallPresenter {
             Task {
                 var enriched = metadata
                 enriched["placement"] = placement.rawValue
-                enriched["is_pro"] = String(EntitlementService.shared.isPro)
+                enriched["paid_pro"] = String(EntitlementService.shared.isPaidPro)
+                enriched["premium_access"] = String(EntitlementService.shared.hasPremiumAccess)
+                enriched["premium_access_reason"] = EntitlementService.shared.premiumAccessReason.rawValue
                 await dataService.recordProGateAttempt(
                     gate: placement.analyticsGate,
                     surface: placement.rawValue,
@@ -153,11 +155,10 @@ final class PaywallPresenter {
             }
         }
 
-        // If the user is already Pro the paywall is a UX dead-end —
-        // route them to the Manage Subscription / CustomerCenter flow
-        // instead. Wave 4.6 wires that target; for now we just suppress
-        // the present.
-        guard !EntitlementService.shared.isPro else { return }
+        // If the user already has premium access (paid or free launch),
+        // the paywall is a UX dead-end. Real paid subscription state stays
+        // separate for Profile / CustomerCenter.
+        guard !EntitlementService.shared.hasPremiumAccess else { return }
 
         pending = PaywallContext(placement: placement)
     }

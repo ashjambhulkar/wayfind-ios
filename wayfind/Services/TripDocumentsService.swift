@@ -289,7 +289,7 @@ final class TripDocumentsService {
         // with the paywall before we get here, but a queued upload
         // that resumes after a Pro→Free transition needs to fail
         // cleanly rather than silently exceed the cap.
-        if !EntitlementService.shared.isPro,
+        if !EntitlementService.shared.hasPremiumAccess,
            quotaSnapshot.hitsPerUserSoftLimit
         {
             await dataService.recordProGateAttempt(

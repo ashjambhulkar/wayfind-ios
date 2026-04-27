@@ -83,3 +83,8 @@ verify_jwt = false
 # mints), so we keep the gateway off; pg_cron talks to it from inside the Supabase network.
 [functions.places-usage-rollup]
 verify_jwt = false
+
+# City cover image pool worker. Called by cron/manual worker with x-worker-secret;
+# uses service-role + UNSPLASH_ACCESS_KEY internally and never trusts client input.
+[functions.city-cover-images]
+verify_jwt = false
