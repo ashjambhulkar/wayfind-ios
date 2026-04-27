@@ -57,6 +57,7 @@ struct TripDetailView: View {
     @State private var tripTimelineGeocodedTimeZone: TimeZone = .current
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isDayHeaderPinnedToNavigation = false
     /// Hide the inline nav title while the hero shows the trip name; reveal after scrolling.
     @State private var showInlineTripTitle = false
@@ -105,7 +106,199 @@ struct TripDetailView: View {
 
     /// Avatars live in the nav bar while loading, when the hero is hidden, or after the user scrolls past the hero.
     private var showTripMembersInNavigationBar: Bool {
-        !tripDetailShowsHeroWithContent || showInlineTripTitle
+        !tripDetailShowsHeroWithContent || shouldShowOpaqueNavigationBar
+    }
+
+    private var shouldShowOpaqueNavigationBar: Bool {
+        !tripDetailShowsHeroWithContent || showInlineTripTitle || isDayHeaderPinnedToNavigation
+    }
+
+    private var shouldCollapseNavigationToolbarActions: Bool {
+        shouldShowOpaqueNavigationBar
+    }
+
+    private var navigationBarTitle: String {
+        shouldShowOpaqueNavigationBar ? (viewModel?.trip.title ?? trip.title) : ""
+    }
+
+    private var navigationToolbarColorScheme: ColorScheme {
+        shouldShowOpaqueNavigationBar ? colorScheme : .dark
+    }
+
+    private var navigationToolbarForegroundColor: Color {
+        AppColors.appPrimary
+    }
+
+    private var checklistProgressText: String {
+        guard let viewModel else { return "0/0" }
+        return "\(viewModel.checklistDoneCount)/\(viewModel.checklistTotalCount)"
+    }
+
+    @ViewBuilder
+    private var checklistToolbarButton: some View {
+        Button {
+            HapticManager.light()
+            showTripChecklists = true
+        } label: {
+            Image(systemName: "checklist")
+                .foregroundStyle(navigationToolbarForegroundColor)
+        }
+        .tint(navigationToolbarForegroundColor)
+        .accessibilityLabel(checklistToolbarAccessibilityLabel)
+        .accessibilityHint("Opens the checklist for this trip.")
+    }
+
+    @ViewBuilder
+    private var notesToolbarButton: some View {
+        if collaborationStore.canViewNotes {
+            Button {
+                HapticManager.light()
+                showTripNotes = true
+            } label: {
+                Image(systemName: "note.text")
+                    .foregroundStyle(navigationToolbarForegroundColor)
+            }
+            .tint(navigationToolbarForegroundColor)
+            .accessibilityLabel(notesToolbarAccessibilityLabel)
+            .accessibilityHint("Opens notes for this trip.")
+        }
+    }
+
+    @ViewBuilder
+    private var checklistNotesToolbarGroup: some View {
+        HStack(spacing: 0) {
+            Button {
+                HapticManager.light()
+                showTripChecklists = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "checklist")
+                        .foregroundStyle(navigationToolbarForegroundColor)
+                    Text(checklistProgressText)
+                        .font(.appCaption.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(AppColors.textPrimary)
+                }
+                .frame(minHeight: 28)
+                .padding(.leading, 7)
+                .padding(.trailing, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(checklistToolbarAccessibilityLabel)
+            .accessibilityHint("Opens the checklist for this trip.")
+
+            Rectangle()
+                .fill(AppColors.appDivider)
+                .frame(width: 1, height: 18)
+
+            if collaborationStore.canViewNotes {
+                Button {
+                    HapticManager.light()
+                    showTripNotes = true
+                } label: {
+                    Image(systemName: "note.text")
+                        .foregroundStyle(navigationToolbarForegroundColor)
+                        .frame(width: 30)
+                        .frame(minHeight: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(notesToolbarAccessibilityLabel)
+                .accessibilityHint("Opens notes for this trip.")
+            }
+        }
+        .tint(navigationToolbarForegroundColor)
+        .padding(.vertical, 3)
+        .environment(\.colorScheme, navigationToolbarColorScheme)
+    }
+
+    @ViewBuilder
+    private var tripActionsMenuContent: some View {
+        if collaborationStore.canManage {
+            // Owner-only: Edit Trip wraps a destructive cascade
+            // (it can shrink the date range and drop activities
+            // on those days). Editors can change activities
+            // through the inline UI but not the trip itself in
+            // Phase 1.
+            Button {
+                showEditTrip = true
+            } label: {
+                Label("Edit Trip", systemImage: "pencil")
+            }
+            Divider()
+        }
+        Button {
+            viewModel?.expandAll()
+        } label: {
+            Label("Expand All Days", systemImage: "arrow.up.left.and.arrow.down.right")
+        }
+        Button {
+            viewModel?.collapseAll()
+        } label: {
+            Label("Collapse All Days", systemImage: "arrow.down.right.and.arrow.up.left")
+        }
+        // Recent activity feed (Phase 4) — secondary surface,
+        // intentionally lives in the menu rather than the
+        // toolbar avatar slot which is reserved for Members.
+        Divider()
+        Button {
+            HapticManager.light()
+            showRecentActivitySheet = true
+        } label: {
+            Label("Recent activity", systemImage: "clock.arrow.circlepath")
+        }
+        Divider()
+        if CalendarSyncService.isEnabled(tripId: (viewModel?.trip.id ?? trip.id)) {
+            Button {
+                HapticManager.light()
+                Task { await runCalendarSync() }
+            } label: {
+                Label("Resync to Calendar", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(calendarSyncInFlight)
+            Button(role: .destructive) {
+                HapticManager.light()
+                Task { await stopCalendarSync() }
+            } label: {
+                Label("Stop syncing to Calendar", systemImage: "calendar.badge.minus")
+            }
+        } else {
+            Button {
+                HapticManager.light()
+                showCalendarOnboarding = true
+            } label: {
+                Label("Sync to Apple Calendar", systemImage: "calendar.badge.plus")
+            }
+        }
+        if collaborationStore.canManage {
+            Divider()
+            Button(role: .destructive) {
+                showDeleteConfirmation = true
+            } label: {
+                Label("Delete Trip", systemImage: "trash")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var compactTripToolbarMenuContent: some View {
+        Button {
+            HapticManager.light()
+            showTripChecklists = true
+        } label: {
+            Label("Checklist", systemImage: "checklist")
+        }
+        if collaborationStore.canViewNotes {
+            Button {
+                HapticManager.light()
+                showTripNotes = true
+            } label: {
+                Label("Notes", systemImage: "note.text")
+            }
+        }
+        Divider()
+        tripActionsMenuContent
     }
 
     var body: some View {
@@ -347,108 +540,64 @@ struct TripDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppColors.appBackground)
-        .navigationTitle(showInlineTripTitle ? (viewModel?.trip.title ?? trip.title) : "")
+        .overlay(alignment: .top) {
+            if shouldShowOpaqueNavigationBar {
+                AppColors.appBackground
+                    .frame(height: TripDetailOverlayMetrics.navigationChromeHeight)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .ignoresSafeArea(edges: .top)
+                    .allowsHitTesting(false)
+            }
+        }
+        .navigationTitle(navigationBarTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(AppColors.appBackground, for: .navigationBar)
+        .toolbarBackground(shouldShowOpaqueNavigationBar ? .visible : .hidden, for: .navigationBar)
+        .toolbarColorScheme(navigationToolbarColorScheme, for: .navigationBar)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            if shouldCollapseNavigationToolbarActions {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        compactTripToolbarMenuContent
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundStyle(navigationToolbarForegroundColor)
+                    }
+                    .tint(navigationToolbarForegroundColor)
+                    .accessibilityLabel("Trip actions")
+                }
+            } else {
                 if showTripMembersInNavigationBar {
-                    TripMembersAvatarStack(onTap: {}, heroOnPhoto: false, allowsTap: false)
-                    TripMembersInviteButton(heroOnPhoto: false) {
-                        showMembersSheet = true
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: AppSpacing.sm) {
+                            if hasAcceptedCollaborators {
+                                TripMembersAvatarStack(onTap: {}, heroOnPhoto: false, allowsTap: false)
+                            }
+                            TripMembersInviteButton(heroOnPhoto: false) {
+                                showMembersSheet = true
+                            }
+                        }
                     }
                 }
 
-                Button {
-                    HapticManager.light()
-                    showTripChecklists = true
-                } label: {
-                    Image(systemName: "checklist")
-                }
-                .tint(.primary)
-                .accessibilityLabel(checklistToolbarAccessibilityLabel)
-                .accessibilityHint("Opens the checklist for this trip.")
-
-                if collaborationStore.canViewNotes {
-                    Button {
-                        HapticManager.light()
-                        showTripNotes = true
-                    } label: {
-                        Image(systemName: "note.text")
-                    }
-                    .tint(.primary)
-                    .accessibilityLabel(notesToolbarAccessibilityLabel)
-                    .accessibilityHint("Opens notes for this trip.")
+                ToolbarItem(placement: .topBarTrailing) {
+                    checklistNotesToolbarGroup
                 }
 
-                Menu {
-                    if collaborationStore.canManage {
-                        // Owner-only: Edit Trip wraps a destructive cascade
-                        // (it can shrink the date range and drop activities
-                        // on those days). Editors can change activities
-                        // through the inline UI but not the trip itself in
-                        // Phase 1.
-                        Button {
-                            showEditTrip = true
-                        } label: {
-                            Label("Edit Trip", systemImage: "pencil")
-                        }
-                        Divider()
-                    }
-                    Button {
-                        viewModel?.expandAll()
-                    } label: {
-                        Label("Expand All Days", systemImage: "arrow.up.left.and.arrow.down.right")
-                    }
-                    Button {
-                        viewModel?.collapseAll()
-                    } label: {
-                        Label("Collapse All Days", systemImage: "arrow.down.right.and.arrow.up.left")
-                    }
-                    // Recent activity feed (Phase 4) — secondary surface,
-                    // intentionally lives in the menu rather than the
-                    // toolbar avatar slot which is reserved for Members.
-                    Divider()
-                    Button {
-                        HapticManager.light()
-                        showRecentActivitySheet = true
-                    } label: {
-                        Label("Recent activity", systemImage: "clock.arrow.circlepath")
-                    }
-                    Divider()
-                    if CalendarSyncService.isEnabled(tripId: (viewModel?.trip.id ?? trip.id)) {
-                        Button {
-                            HapticManager.light()
-                            Task { await runCalendarSync() }
-                        } label: {
-                            Label("Resync to Calendar", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        .disabled(calendarSyncInFlight)
-                        Button(role: .destructive) {
-                            HapticManager.light()
-                            Task { await stopCalendarSync() }
-                        } label: {
-                            Label("Stop syncing to Calendar", systemImage: "calendar.badge.minus")
-                        }
-                    } else {
-                        Button {
-                            HapticManager.light()
-                            showCalendarOnboarding = true
-                        } label: {
-                            Label("Sync to Apple Calendar", systemImage: "calendar.badge.plus")
-                        }
-                    }
-                    if collaborationStore.canManage {
-                        Divider()
-                        Button(role: .destructive) {
-                            showDeleteConfirmation = true
-                        } label: {
-                            Label("Delete Trip", systemImage: "trash")
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                if #available(iOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 }
-                .accessibilityLabel("Trip actions")
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        tripActionsMenuContent
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundStyle(navigationToolbarForegroundColor)
+                    }
+                    .tint(navigationToolbarForegroundColor)
+                    .accessibilityLabel("Trip actions")
+                }
             }
         }
         .sheet(isPresented: $showMembersSheet) {
@@ -554,6 +703,10 @@ struct TripDetailView: View {
         toastManager.show(ToastData(message: "Stopped syncing to Calendar", type: .success))
     }
 
+    private var hasAcceptedCollaborators: Bool {
+        !collaborationStore.acceptedCollaborators.isEmpty
+    }
+
     // MARK: - Itinerary Content
 
     @ViewBuilder
@@ -565,6 +718,7 @@ struct TripDetailView: View {
                         trip: viewModel.trip,
                         topBleed: KeyWindowSafeArea.topInset,
                         showMembersCluster: !showInlineTripTitle,
+                        showMemberAvatars: hasAcceptedCollaborators,
                         onInviteMembers: { showMembersSheet = true }
                     )
 
@@ -595,7 +749,7 @@ struct TripDetailView: View {
                             }
                             .padding(.horizontal, AppSpacing.lg)
                             .padding(.top, AppSpacing.sm + AppSpacing.md)
-                            .padding(.bottom, AppSpacing.md)
+                            .padding(.bottom, AppSpacing.xs)
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel(String(localized: "Itinerary"))
                         }
@@ -731,12 +885,8 @@ struct TripDetailView: View {
         let places = viewModel.places(for: day)
         let ongoingForDay = viewModel.ongoingBookings(for: day)
         let isQuietEmptyDay = places.isEmpty && ongoingForDay.isEmpty
-        let preview: String = {
-            if !places.isEmpty {
-                return places.prefix(3).map(\.name).joined(separator: ", ")
-            }
-            return ongoingForDay.first.map(\.place.name) ?? ""
-        }()
+        let emptyDayPrompt = emptyDayPrompt(for: day, isQuietEmptyDay: isQuietEmptyDay, viewModel: viewModel)
+        let preview = collapsedDayPreview(places: places, ongoingBookings: ongoingForDay.map(\.place))
 
         Section {
             if !viewModel.isDayCollapsed(day) {
@@ -744,7 +894,11 @@ struct TripDetailView: View {
                     Spacer()
                         .frame(height: AppSpacing.md)
 
-                    DaySummaryView(places: places, showNoPlansYet: isQuietEmptyDay)
+                    DaySummaryView(
+                        places: places,
+                        showNoPlansYet: isQuietEmptyDay,
+                        emptyDayPrompt: emptyDayPrompt
+                    )
 
                     if isTodayDay(day) {
                         NowIndicatorView()
@@ -846,7 +1000,8 @@ struct TripDetailView: View {
                 dateLabel: viewModel.dayHeaderDateLabel(for: day, timelineTimeZone: dayTZ),
                 isCollapsed: viewModel.isDayCollapsed(day),
                 contentPreview: preview,
-                isQuietEmptyDay: isQuietEmptyDay
+                isQuietEmptyDay: isQuietEmptyDay,
+                emptyDayPrompt: emptyDayPrompt
             ) {
                 viewModel.toggleDayCollapse(day)
             }
@@ -1083,6 +1238,88 @@ struct TripDetailView: View {
             }
         }
     }
+
+    private func emptyDayPrompt(for day: ItineraryDay, isQuietEmptyDay: Bool, viewModel: TripDetailViewModel) -> String {
+        guard isQuietEmptyDay else { return "" }
+        let firstQuietEmptyDay = viewModel.scheduledDays.first { candidate in
+            viewModel.places(for: candidate).isEmpty && viewModel.ongoingBookings(for: candidate).isEmpty
+        }
+        return firstQuietEmptyDay?.id == day.id
+            ? "Add places or let AI plan this day"
+            : "No plans yet"
+    }
+
+    private func collapsedDayPreview(places: [Place], ongoingBookings: [Place]) -> String {
+        let stops = places.filter { !$0.isBooking }
+        let stopCount = stops.count
+        guard stopCount > 0 else {
+            return ongoingBookings.first.map { "Staying at \($0.name)" } ?? ""
+        }
+
+        let themes = curatedDayThemes(for: stops)
+        let stopText = "\(stopCount) \(stopCount == 1 ? "stop" : "stops")"
+        guard !themes.isEmpty else { return stopText }
+        return "\(joinedDayThemes(themes)) · \(stopText)"
+    }
+
+    private func curatedDayThemes(for stops: [Place]) -> [String] {
+        let categories = Set(stops.map(\.categoryEnum))
+        var themes: [String] = []
+
+        if categories.contains(.attraction) {
+            themes.append("Landmarks")
+        }
+        if categories.contains(.nature) {
+            themes.append("parks")
+        }
+        if stops.contains(where: { containsAny($0.name, ["museum", "gallery", "goma", "art"]) }) {
+            themes.append("galleries")
+        }
+        if stops.contains(where: { containsAny($0.name, ["cathedral", "church", "temple", "mosque", "synagogue"]) }) {
+            themes.append("cathedral walk")
+        }
+        if categories.contains(.shopping) {
+            themes.append("shopping")
+        }
+        if categories.contains(.restaurant) {
+            themes.append(stops.contains { isLunchStop($0) } ? "lunch" : "dinner")
+        }
+        if categories.contains(.nightlife) {
+            themes.append("pubs")
+        }
+        if categories.contains(.transport) {
+            themes.append("transfers")
+        }
+
+        return Array(themes.prefix(3))
+    }
+
+    private func joinedDayThemes(_ themes: [String]) -> String {
+        switch themes.count {
+        case 0:
+            return ""
+        case 1:
+            return themes[0]
+        case 2:
+            return "\(themes[0]) and \(themes[1])"
+        default:
+            return "\(themes[0]), \(themes[1]), and \(themes[2])"
+        }
+    }
+
+    private func containsAny(_ text: String, _ needles: [String]) -> Bool {
+        let lowercased = text.localizedLowercase
+        return needles.contains { lowercased.contains($0) }
+    }
+
+    private func isLunchStop(_ place: Place) -> Bool {
+        if containsAny(place.name, ["lunch", "brunch", "cafe", "coffee", "bakery"]) {
+            return true
+        }
+        guard let startTime = place.startTime else { return false }
+        let hour = Calendar.current.component(.hour, from: startTime)
+        return (10..<16).contains(hour)
+    }
 }
 
 // MARK: - Hero header (cover image)
@@ -1093,14 +1330,19 @@ private struct TripDetailHeroHeader: View {
     let trip: Trip
     var topBleed: CGFloat = 0
     var showMembersCluster: Bool = false
+    var showMemberAvatars: Bool = false
     var onInviteMembers: () -> Void = {}
 
-    private var statusLabel: String {
-        switch trip.status {
-        case .upcoming: return "Upcoming"
-        case .active: return "Active"
-        case .past: return "Past"
-        }
+    private var dateSummary: String {
+        "\(trip.startDate.shortFormatted) – \(trip.endDate.shortFormatted) · \(tripLengthLabel)"
+    }
+
+    private var tripLengthLabel: String {
+        let days = max(
+            1,
+            Calendar.current.dateComponents([.day], from: trip.startDate, to: trip.endDate).day ?? 0
+        )
+        return days == 1 ? "1 day" : "\(days) days"
     }
 
     private var totalHeight: CGFloat {
@@ -1139,41 +1381,34 @@ private struct TripDetailHeroHeader: View {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 Spacer(minLength: 0)
 
-                HStack(alignment: .bottom, spacing: AppSpacing.md) {
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        Text(trip.title)
-                            .font(.tripDetailHeroTitle)
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    Text(trip.title)
+                        .font(.tripDetailHeroTitle)
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .shadow(color: .black.opacity(0.35), radius: 6, x: 0, y: 2)
 
-                        Text("\(trip.startDate.shortFormatted) – \(trip.endDate.shortFormatted)")
-                            .font(.appCaption)
-                            .foregroundStyle(.white.opacity(0.92))
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 1)
-
-                        Text(statusLabel)
-                            .font(.appSmall)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, AppSpacing.sm)
-                            .padding(.vertical, AppSpacing.xs)
-                            .background(Color.white.opacity(0.22))
-                            .clipShape(Capsule())
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(dateSummary)
+                        .font(.appCaption)
+                        .foregroundStyle(.white.opacity(0.92))
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 1)
 
                     if showMembersCluster {
                         HStack(alignment: .center, spacing: AppSpacing.sm) {
-                            TripMembersAvatarStack(onTap: {}, heroOnPhoto: true, allowsTap: false)
+                            if showMemberAvatars {
+                                TripMembersAvatarStack(onTap: {}, heroOnPhoto: true, allowsTap: false)
+                            }
                             TripMembersInviteButton(heroOnPhoto: true, action: onInviteMembers)
                         }
+                        .padding(.top, AppSpacing.xs)
                         .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 2)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(AppSpacing.lg)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -1228,6 +1463,9 @@ private enum TripDetailOverlayMetrics {
     /// itinerary scroll intentionally ignores the top safe area for the hero,
     /// so day headers need a visual clamp to the app navigation bar instead.
     static let navigationBarHeight: CGFloat = 44
+    static var navigationChromeHeight: CGFloat {
+        KeyWindowSafeArea.topInset + navigationBarHeight
+    }
     static var stickyDayHeaderTop: CGFloat {
         KeyWindowSafeArea.topInset + navigationBarHeight
     }
@@ -1282,7 +1520,7 @@ extension TripDetailView {
 }
 
 // Lives in this file so SwiftUI canvas typechecking (single-file) always sees the hub next to `#Preview`.
-/// iOS 26+: Map | spacer | Budget + Bookings + Documents | spacer | AI. Earlier OS: one `ToolbarItemGroup` (no spacers).
+/// iOS 26+: Map + Budget + Bookings + Documents | spacer | AI. Earlier OS: same utilities first, AI last.
 struct TripDetailHubBottomBar: ToolbarContent {
     var showsAI: Bool
     var showsDocuments: Bool
@@ -1296,9 +1534,6 @@ struct TripDetailHubBottomBar: ToolbarContent {
         if #available(iOS 26.0, *) {
             ToolbarItemGroup(placement: .bottomBar) {
                 mapButton
-            }
-            ToolbarSpacer(.flexible, placement: .bottomBar)
-            ToolbarItemGroup(placement: .bottomBar) {
                 budgetBookingsDocumentsButtons
             }
             if showsAI {
@@ -1311,7 +1546,9 @@ struct TripDetailHubBottomBar: ToolbarContent {
             ToolbarItemGroup(placement: .bottomBar) {
                 mapButton
                 budgetBookingsDocumentsButtons
-                if showsAI {
+            }
+            if showsAI {
+                ToolbarItem(placement: .bottomBar) {
                     aiButton
                 }
             }
@@ -1320,7 +1557,7 @@ struct TripDetailHubBottomBar: ToolbarContent {
 
     private var mapButton: some View {
         Button(action: onMap) {
-            Image(systemName: "map.fill")
+            Image(systemName: "map")
         }
         .tint(.primary)
         .accessibilityLabel(String(localized: "Map"))
@@ -1341,7 +1578,7 @@ struct TripDetailHubBottomBar: ToolbarContent {
             )
 
             Button(action: onBookings) {
-                Image(systemName: "suitcase.fill")
+                Image(systemName: "ticket")
             }
             .tint(.primary)
             .accessibilityLabel(String(localized: "Bookings"))
@@ -1381,13 +1618,14 @@ struct TripDetailHubBottomBar: ToolbarContent {
 private enum TripDetailView_Previews {}
 
 /// Hosts `TripDetailView` with the same environments as `AppRootTabView`.
-/// Timeline data comes from `MockDataService` when `AppConfig.useRealBackend` is `false`
-/// (`Trip.preview.id` matches the mock Paris trip).
+/// Timeline data always comes from seeded mock data so Xcode's canvas remains
+/// interactive even when the app is configured for the live Supabase backend.
 private struct TripDetailPreviewHost: View {
     let trip: Trip
-    @State private var dataService = DataService()
+    @State private var dataService = DataService(previewMockData: true)
     @State private var toastManager = ToastManager()
     @State private var collaborationStore = CollaborationStore()
+    @State private var collaborationUi = TripCollaborationUiStore()
 
     var body: some View {
         NavigationStack {
@@ -1411,8 +1649,9 @@ private struct TripDetailPreviewHost: View {
         .environment(dataService)
         .environment(toastManager)
         .environment(collaborationStore)
+        .environment(collaborationUi)
         .task(id: trip.id) {
-            collaborationStore.bind(to: trip.id)
+            collaborationStore.seedPreviewOwner(tripId: trip.id)
         }
     }
 }

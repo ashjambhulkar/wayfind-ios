@@ -54,6 +54,30 @@ final class CollaborationStore {
         self.service = service ?? .shared
     }
 
+    #if DEBUG
+    func seedPreviewOwner(tripId: UUID) {
+        fetchTask?.cancel()
+        let userId = UUID()
+        currentTripId = tripId
+        members = [
+            TripCollaborator(
+                id: nil,
+                tripId: tripId,
+                userId: userId,
+                role: .owner,
+                status: .accepted,
+                invitedEmail: nil,
+                displayName: "You",
+                username: nil,
+                avatarURLString: nil,
+                email: nil
+            )
+        ]
+        currentUserId = userId
+        loadState = .loaded
+    }
+    #endif
+
     // MARK: - Lifecycle
 
     /// Switch to a new trip. Cancels any in-flight fetch for the previous

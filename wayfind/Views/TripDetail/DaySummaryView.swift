@@ -10,6 +10,7 @@ struct DaySummaryView: View {
     let places: [Place]
     /// Shown when the day has no stops (quiet empty day); ongoing cross-day rows are handled in the parent.
     var showNoPlansYet: Bool = false
+    var emptyDayPrompt: String = "No plans yet"
 
     private var totalDurationMinutes: Int {
         places.reduce(0) { sum, place in
@@ -52,7 +53,7 @@ struct DaySummaryView: View {
 
     var body: some View {
         if showNoPlansYet {
-            Text("No plans yet")
+            Text(emptyDayPrompt)
                 .font(.appCaption)
                 .foregroundStyle(AppColors.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)

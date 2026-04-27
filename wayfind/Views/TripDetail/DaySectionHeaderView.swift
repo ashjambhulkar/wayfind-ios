@@ -6,8 +6,9 @@ struct DaySectionHeaderView: View {
     let dateLabel: String
     let isCollapsed: Bool
     let contentPreview: String
-    /// No places and no cross-day ongoing banners — show muted chrome + "No plans yet".
+    /// No places and no cross-day ongoing banners — show muted chrome + empty-day prompt.
     let isQuietEmptyDay: Bool
+    var emptyDayPrompt: String = "No plans yet"
     var onToggle: () -> Void
 
     private var dayColor: Color {
@@ -25,13 +26,13 @@ struct DaySectionHeaderView: View {
     @ViewBuilder
     private var collapsedSubtitle: some View {
         if isQuietEmptyDay {
-            Text("No plans yet")
+            Text(emptyDayPrompt)
                 .font(.appCaption)
                 .foregroundStyle(AppColors.textTertiary)
                 .lineLimit(2)
         } else if !contentPreview.isEmpty {
             Text(contentPreview)
-                .font(.appCaption)
+                .font(.appCaption.weight(.medium))
                 .foregroundStyle(AppColors.textSecondary)
                 .lineLimit(2)
         }
@@ -42,14 +43,14 @@ struct DaySectionHeaderView: View {
         if isQuietEmptyDay {
             (
                 Text(dayLabel)
-                    .fontWeight(.medium)
+                    .fontWeight(.semibold)
                     .foregroundStyle(AppColors.textSecondary)
                 + Text(" · ")
-                    .fontWeight(.regular)
-                    .foregroundStyle(AppColors.textTertiary.opacity(0.9))
+                    .fontWeight(.light)
+                    .foregroundStyle(AppColors.textTertiary.opacity(0.75))
                 + Text(dateLabel)
-                    .fontWeight(.regular)
-                    .foregroundStyle(AppColors.textTertiary)
+                    .fontWeight(.light)
+                    .foregroundStyle(AppColors.textTertiary.opacity(0.88))
             )
             .font(.cardTitle)
             .lineLimit(1)
@@ -57,14 +58,14 @@ struct DaySectionHeaderView: View {
         } else {
             (
                 Text(dayLabel)
-                    .fontWeight(.semibold)
+                    .fontWeight(.bold)
                     .foregroundStyle(AppColors.textPrimary)
                 + Text(" · ")
-                    .fontWeight(.regular)
-                    .foregroundStyle(AppColors.textTertiary)
+                    .fontWeight(.light)
+                    .foregroundStyle(AppColors.textTertiary.opacity(0.75))
                 + Text(dateLabel)
-                    .fontWeight(.regular)
-                    .foregroundStyle(AppColors.textSecondary)
+                    .fontWeight(.light)
+                    .foregroundStyle(AppColors.textSecondary.opacity(0.86))
             )
             .font(.cardTitle)
             .lineLimit(1)
@@ -79,15 +80,16 @@ struct DaySectionHeaderView: View {
             }
             HapticManager.selection()
         } label: {
-            HStack(alignment: .center, spacing: AppSpacing.sm) {
+            HStack(alignment: .top, spacing: AppSpacing.sm) {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(chevronColor)
                     // Collapsed: ∨ (expand). Expanded: ∧ (collapse).
                     .rotationEffect(.degrees(isCollapsed ? 0 : 180))
                     .frame(width: 18, alignment: .center)
+                    .padding(.top, 3)
 
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                VStack(alignment: .leading, spacing: 6) {
                     titleLine
 
                     if isCollapsed {
@@ -103,8 +105,8 @@ struct DaySectionHeaderView: View {
             // expanded day body — one column, one ruler.
             .padding(.leading, AppSpacing.lg)
             .padding(.trailing, AppSpacing.lg)
-            .padding(.vertical, AppSpacing.sm)
-            .frame(height: isCollapsed ? 48 : 52)
+            .padding(.vertical, isCollapsed ? 12 : AppSpacing.sm)
+            .frame(minHeight: isCollapsed ? 62 : 52)
             .background(AppColors.appBackground)
             .background(alignment: .leading) {
                 accentStripe

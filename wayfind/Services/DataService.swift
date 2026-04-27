@@ -51,6 +51,21 @@ final class DataService {
         }
     }
 
+    #if DEBUG
+    init(previewMockData: Bool) {
+        if previewMockData {
+            mock = MockDataService()
+            real = nil
+        } else if AppConfig.useRealBackend {
+            real = SupabaseManager()
+            mock = nil
+        } else {
+            mock = MockDataService()
+            real = nil
+        }
+    }
+    #endif
+
     func fetchTrips() async -> [Trip] {
         if let real { return (try? await real.fetchTrips()) ?? [] }
         return await mock!.fetchTrips()
