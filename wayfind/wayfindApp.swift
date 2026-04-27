@@ -303,7 +303,7 @@ private struct AppRootTabView: View {
                             TripDetailHubBottomBar(
                                 showsAI: collaborationStore.canEdit,
                                 showsDocuments: collaborationStore.canViewDocuments,
-                                onMap: { tripModulePath = [.map] },
+                                onMap: { openTripMapWithPlacesSheetHalfOpen() },
                                 onBudget: { tripModulePath = [.budget] },
                                 onBookings: { tripModulePath = [.bookings] },
                                 onDocuments: { tripModulePath = [.documents] },
@@ -565,7 +565,7 @@ private struct AppRootTabView: View {
     /// Phase C handoff: dismiss the wizard and push Map so new stops are
     /// visible in spatial context, then toast.
     private func handleAIPlanApplied(_ count: Int) {
-        tripModulePath = [.map]
+        openTripMapWithPlacesSheetHalfOpen()
         showAIPlanner = false
         let message: String
         switch count {
@@ -577,6 +577,15 @@ private struct AppRootTabView: View {
             message = "Added \(count) stops to your itinerary"
         }
         toastManager.show(ToastData(message: message, type: .success, duration: 3.5))
+    }
+
+    /// Push Map and present the iOS 26 places sheet at the half (medium) detent.
+    private func openTripMapWithPlacesSheetHalfOpen() {
+        if #available(iOS 26.0, *) {
+            mapTabState.placesSheetLayout = .half
+            mapTabState.showPlacesSheet = true
+        }
+        tripModulePath = [.map]
     }
 
     // MARK: - Trip detail pushed destinations
@@ -614,49 +623,7 @@ private struct AppRootTabView: View {
     }
 }
 
-// MARK: - Map Tab Wrapper
-
-/// Wraps the map view and owns the native places sheet. The sheet uses
-/// small / medium / large detents so the compact state behaves like the
-/// former docked day-pill bar while expanded states follow system sheet UX.
-@available(iOS 26.0, *)
-private struct MapTabWrapper: View {
-    let trip: Trip
-    let mapState: MapTabSharedState
-
-    var body: some View {
-        TripMapView(trip: trip, sharedState: mapState)
-            .onDisappear {
-                mapState.showPlacesSheet = false
-            }
-            .sheet(isPresented: Binding(
-                get: { mapState.showPlacesSheet },
-                set: { mapState.showPlacesSheet = $0 }
-            )) {
-                TripMapPlacesExpandedSheet(
-                    trip: trip,
-                    selectedDayFilter: Binding(
-                        get: { mapState.selectedDayFilter },
-                        set: { mapState.selectedDayFilter = $0 }
-                    ),
-                    allPlacesForList: mapState.mappablePlaces,
-                    dayNumberByDayId: mapState.dayNumberByDayId,
-                    onSelectPlace: { place in
-                        mapState.showPlacesSheet = false
-                        mapState.selectedPlaceToFocus = place
-                    }
-                )
-                .presentationDetents([.medium, .large])
-                .presentationContentInteraction(.scrolls)
-                .presentationBackground(.regularMaterial)
-                .presentationDragIndicator(.hidden)
-                .tint(AppColors.appPrimary)
-            }
-    }
-}
-
-/// Shared state between the map view, the minimized safe-area accessory,
-/// and the expanded places sheet.
+/// Shared state between the map view and the single persistent places sheet.
 ///
 /// Search state lives in `TripMapState` (Phase 2) and is owned by
 /// `TripMapView`; this object now carries only the data that the day
@@ -667,7 +634,15 @@ final class MapTabSharedState {
     var mappablePlaces: [Place] = []
     var selectedPlaceToFocus: Place?
     var dayNumberByDayId: [UUID: Int] = [:]
-    var showPlacesSheet = false
+    /// Kept in sync as `true` while the map tab is active (sheet visibility is `sharedState != nil`).
+    var showPlacesSheet = true
+    /// Docked vs half vs full — the sheet is always presented; this only changes detent.
+    var placesSheetLayout: PlacesSheetLayout = .docked
+    /// Map-tab search field text (sheet search bar on iOS 26+; inline searchable pre-26).
+    var mapTabSearchText: String = ""
+    var mapTabSearchPresented: Bool = false
+    /// When true, the places sheet expands search **inside** the same presentation (no standalone overlay).
+    var openInlineMapSearch = false
 }
 
 // MARK: - Search Tab (list mode)

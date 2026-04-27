@@ -126,6 +126,10 @@ struct TripMapKitView: UIViewRepresentable {
     let cameraTarget: TripMapCameraTarget?
     let configuration: TripMapKitConfiguration
     let reduceMotion: Bool
+    /// Drives spring scale + z-order so the tapped itinerary / booking pin matches `PlaceDetailSheet`.
+    var selectedTripPlaceId: UUID?
+    /// Drives scale + tint for the pin whose preview sheet is open.
+    var selectedSearchResultId: String?
 
     // Callbacks
     var onTapTripPlace: (Place) -> Void = { _ in }
@@ -200,6 +204,8 @@ struct TripMapKitView: UIViewRepresentable {
             coordinator.apply(camera: target, to: map, reduceMotion: reduceMotion)
             coordinator.appliedCameraId = target.id
         }
+
+        coordinator.applyAnnotationHighlights(to: map)
     }
 
     private static func makeConfiguration(
@@ -243,6 +249,25 @@ struct TripMapKitView: UIViewRepresentable {
             self.parent = parent
             self.routeStrokeColor = UIColor(parent.routeStrokeColor)
             super.init()
+        }
+
+        func applyAnnotationHighlights(to mapView: MKMapView) {
+            let animate = !parent.reduceMotion
+            let tripSel = parent.selectedTripPlaceId
+            let searchSel = parent.selectedSearchResultId
+
+            for case let ann as TripPlaceAnnotation in mapView.annotations {
+                guard let view = mapView.view(for: ann) as? TripPlaceAnnotationView else { continue }
+                view.setMapSelected(tripSel == ann.placeId, animated: animate)
+            }
+            for case let ann as BookingAnnotation in mapView.annotations {
+                guard let view = mapView.view(for: ann) as? BookingAnnotationView else { continue }
+                view.setMapSelected(tripSel == ann.placeId, animated: animate)
+            }
+            for case let ann as SearchResultAnnotation in mapView.annotations {
+                guard let view = mapView.view(for: ann) as? SearchResultAnnotationView else { continue }
+                view.setMapSelected(searchSel == ann.preview.id, animated: animate)
+            }
         }
 
         func matchesAppliedConfiguration(_ desired: MKMapConfiguration) -> Bool {
@@ -596,20 +621,32 @@ struct TripMapKitView: UIViewRepresentable {
 
             switch annotation {
             case is TripPlaceAnnotation:
-                return mapView.dequeueReusableAnnotationView(
+                let view = mapView.dequeueReusableAnnotationView(
                     withIdentifier: TripPlaceAnnotationView.reuseId,
                     for: annotation
                 )
+                if let marker = view as? TripPlaceAnnotationView {
+                    marker.animatesWhenAdded = !parent.reduceMotion
+                }
+                return view
             case is BookingAnnotation:
-                return mapView.dequeueReusableAnnotationView(
+                let view = mapView.dequeueReusableAnnotationView(
                     withIdentifier: BookingAnnotationView.reuseId,
                     for: annotation
                 )
+                if let marker = view as? BookingAnnotationView {
+                    marker.animatesWhenAdded = !parent.reduceMotion
+                }
+                return view
             case is SearchResultAnnotation:
-                return mapView.dequeueReusableAnnotationView(
+                let view = mapView.dequeueReusableAnnotationView(
                     withIdentifier: SearchResultAnnotationView.reuseId,
                     for: annotation
                 )
+                if let marker = view as? SearchResultAnnotationView {
+                    marker.animatesWhenAdded = !parent.reduceMotion
+                }
+                return view
             case is RouteBadgeAnnotation:
                 let view = mapView.dequeueReusableAnnotationView(
                     withIdentifier: RouteBadgeAnnotationView.reuseId,
@@ -673,6 +710,10 @@ struct TripMapKitView: UIViewRepresentable {
                 renderer.lineDashPattern = nil
             }
             return renderer
+        }
+
+        func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
+            applyAnnotationHighlights(to: mapView)
         }
 
         func mapView(

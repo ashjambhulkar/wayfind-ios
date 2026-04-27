@@ -4,8 +4,8 @@
 //
 //  UIKit annotation models and views used by `TripMapKitView`. Three kinds:
 //
-//    • TripPlaceAnnotation     — numbered day pin (day color + sort order).
-//    • BookingAnnotation       — booking diamond (e.g. flight, hotel).
+//    • TripPlaceAnnotation     — MKMarker balloon (day color + stop number).
+//    • BookingAnnotation       — MKMarker balloon (category tint + glyph).
 //    • SearchResultAnnotation  — exploratory search hit. Clusters.
 //
 //  Trip and booking pins MUST NOT cluster — sort-order semantics make
@@ -49,7 +49,8 @@ final class TripPlaceAnnotation: NSObject, MKAnnotation {
     }
 }
 
-/// Booking pin (rotated rounded square with a category glyph).
+/// Booking stop — rendered as a tinted `MKMarkerAnnotationView` with a
+/// category SF Symbol (same map style as trip stops).
 final class BookingAnnotation: NSObject, MKAnnotation {
     let id: String
     let placeId: UUID
@@ -97,13 +98,14 @@ final class SearchResultAnnotation: NSObject, MKAnnotation {
 
 // MARK: - Annotation views
 
-/// Numbered circle in the day color. Drawn with CALayer + a UILabel for
-/// crisp text without re-rendering SwiftUI per pin. No clustering.
-final class TripPlaceAnnotationView: MKAnnotationView {
+/// Apple Maps–style marker balloon: day color, numbered glyph, drop-in
+/// animation (`animatesWhenAdded`), and spring scale when selected on the map.
+final class TripPlaceAnnotationView: MKMarkerAnnotationView {
     static let reuseId = "TripPlaceAnnotationView"
 
-    private let circle = CAShapeLayer()
-    private let label = UILabel()
+    private static let selectedScale: CGFloat = 1.34
+
+    private var mapSelectionActive = false
 
     override var annotation: MKAnnotation? {
         didSet { configure() }
@@ -111,51 +113,59 @@ final class TripPlaceAnnotationView: MKAnnotationView {
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
-        frame = CGRect(x: 0, y: 0, width: 28, height: 28)
-        canShowCallout = false
-        // Trip pins MUST NOT cluster — sort order matters.
         clusteringIdentifier = nil
-        displayPriority = .required
-        setupLayers()
+        canShowCallout = false
+        titleVisibility = .hidden
+        subtitleVisibility = .hidden
         configure()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
-
-    private func setupLayers() {
-        circle.frame = bounds
-        circle.path = UIBezierPath(ovalIn: bounds).cgPath
-        circle.shadowColor = UIColor.black.cgColor
-        circle.shadowOpacity = 0.18
-        circle.shadowRadius = 2
-        circle.shadowOffset = CGSize(width: 0, height: 1)
-        layer.addSublayer(circle)
-
-        label.frame = bounds
-        label.textAlignment = .center
-        label.font = .systemFont(ofSize: 12, weight: .bold)
-        label.textColor = .white
-        label.adjustsFontForContentSizeCategory = false
-        addSubview(label)
-    }
 
     private func configure() {
         guard let pin = annotation as? TripPlaceAnnotation else { return }
-        let dayColor = UIColor(AppColors.dayColor(for: pin.dayNumber))
-        circle.fillColor = dayColor.cgColor
-        label.text = "\(pin.sortLabel)"
+        mapSelectionActive = false
+        markerTintColor = UIColor(AppColors.dayColor(for: pin.dayNumber))
+        glyphText = "\(pin.sortLabel)"
+        glyphImage = nil
+        glyphTintColor = .white
+        transform = .identity
+        displayPriority = .defaultHigh
         accessibilityLabel = "\(pin.title ?? "Place"), Day \(pin.dayNumber), stop \(pin.sortLabel)"
         isAccessibilityElement = true
     }
+
+    func setMapSelected(_ selected: Bool, animated: Bool) {
+        guard selected != mapSelectionActive else { return }
+        mapSelectionActive = selected
+        let scale: CGFloat = selected ? Self.selectedScale : 1
+        displayPriority = selected ? .required : .defaultHigh
+        let changes = {
+            self.transform = CGAffineTransform(scaleX: scale, y: scale)
+        }
+        if animated {
+            UIView.animate(
+                withDuration: 0.38,
+                delay: 0,
+                usingSpringWithDamping: 0.72,
+                initialSpringVelocity: 0.55,
+                options: [.allowUserInteraction, .beginFromCurrentState],
+                animations: changes
+            )
+        } else {
+            changes()
+        }
+    }
 }
 
-/// Rotated rounded-square diamond + glyph. No clustering.
-final class BookingAnnotationView: MKAnnotationView {
+/// Booking stop — same system marker treatment as trip pins, with a
+/// category symbol in the balloon.
+final class BookingAnnotationView: MKMarkerAnnotationView {
     static let reuseId = "BookingAnnotationView"
 
-    private let diamondContainer = UIView()
-    private let diamond = CAShapeLayer()
-    private let glyph = UIImageView()
+    private static let selectedScale: CGFloat = 1.34
+
+    private var mapSelectionActive = false
 
     override var annotation: MKAnnotation? {
         didSet { configure() }
@@ -163,47 +173,50 @@ final class BookingAnnotationView: MKAnnotationView {
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
-        frame = CGRect(x: 0, y: 0, width: 28, height: 28)
-        canShowCallout = false
         clusteringIdentifier = nil
-        displayPriority = .required
-        setupLayers()
+        canShowCallout = false
+        titleVisibility = .hidden
+        subtitleVisibility = .hidden
         configure()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
-    private func setupLayers() {
-        diamondContainer.frame = CGRect(x: 4, y: 4, width: 20, height: 20)
-        diamondContainer.transform = CGAffineTransform(rotationAngle: .pi / 4)
-        addSubview(diamondContainer)
-
-        diamond.frame = diamondContainer.bounds
-        diamond.path = UIBezierPath(
-            roundedRect: diamondContainer.bounds,
-            cornerRadius: 4
-        ).cgPath
-        diamond.shadowColor = UIColor.black.cgColor
-        diamond.shadowOpacity = 0.18
-        diamond.shadowRadius = 2
-        diamond.shadowOffset = CGSize(width: 0, height: 1)
-        diamondContainer.layer.addSublayer(diamond)
-
-        glyph.frame = bounds
-        glyph.contentMode = .center
-        glyph.tintColor = .white
-        glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 11, weight: .bold)
-        addSubview(glyph)
-    }
-
     private func configure() {
         guard let pin = annotation as? BookingAnnotation else { return }
+        mapSelectionActive = false
         let color = pin.bookingCategory?.color ?? AppColors.appPrimary
-        diamond.fillColor = UIColor(color).cgColor
+        markerTintColor = UIColor(color)
         let symbolName = pin.bookingCategory?.sfSymbol ?? "ticket.fill"
-        glyph.image = UIImage(systemName: symbolName)
+        glyphImage = UIImage(systemName: symbolName)
+        glyphText = nil
+        glyphTintColor = .white
+        transform = .identity
+        displayPriority = .defaultHigh
         accessibilityLabel = "Booking, \(pin.title ?? "")"
         isAccessibilityElement = true
+    }
+
+    func setMapSelected(_ selected: Bool, animated: Bool) {
+        guard selected != mapSelectionActive else { return }
+        mapSelectionActive = selected
+        let scale: CGFloat = selected ? Self.selectedScale : 1
+        displayPriority = selected ? .required : .defaultHigh
+        let changes = {
+            self.transform = CGAffineTransform(scaleX: scale, y: scale)
+        }
+        if animated {
+            UIView.animate(
+                withDuration: 0.38,
+                delay: 0,
+                usingSpringWithDamping: 0.72,
+                initialSpringVelocity: 0.55,
+                options: [.allowUserInteraction, .beginFromCurrentState],
+                animations: changes
+            )
+        } else {
+            changes()
+        }
     }
 }
 
@@ -213,6 +226,10 @@ final class BookingAnnotationView: MKAnnotationView {
 /// paid to enrich.
 final class SearchResultAnnotationView: MKMarkerAnnotationView {
     static let reuseId = "SearchResultAnnotationView"
+
+    private static let selectedScale: CGFloat = 1.3
+
+    private var mapSelectionActive = false
 
     private let ownedDot = CAShapeLayer()
 
@@ -224,7 +241,10 @@ final class SearchResultAnnotationView: MKMarkerAnnotationView {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
         clusteringIdentifier = SearchResultAnnotation.clusterId
         canShowCallout = false
-        animatesWhenAdded = !UIAccessibility.isReduceMotionEnabled
+        titleVisibility = .hidden
+        subtitleVisibility = .hidden
+        // `TripMapKitView` sets this from `reduceMotion` in `viewFor`.
+        animatesWhenAdded = false
         markerTintColor = .systemRed
         glyphImage = nil
         glyphText = nil
@@ -250,11 +270,8 @@ final class SearchResultAnnotationView: MKMarkerAnnotationView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
-    private func configure() {
-        guard let pin = annotation as? SearchResultAnnotation else { return }
-        ownedDot.isHidden = !pin.isOwnedRow
-        // Re-anchor the dot every layout pass — the marker view's bounds
-        // are stable but reuse can put the layer on a freshly-sized view.
+    override func layoutSubviews() {
+        super.layoutSubviews()
         let dotSize: CGFloat = 8
         ownedDot.frame = CGRect(
             x: bounds.width - dotSize - 2,
@@ -263,10 +280,54 @@ final class SearchResultAnnotationView: MKMarkerAnnotationView {
             height: dotSize
         )
         ownedDot.path = UIBezierPath(ovalIn: ownedDot.bounds).cgPath
+    }
+
+    private func configure() {
+        guard let pin = annotation as? SearchResultAnnotation else { return }
+        mapSelectionActive = false
+        ownedDot.isHidden = !pin.isOwnedRow
+        transform = .identity
+        markerTintColor = .systemRed
+        displayPriority = .defaultHigh
+        layoutOwnedDotForCurrentBounds()
 
         let ownedSuffix = pin.isOwnedRow ? ", saved in this city" : ""
         accessibilityLabel = "Search result: \(pin.title ?? "")\(ownedSuffix)"
         isAccessibilityElement = true
+    }
+
+    private func layoutOwnedDotForCurrentBounds() {
+        let dotSize: CGFloat = 8
+        ownedDot.frame = CGRect(
+            x: bounds.width - dotSize - 2,
+            y: bounds.height - dotSize - 2,
+            width: dotSize,
+            height: dotSize
+        )
+        ownedDot.path = UIBezierPath(ovalIn: ownedDot.bounds).cgPath
+    }
+
+    func setMapSelected(_ selected: Bool, animated: Bool) {
+        guard selected != mapSelectionActive else { return }
+        mapSelectionActive = selected
+        let scale: CGFloat = selected ? Self.selectedScale : 1
+        displayPriority = selected ? .required : .defaultHigh
+        let changes = {
+            self.transform = CGAffineTransform(scaleX: scale, y: scale)
+            self.markerTintColor = selected ? .systemBlue : .systemRed
+        }
+        if animated {
+            UIView.animate(
+                withDuration: 0.38,
+                delay: 0,
+                usingSpringWithDamping: 0.72,
+                initialSpringVelocity: 0.55,
+                options: [.allowUserInteraction, .beginFromCurrentState],
+                animations: changes
+            )
+        } else {
+            changes()
+        }
     }
 }
 

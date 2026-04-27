@@ -38,8 +38,6 @@ struct TripMapView: View {
     /// Temporary map pin for a search result selected from autocomplete.
     @State private var searchResultPin: MapSearchPin?
 
-    /// Controls whether the expanded places sheet is shown.
-    @State private var showPlacesSheet = false
     @State private var searchRegion: MKCoordinateRegion
 
     /// Hybrid is the default map style.
@@ -74,7 +72,7 @@ struct TripMapView: View {
     @State private var lastSubmittedMapSearchQuery: String?
     @State private var tabSearchText = ""
     @State private var isTabSearchPresented = false
-    @State private var searchPreviewDetent: PresentationDetent = .medium
+    @State private var searchPreviewDetent: PresentationDetent = PlacesSheetLayout.halfOpenDetent
 
     // MARK: - Transport mode (Phase J.4 polylines)
 
@@ -498,44 +496,72 @@ struct TripMapView: View {
         )
     }
 
+    /// `MapSearchPreviewSheet` on the root — legacy map tab without `sharedState`.
+    private var searchPreviewSheetBindingForRoot: Binding<MapSearchPreview?> {
+        Binding(
+            get: { sharedState == nil ? mapState.selectedSearchResult : nil },
+            set: { mapState.selectedSearchResult = $0 }
+        )
+    }
+
+    /// Stacked on the persistent places sheet so list rows can present preview while the list sheet stays open.
+    private var searchPreviewSheetBindingForPlacesSheet: Binding<MapSearchPreview?> {
+        Binding(
+            get: { sharedState != nil ? mapState.selectedSearchResult : nil },
+            set: { mapState.selectedSearchResult = $0 }
+        )
+    }
+
+    /// iOS 26+ map module stores query text in `MapTabSharedState` for the places sheet search bar.
+    private var effectiveMapTabSearchText: String {
+        sharedState?.mapTabSearchText ?? tabSearchText
+    }
+
+    private func setMapTabSearchText(_ text: String) {
+        if let sharedState {
+            sharedState.mapTabSearchText = text
+        } else {
+            tabSearchText = text
+        }
+    }
+
     var body: some View {
         mapHandoffView
     }
 
-    private var mapSearchableView: some View {
+    private var mapNavigationChrome: some View {
         mapRoot
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                mapPlacesMinimizedAccessory
-            }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .tint(AppColors.appPrimary)
-            .searchable(
-                text: $tabSearchText,
-                isPresented: $isTabSearchPresented,
-                placement: .automatic,
-                prompt: "Search places"
-            )
-            .onChange(of: isTabSearchPresented) { _, isPresented in
-                // The Map tab uses `Tab(role: .search)`, so tapping the
-                // tab-bar search button flips `isTabSearchPresented` to
-                // true. We hand off to our richer custom overlay sheet
-                // instead — but if we let SwiftUI animate the inline
-                // `.searchable` expansion first, the user sees an
-                // unwanted "searchable rises → sheet rises" transform.
-                // Suppress the searchable's expansion animation so the
-                // dismiss is invisible and the only motion the user
-                // perceives is our overlay sheet sliding up.
-                guard isPresented else { return }
-                var t = Transaction()
-                t.disablesAnimations = true
-                withTransaction(t) {
-                    isTabSearchPresented = false
-                }
-                hideMapPlacesSheet()
-                showSearchOverlay = true
+    }
+
+    private var mapSearchableView: some View {
+        Group {
+            if sharedState != nil {
+                mapNavigationChrome
+            } else {
+                mapNavigationChrome
+                    .searchable(
+                        text: $tabSearchText,
+                        isPresented: $isTabSearchPresented,
+                        placement: .automatic,
+                        prompt: "Search places"
+                    )
+                    .onChange(of: isTabSearchPresented) { _, isPresented in
+                        // Legacy map path: hand `.searchable` activation to `MapSearchOverlay`.
+                        guard isPresented else { return }
+                        var t = Transaction()
+                        t.disablesAnimations = true
+                        withTransaction(t) {
+                            isTabSearchPresented = false
+                        }
+                        dockMapPlacesSheet()
+                        showSearchOverlay = true
+                    }
             }
+        }
     }
 
     private var mapDataLifecycleView: some View {
@@ -577,6 +603,9 @@ struct TripMapView: View {
             .onAppear {
                 fitMapForCurrentMode()
                 syncToSharedState()
+                if sharedState != nil {
+                    sharedState?.showPlacesSheet = true
+                }
             }
             .onChange(of: sharedState?.selectedDayFilter) { _, newVal in
                 // `nil` is a meaningful value here ("All days" pill) — we
@@ -588,14 +617,6 @@ struct TripMapView: View {
                     selectedDayFilter = newVal
                 }
             }
-            .onChange(of: sharedState?.showPlacesSheet) { _, newVal in
-                if let newVal, newVal != showPlacesSheet {
-                    showPlacesSheet = newVal
-                }
-            }
-            .onChange(of: showPlacesSheet) { _, newVal in
-                sharedState?.showPlacesSheet = newVal
-            }
             .onChange(of: sharedState?.selectedPlaceToFocus) { _, place in
                 if let place {
                     selectAndFocusPlace(place)
@@ -604,13 +625,25 @@ struct TripMapView: View {
             }
             .onChange(of: selectedPlace) { oldPlace, newPlace in
                 if newPlace != nil {
-                    hideMapPlacesSheet()
+                    dockMapPlacesSheet()
                 }
                 if oldPlace != nil && newPlace == nil {
                     fitMapForCurrentMode()
-                    restoreMapPlacesSheetSmall()
+                    expandMapPlacesSheetToHalf()
                 }
             }
+    }
+
+    /// One native sheet for the whole map tab: always presented when `sharedState` exists.
+    /// Interactive dismiss is disabled; collapsing uses the docked detent instead.
+    private var placesSheetPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { sharedState != nil },
+            set: { allowDismiss in
+                guard allowDismiss == false, sharedState != nil else { return }
+                sharedState?.placesSheetLayout = .docked
+            }
+        )
     }
 
     private var mapSheetsView: some View {
@@ -622,16 +655,157 @@ struct TripMapView: View {
             .sheet(isPresented: $showAddPlace) {
                 addPlaceSheetContent
             }
-            .sheet(isPresented: $showSearchOverlay) {
-                searchOverlaySheet
+            .sheet(isPresented: placesSheetPresentationBinding) {
+                tripPlacesExpandedSheet
             }
+    }
+
+    @ViewBuilder
+    private var tripPlacesExpandedSheet: some View {
+        if let s = sharedState {
+            TripMapPlacesExpandedSheet(
+                trip: trip,
+                selectedDayFilter: Binding(
+                    get: { s.selectedDayFilter },
+                    set: { s.selectedDayFilter = $0 }
+                ),
+                allPlacesForList: s.mappablePlaces,
+                dayNumberByDayId: s.dayNumberByDayId,
+                onSelectPlace: { place in
+                    s.placesSheetLayout = .docked
+                    s.selectedPlaceToFocus = place
+                },
+                placesSheetLayout: Binding(
+                    get: { s.placesSheetLayout },
+                    set: { s.placesSheetLayout = $0 }
+                ),
+                searchText: Binding(
+                    get: { s.mapTabSearchText },
+                    set: { s.mapTabSearchText = $0 }
+                ),
+                isSearchPresented: Binding(
+                    get: { s.mapTabSearchPresented },
+                    set: { s.mapTabSearchPresented = $0 }
+                ),
+                openInlineMapSearch: Binding(
+                    get: { s.openInlineMapSearch },
+                    set: { s.openInlineMapSearch = $0 }
+                ),
+                onOpenSuggestedPlaces: {
+                    showSuggestedPlacesBrowser = true
+                },
+                mapSearchResults: mapState.searchResults,
+                onSelectMapSearchPreview: { handleSearchResultTapped($0) },
+                onClearActiveMapSearch: { clearSearchResults() },
+                mapSearchOverlay: { embeds, activationDelayMs, endInline in
+                    mapSearchOverlayForPlacesSheet(
+                        embedsInParentSheet: embeds,
+                        embeddedSearchFieldActivationDelayMs: activationDelayMs,
+                        endInlineSearch: endInline
+                    )
+                }
+            )
+            .presentationDetents(
+                [PlacesSheetLayout.compactDetent, PlacesSheetLayout.halfOpenDetent, .large],
+                selection: Binding(
+                    get: { s.placesSheetLayout.presentationDetent },
+                    set: { s.placesSheetLayout = PlacesSheetLayout(resolving: $0) }
+                )
+            )
+            .presentationContentInteraction(.scrolls)
+            // Keep the map pannable/zoomable and avoid the dimmed backdrop while the sheet is up.
+            .presentationBackgroundInteraction(.enabled)
+            .presentationBackground(.regularMaterial)
+            .presentationDragIndicator(.hidden)
+            .interactiveDismissDisabled(true)
+            .tint(AppColors.appPrimary)
+            .sheet(item: searchPreviewSheetBindingForPlacesSheet) { preview in
+                searchPreviewSheet(for: preview)
+            }
+            // Present add-to-day from the places sheet so it stacks above the nested search preview;
+            // a root-level `.sheet` on `mapHandoffView` often never appears while those sheets are up.
+            .sheet(isPresented: $showAddToDay) {
+                addToDaySheet
+            }
+        }
+    }
+
+    private func mapSearchOverlayForPlacesSheet(
+        embedsInParentSheet: Bool,
+        embeddedSearchFieldActivationDelayMs: Int,
+        endInlineSearch: @escaping () -> Void
+    ) -> MapSearchOverlay {
+        MapSearchOverlay(
+            country: tripCountryGuess,
+            initialQuery: effectiveMapTabSearchText,
+            cityProfileId: resolvedCityProfileId,
+            region: effectiveSearchRegion,
+            excludedPlaceIds: mapState.scheduledDayPlaceIds,
+            embedsInParentSheet: embedsInParentSheet,
+            onCollapseEmbedded: embedsInParentSheet ? endInlineSearch : nil,
+            suppressesEnvironmentDismiss: false,
+            embeddedSearchFieldActivationDelayMs: embeddedSearchFieldActivationDelayMs,
+            onPickResult: { handleOverlayPicked($0) },
+            onPickSuggestedResult: { handleSearchSheetSuggestedPicked($0) },
+            onPickSuggestedBrowserResult: { handleSuggestedPlacesPicked($0) },
+            onPickCategory: { pill, results in
+                handleCategoryResults(pill: pill, results: results)
+            },
+            onSubmitSearch: { query, results in
+                handleSubmittedSearch(query: query, results: results)
+            },
+            onCancel: {
+                endInlineSearch()
+                showSearchOverlay = false
+                returnToSearchOverlay = false
+            },
+            onOpenSuggestedPlacesSheet: embedsInParentSheet
+                ? { showSuggestedPlacesBrowser = true }
+                : nil
+        )
+    }
+
+    /// Legacy map (no `sharedState`): full-screen search on the map — not a separate `.sheet`.
+    @ViewBuilder
+    private var legacyFullScreenMapSearchOverlay: some View {
+        if showSearchOverlay, sharedState == nil {
+            MapSearchOverlay(
+                country: tripCountryGuess,
+                initialQuery: effectiveMapTabSearchText,
+                cityProfileId: resolvedCityProfileId,
+                region: effectiveSearchRegion,
+                excludedPlaceIds: mapState.scheduledDayPlaceIds,
+                embedsInParentSheet: false,
+                onCollapseEmbedded: nil,
+                suppressesEnvironmentDismiss: true,
+                onPickResult: { handleOverlayPicked($0) },
+                onPickSuggestedResult: { handleSearchSheetSuggestedPicked($0) },
+                onPickSuggestedBrowserResult: { handleSuggestedPlacesPicked($0) },
+                onPickCategory: { pill, results in
+                    handleCategoryResults(pill: pill, results: results)
+                },
+                onSubmitSearch: { query, results in
+                    handleSubmittedSearch(query: query, results: results)
+                },
+                onCancel: {
+                    showSearchOverlay = false
+                    returnToSearchOverlay = false
+                }
+            )
+            .ignoresSafeArea()
+        }
     }
 
     private var mapHandoffView: some View {
         mapSheetsView
+            .overlay {
+                legacyFullScreenMapSearchOverlay
+            }
             .onChange(of: showSearchOverlay) { _, isPresented in
                 if isPresented {
-                    hideMapPlacesSheet()
+                    if sharedState == nil {
+                        dockMapPlacesSheet()
+                    }
                 } else if let preview = pendingSuggestedPlacesPreview {
                     pendingSuggestedPlacesPreview = nil
                     Task {
@@ -641,23 +815,23 @@ struct TripMapView: View {
                         }
                     }
                 } else {
-                    restoreMapPlacesSheetSmallAfterTransition()
+                    expandMapPlacesSheetToHalfAfterTransition()
                 }
             }
             .sheet(isPresented: $showSuggestedPlacesBrowser) {
                 suggestedPlacesBrowserSheet
             }
-            .sheet(item: selectedSearchResultBinding, content: searchPreviewSheet)
-            .sheet(isPresented: $showAddToDay) {
+            .sheet(item: searchPreviewSheetBindingForRoot, content: searchPreviewSheet)
+            .modifier(RootAddToDaySheetModifier(isLegacyMap: sharedState == nil, showAddToDay: $showAddToDay) {
                 addToDaySheet
-            }
+            })
             .onChange(of: showSuggestedPlacesBrowser) { _, isPresented in
                 if isPresented {
-                    hideMapPlacesSheet()
+                    dockMapPlacesSheet()
                     return
                 }
                 guard let preview = pendingSuggestedPlacesPreview else {
-                    restoreMapPlacesSheetSmallAfterTransition()
+                    expandMapPlacesSheetToHalfAfterTransition()
                     return
                 }
                 pendingSuggestedPlacesPreview = nil
@@ -694,24 +868,30 @@ struct TripMapView: View {
                         try? await Task.sleep(for: .milliseconds(350))
                         await MainActor.run {
                             guard returnToSearchOverlay else { return }
-                            showSearchOverlay = true
+                            if let s = sharedState {
+                                s.showPlacesSheet = true
+                                s.placesSheetLayout = .full
+                                s.openInlineMapSearch = true
+                            } else {
+                                showSearchOverlay = true
+                            }
                         }
                     }
-                } else if newVal != nil && showPlacesSheet {
-                    hideMapPlacesSheet()
-                    searchPreviewDetent = .medium
+                } else if newVal != nil && sharedState != nil {
+                    dockMapPlacesSheet()
+                    searchPreviewDetent = PlacesSheetLayout.halfOpenDetent
                 } else if newVal != nil {
-                    hideMapPlacesSheet()
-                    searchPreviewDetent = .medium
+                    dockMapPlacesSheet()
+                    searchPreviewDetent = PlacesSheetLayout.halfOpenDetent
                 } else {
-                    restoreMapPlacesSheetSmallAfterTransition()
+                    expandMapPlacesSheetToHalfAfterTransition()
                 }
             }
             .onChange(of: showAddToDay) { _, isPresented in
                 if isPresented {
-                    hideMapPlacesSheet()
+                    dockMapPlacesSheet()
                 } else {
-                    restoreMapPlacesSheetSmallAfterTransition()
+                    expandMapPlacesSheetToHalfAfterTransition()
                 }
             }
     }
@@ -732,42 +912,8 @@ struct TripMapView: View {
         TripMapModesSheet(selectedMode: $mapMode)
             .presentationDetents([.height(220), .medium])
             .presentationDragIndicator(.visible)
+            .presentationBackgroundInteraction(.enabled)
             .presentationBackground(.regularMaterial)
-            // `.enabled` forwards taps to the map and blocks the usual backdrop dismiss.
-            .presentationBackgroundInteraction(.disabled)
-    }
-
-    private var searchOverlaySheet: some View {
-        MapSearchOverlay(
-            country: tripCountryGuess,
-            initialQuery: tabSearchText,
-            cityProfileId: resolvedCityProfileId,
-            region: effectiveSearchRegion,
-            excludedPlaceIds: mapState.scheduledDayPlaceIds,
-            onPickResult: { preview in
-                handleOverlayPicked(preview)
-            },
-            onPickSuggestedResult: { preview in
-                handleSearchSheetSuggestedPicked(preview)
-            },
-            onPickSuggestedBrowserResult: { preview in
-                handleSuggestedPlacesPicked(preview)
-            },
-            onPickCategory: { pill, results in
-                handleCategoryResults(pill: pill, results: results)
-            },
-            onSubmitSearch: { query, results in
-                handleSubmittedSearch(query: query, results: results)
-            },
-            onCancel: {
-                showSearchOverlay = false
-                returnToSearchOverlay = false
-            }
-        )
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-        .presentationCornerRadius(28)
-        .presentationBackground(.regularMaterial)
     }
 
     private var suggestedPlacesBrowserSheet: some View {
@@ -785,6 +931,7 @@ struct TripMapView: View {
         .presentationDetents([.medium, .large])
         .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.visible)
+        .presentationBackgroundInteraction(.enabled)
         .presentationBackground(.regularMaterial)
     }
 
@@ -805,9 +952,12 @@ struct TripMapView: View {
                 mapState.selectedSearchResult = nil
             }
         )
-        .presentationDetents([.height(180), .medium, .large], selection: $searchPreviewDetent)
+        .presentationDetents(
+            [PlacesSheetLayout.halfOpenDetent, .medium, .large],
+            selection: $searchPreviewDetent
+        )
         .presentationDragIndicator(.visible)
-        .presentationBackgroundInteraction(.enabled(upThrough: .height(180)))
+        .presentationBackgroundInteraction(.enabled(upThrough: PlacesSheetLayout.halfOpenDetent))
         .presentationBackground(.regularMaterial)
     }
 
@@ -858,7 +1008,7 @@ struct TripMapView: View {
                             .onChange(of: geo.size.height) { _, h in mapContainerHeight = h }
                     }
                 )
-                .onChange(of: showPlacesSheet) { _, _ in
+                .onChange(of: sharedState?.placesSheetLayout) { _, _ in
                     if searchResultPin == nil && mapState.searchResults.isEmpty {
                         fitMapForCurrentMode()
                     }
@@ -872,56 +1022,25 @@ struct TripMapView: View {
         }
     }
 
-    @ViewBuilder
-    private var mapPlacesMinimizedAccessory: some View {
-        if shouldShowMapPlacesMinimizedAccessory {
-            MapPlacesMinimizedAccessory(
-                trip: trip,
-                selectedDayFilter: Binding(
-                    get: { selectedDayFilter },
-                    set: { selectedDayFilter = $0 }
-                ),
-                allPlacesForList: mappablePlaces,
-                onExpand: {
-                    showPlacesSheet = true
-                    sharedState?.showPlacesSheet = true
-                }
-            )
-        }
+    private func dockMapPlacesSheet() {
+        guard sharedState != nil else { return }
+        sharedState?.placesSheetLayout = .docked
+        sharedState?.showPlacesSheet = true
     }
 
-    private var shouldShowMapPlacesMinimizedAccessory: Bool {
-        sharedState != nil
-            && !showPlacesSheet
-            && !showSearchOverlay
-            && !showSuggestedPlacesBrowser
-            && !showAddToDay
-            && !showAddPlace
-            && !showMapModesSheet
-            && selectedPlace == nil
-            && mapState.selectedSearchResult == nil
-    }
-
-    private func hideMapPlacesSheet() {
-        showPlacesSheet = false
-        sharedState?.showPlacesSheet = false
-    }
-
-    private func restoreMapPlacesSheetSmallAfterTransition() {
+    private func expandMapPlacesSheetToHalfAfterTransition() {
         Task {
             try? await Task.sleep(for: .milliseconds(350))
             await MainActor.run {
-                restoreMapPlacesSheetSmall()
+                expandMapPlacesSheetToHalf()
             }
         }
     }
 
-    private func restoreMapPlacesSheetSmall() {
-        // The minimized places control is now a safe-area accessory, not
-        // a sheet detent. Keep the expanded sheet dismissed so the
-        // accessory can reappear above the tab bar.
-        sharedState?.showPlacesSheet = false
-        showPlacesSheet = false
+    private func expandMapPlacesSheetToHalf() {
+        guard sharedState != nil else { return }
+        sharedState?.placesSheetLayout = .half
+        sharedState?.showPlacesSheet = true
     }
 
     /// "Search this area" pill — appears once the user has panned past
@@ -1033,6 +1152,8 @@ struct TripMapView: View {
             cameraTarget: cameraTarget,
             configuration: currentMapKitConfiguration,
             reduceMotion: reduceMotion,
+            selectedTripPlaceId: selectedPlace?.id,
+            selectedSearchResultId: mapState.selectedSearchResult?.id,
             onTapTripPlace: { place in
                 HapticManager.light()
                 selectedPlace = place
@@ -1431,8 +1552,15 @@ struct TripMapView: View {
         let bottomCovered: CGFloat
         if mapState.selectedSearchResult != nil {
             bottomCovered = height * 0.30
-        } else if showPlacesSheet {
-            bottomCovered = height * 0.5
+        } else if let layout = sharedState?.placesSheetLayout {
+            switch layout {
+            case .docked:
+                bottomCovered = 150
+            case .half:
+                bottomCovered = max(300, height * 0.34)
+            case .full:
+                bottomCovered = height * 0.5
+            }
         } else {
             bottomCovered = 120
         }
@@ -1524,7 +1652,7 @@ struct TripMapView: View {
 
     private func handleCategoryResults(pill: CategoryPill, results: [MapSearchPreview]) {
         showSearchOverlay = false
-        tabSearchText = pill.label
+        setMapTabSearchText(pill.label)
         returnToSearchOverlay = false
         returnToSuggestedPlacesBrowser = false
         lastPickedCategory = pill
@@ -1552,9 +1680,12 @@ struct TripMapView: View {
     /// as exploratory map pins.
     private func handleSubmittedSearch(query: String, results: [MapSearchPreview]) {
         showSearchOverlay = false
-        tabSearchText = query
-        showPlacesSheet = false
-        sharedState?.showPlacesSheet = false
+        setMapTabSearchText(query)
+        if sharedState != nil {
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.88)) {
+                sharedState?.placesSheetLayout = .half
+            }
+        }
         mapState.selectedSearchResult = nil
         returnToSearchOverlay = false
         returnToSuggestedPlacesBrowser = false
@@ -1619,7 +1750,7 @@ struct TripMapView: View {
         searchResultPin = nil
         lastPickedCategory = nil
         lastSubmittedMapSearchQuery = nil
-        tabSearchText = ""
+        setMapTabSearchText("")
         lastCategoryRegion = nil
         returnToSearchOverlay = false
         returnToSuggestedPlacesBrowser = false
@@ -1791,6 +1922,22 @@ struct TripMapView: View {
 // here so `TripMapView` can re-run searches without depending on the
 // overlay being on screen.
 
+/// Presents `MapAddToDaySheet` from the map handoff root only for the legacy map tab (`sharedState == nil`).
+/// When the persistent places sheet is up, add-to-day is attached to that sheet so it stacks above the nested search preview.
+private struct RootAddToDaySheetModifier<Sheet: View>: ViewModifier {
+    var isLegacyMap: Bool
+    @Binding var showAddToDay: Bool
+    @ViewBuilder var sheet: () -> Sheet
+
+    func body(content: Content) -> some View {
+        if isLegacyMap {
+            content.sheet(isPresented: $showAddToDay, content: sheet)
+        } else {
+            content
+        }
+    }
+}
+
 private extension CategoryPill {
     var matchingPlaceCategory: PlaceCategory? {
         switch id {
@@ -1807,15 +1954,22 @@ private extension CategoryPill {
 #if DEBUG
 // MARK: - Previews
 
-/// Canvas / `#Preview` host: same shape as the Map tab (`NavigationStack` + shared state for the places strip).
-/// Uses `Trip.preview` so `MockDataService` timeline loads when `AppConfig.useRealBackend` is `false`.
+/// Canvas / `#Preview` host: matches production — `MapTabWrapper` + `TripMapView` keep one persistent places `.sheet`.
 private struct TripMapViewPreviewHost: View {
     @State private var dataService = DataService()
     @State private var mapTabState = MapTabSharedState()
 
     var body: some View {
-        NavigationStack {
-            TripMapView(trip: .preview, sharedState: mapTabState)
+        Group {
+            if #available(iOS 26.0, *) {
+                NavigationStack {
+                    MapTabWrapper(trip: .preview, mapState: mapTabState)
+                }
+            } else {
+                NavigationStack {
+                    TripMapView(trip: .preview)
+                }
+            }
         }
         .environment(dataService)
         .tint(AppColors.appPrimary)

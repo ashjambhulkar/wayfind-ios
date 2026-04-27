@@ -44,6 +44,20 @@ struct MapSearchOverlay: View {
     /// uses this to skip rows already on the itinerary.
     var excludedPlaceIds: Set<String>
 
+    /// When true, this overlay lives inside the trip places sheet — use
+    /// `onCollapseEmbedded` instead of `dismiss()` so the parent sheet stays open.
+    var embedsInParentSheet: Bool = false
+
+    /// Collapses the embedded search surface (e.g. return to day list). Ignored when not embedded.
+    var onCollapseEmbedded: (() -> Void)?
+
+    /// When true (full-screen overlay on the map, not a `.sheet`), never call `Environment.dismiss`.
+    var suppressesEnvironmentDismiss: Bool = false
+
+    /// When embedded: wait this long before presenting/focusing the nav search field so a
+    /// parent sheet can finish a detent animation. Use `0` when the parent is already `.large`.
+    var embeddedSearchFieldActivationDelayMs: Int = 0
+
     /// Called when the user picks a single result (autocomplete or
     /// recent). Hands the resolved preview back so the map can drop a
     /// pin and open the preview sheet.
@@ -69,6 +83,9 @@ struct MapSearchOverlay: View {
     /// Dismiss without picking.
     var onCancel: () -> Void
 
+    /// Embedded in the places sheet: opens the full suggested-places browser while search is idle (`!isSearching`).
+    var onOpenSuggestedPlacesSheet: (() -> Void)?
+
     // MARK: - Local state
 
     @State private var query: String
@@ -93,6 +110,15 @@ struct MapSearchOverlay: View {
 
     @AppStorage("mapSearchRecents") private var recentsRaw: String = ""
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.isSearching) private var isSearching
+
+    /// Embedded in the places sheet: system search must be presented + focused after the
+    /// parent sheet finishes animating to `.large`, otherwise the field never becomes first responder.
+    @State private var embeddedSearchPresentationExpanded = false
+    @FocusState private var embeddedSearchFieldFocused: Bool
+    /// After the first embedded activation pass (delay/yield + expand + focus), so the suggested shortcut
+    /// does not flash on screen while `isPresented`/focus are still settling.
+    @State private var embeddedSuggestedShortcutActivationReady = false
 
     private var provider: FeatureFlagsService.MapSearchProvider {
         FeatureFlagsService.shared.mapSearchProvider(forCountry: country)
@@ -104,68 +130,85 @@ struct MapSearchOverlay: View {
         "\(cityProfileId?.uuidString ?? "_")|\(excludedPlaceIds.sorted().joined(separator: ","))"
     }
 
+    private var trimmedEmbeddedSearchQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Focused or any typed text: hide the suggested-places shortcut (system search supplies Cancel / dismiss).
+    private var embeddedSearchHidesSuggestedShortcut: Bool {
+        guard embedsInParentSheet else { return false }
+        if !trimmedEmbeddedSearchQuery.isEmpty { return true }
+        if #available(iOS 18, *) {
+            return embeddedSearchFieldFocused
+        }
+        return isSearching
+    }
+
+    /// Sparkles only in the idle embedded state (no focus, empty field), after activation settles.
+    private var showsEmbeddedSuggestedPlacesShortcut: Bool {
+        guard onOpenSuggestedPlacesSheet != nil, embeddedSuggestedShortcutActivationReady else { return false }
+        return !embeddedSearchHidesSuggestedShortcut
+    }
+
     init(
         country: String?,
         initialQuery: String = "",
         cityProfileId: UUID?,
         region: MKCoordinateRegion,
         excludedPlaceIds: Set<String>,
+        embedsInParentSheet: Bool = false,
+        onCollapseEmbedded: (() -> Void)? = nil,
+        suppressesEnvironmentDismiss: Bool = false,
+        embeddedSearchFieldActivationDelayMs: Int = 0,
         onPickResult: @escaping (MapSearchPreview) -> Void,
         onPickSuggestedResult: @escaping (MapSearchPreview) -> Void,
         onPickSuggestedBrowserResult: @escaping (MapSearchPreview) -> Void,
         onPickCategory: @escaping (CategoryPill, [MapSearchPreview]) -> Void,
         onSubmitSearch: @escaping (_ query: String, _ results: [MapSearchPreview]) -> Void,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        onOpenSuggestedPlacesSheet: (() -> Void)? = nil
     ) {
         self.country = country
         self.initialQuery = initialQuery
         self.cityProfileId = cityProfileId
         self.region = region
         self.excludedPlaceIds = excludedPlaceIds
+        self.embedsInParentSheet = embedsInParentSheet
+        self.onCollapseEmbedded = onCollapseEmbedded
+        self.suppressesEnvironmentDismiss = suppressesEnvironmentDismiss
+        self.embeddedSearchFieldActivationDelayMs = embeddedSearchFieldActivationDelayMs
         self.onPickResult = onPickResult
         self.onPickSuggestedResult = onPickSuggestedResult
         self.onPickSuggestedBrowserResult = onPickSuggestedBrowserResult
         self.onPickCategory = onPickCategory
         self.onSubmitSearch = onSubmitSearch
         self.onCancel = onCancel
+        self.onOpenSuggestedPlacesSheet = onOpenSuggestedPlacesSheet
         _query = State(initialValue: initialQuery)
+        // Embedded: start with the search field expanded so the first frame matches full-screen search chrome
+        // (async work below only defers first responder, not the visible search bar).
+        _embeddedSearchPresentationExpanded = State(initialValue: embedsInParentSheet)
+    }
+
+    /// When embedded in the trip places sheet, stay visually one surface with the parent (no second opaque card).
+    private var searchSurfaceBackground: Color {
+        embedsInParentSheet ? Color.clear : AppColors.appBackground
     }
 
     var body: some View {
-        NavigationStack {
-            resultsListContainer
-                .background(AppColors.appBackground)
-                .navigationBarTitleDisplayMode(.inline)
-                .navigationTitle(String(localized: "Search Items"))
-                .searchable(
-                    text: $query,
-                    placement: .navigationBarDrawer(displayMode: .always),
-                    prompt: String(localized: "Search...")
-                )
-                .onSubmit(of: .search) {
-                    submitCurrentQueryToMap()
+        Group {
+            if embedsInParentSheet {
+                NavigationStack {
+                    mapSearchEmbeddedContent
                 }
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            HapticManager.light()
-                            onCancel()
-                            dismiss()
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        .accessibilityLabel(String(localized: "Close"))
-                    }
+            } else {
+                NavigationStack {
+                    mapSearchStackHostedContent
                 }
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    categoryPillsInset
-                }
+            }
         }
         .onAppear {
-            if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                refreshSuggestions(for: query)
-            }
+            onOverlayAppear()
         }
         .task(id: suggestedPlacesTaskKey) {
             await loadSuggestedIfNeeded()
@@ -180,6 +223,7 @@ struct MapSearchOverlay: View {
             apple.clear()
             google.clearResults()
             ownedRowsTask?.cancel()
+            resetEmbeddedSearchPresentationState()
         }
         .sheet(isPresented: $showAllSuggested) {
             SuggestedPlacesAllSheet(
@@ -199,6 +243,150 @@ struct MapSearchOverlay: View {
         .tint(AppColors.appPrimary)
     }
 
+    /// Full-screen map search only — needs `NavigationStack` for drawer-style `.searchable` + toolbar close.
+    @ViewBuilder
+    private var mapSearchStackHostedContent: some View {
+        let shell = resultsListContainer
+            .background(searchSurfaceBackground)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("")
+
+        shell
+            .searchable(
+                text: $query,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: String(localized: "Search...")
+            )
+            .onSubmit(of: .search) {
+                submitCurrentQueryToMap()
+            }
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        HapticManager.light()
+                        onCancel()
+                        if !suppressesEnvironmentDismiss {
+                            dismiss()
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel(String(localized: "Close"))
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                categoryPillsInset
+            }
+    }
+
+    /// Embedded in the trip places sheet: same drawer-style `.searchable` as full-screen search (needs a
+    /// `NavigationStack` host). Optional suggested shortcut in `mapSearchEmbeddedTopInset`; dismiss via system search UI.
+    @ViewBuilder
+    private var mapSearchEmbeddedContent: some View {
+        let shell = resultsListContainer
+            .background(searchSurfaceBackground)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("")
+            // Pulls the drawer search field up vs. an opaque bar — matches `TripMapView` map chrome.
+            .toolbarBackground(.hidden, for: .navigationBar)
+
+        Group {
+            if #available(iOS 18, *) {
+                shell
+                    .searchable(
+                        text: $query,
+                        isPresented: $embeddedSearchPresentationExpanded,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: String(localized: "Search...")
+                    )
+                    .searchFocused($embeddedSearchFieldFocused)
+            } else {
+                shell
+                    .searchable(
+                        text: $query,
+                        isPresented: $embeddedSearchPresentationExpanded,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: String(localized: "Search...")
+                    )
+            }
+        }
+        .onSubmit(of: .search) {
+            submitCurrentQueryToMap()
+        }
+        .onChange(of: embeddedSearchPresentationExpanded) { _, expanded in
+            if !expanded {
+                onCollapseEmbedded?()
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            mapSearchEmbeddedTopInset
+        }
+    }
+
+    /// Trailing **Suggested** only when the field is idle; no extra Close (`.searchable` already provides one).
+    private var mapSearchEmbeddedTopInset: some View {
+        VStack(spacing: 0) {
+            if let openSuggested = onOpenSuggestedPlacesSheet, showsEmbeddedSuggestedPlacesShortcut {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button {
+                        HapticManager.light()
+                        openSuggested()
+                    } label: {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(Color(UIColor.tertiarySystemFill), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+                    .accessibilityLabel(String(localized: "Suggested Places"))
+                    .accessibilityHint(String(localized: "Opens the list of suggested places for this trip"))
+                }
+                .padding(.horizontal, AppSpacing.md)
+                .padding(.bottom, 2)
+            }
+            categoryPillsInsetEmbeddedUnderSearch
+        }
+    }
+
+    private func onOverlayAppear() {
+        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            refreshSuggestions(for: query)
+        }
+        guard embedsInParentSheet else { return }
+        embeddedSuggestedShortcutActivationReady = false
+        // Keep the search bar visible immediately; only delay grabbing first responder so a parent
+        // sheet detent animation can finish (see `embeddedSearchFieldActivationDelayMs`).
+        embeddedSearchPresentationExpanded = true
+        if #available(iOS 18, *) {
+            embeddedSearchFieldFocused = false
+        }
+        Task { @MainActor in
+            if embeddedSearchFieldActivationDelayMs > 0 {
+                try? await Task.sleep(for: .milliseconds(embeddedSearchFieldActivationDelayMs))
+            } else {
+                await Task.yield()
+            }
+            if #available(iOS 18, *) {
+                embeddedSearchFieldFocused = true
+            }
+            embeddedSuggestedShortcutActivationReady = true
+        }
+    }
+
+    private func resetEmbeddedSearchPresentationState() {
+        guard embedsInParentSheet else { return }
+        embeddedSuggestedShortcutActivationReady = false
+        embeddedSearchPresentationExpanded = false
+        if #available(iOS 18, *) {
+            embeddedSearchFieldFocused = false
+        }
+    }
+
     private var categoryPillsInset: some View {
         CategoryPillsRow { pill in
             HapticManager.selection()
@@ -207,7 +395,20 @@ struct MapSearchOverlay: View {
         .padding(.horizontal, AppSpacing.lg)
         .padding(.vertical, AppSpacing.sm)
         .frame(maxWidth: .infinity)
-        .background(AppColors.appBackground)
+        .background(searchSurfaceBackground)
+    }
+
+    /// Tighter top padding than `categoryPillsInset` so the row sits closer to the embedded drawer search field.
+    private var categoryPillsInsetEmbeddedUnderSearch: some View {
+        CategoryPillsRow { pill in
+            HapticManager.selection()
+            runCategorySearch(pill)
+        }
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.top, AppSpacing.xs)
+        .padding(.bottom, AppSpacing.sm)
+        .frame(maxWidth: .infinity)
+        .background(searchSurfaceBackground)
     }
 
     // MARK: - Results list
@@ -273,6 +474,7 @@ struct MapSearchOverlay: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .modifier(MapSearchEmbeddedScrollHorizontalBalanceModifier(isEmbedded: embedsInParentSheet))
         .scrollDismissesKeyboard(.interactively)
     }
 
@@ -431,6 +633,7 @@ struct MapSearchOverlay: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .modifier(MapSearchEmbeddedScrollHorizontalBalanceModifier(isEmbedded: embedsInParentSheet))
         .scrollDismissesKeyboard(.interactively)
         .environment(\.defaultMinListRowHeight, 58)
     }
@@ -632,25 +835,35 @@ struct MapSearchOverlay: View {
 
     // MARK: - Actions
 
+    private func dismissEmbeddedOrPresented() {
+        if embedsInParentSheet {
+            onCollapseEmbedded?()
+        } else if suppressesEnvironmentDismiss {
+            return
+        } else {
+            dismiss()
+        }
+    }
+
     private func commit(_ preview: MapSearchPreview) {
         rememberRecent(query)
         HapticManager.light()
         onPickResult(preview)
-        dismiss()
+        dismissEmbeddedOrPresented()
     }
 
     private func commitSuggestedBrowserPick(_ preview: MapSearchPreview) {
         rememberRecent(query)
         HapticManager.light()
         onPickSuggestedBrowserResult(preview)
-        dismiss()
+        dismissEmbeddedOrPresented()
     }
 
     private func commitInlineSuggestedPick(_ preview: MapSearchPreview) {
         rememberRecent(query)
         HapticManager.light()
         onPickSuggestedResult(preview)
-        dismiss()
+        dismissEmbeddedOrPresented()
     }
 
     private func resolveAndCommit(_ suggestion: AppleMapSuggestion) {
@@ -732,7 +945,7 @@ struct MapSearchOverlay: View {
 
             await MainActor.run {
                 onPickCategory(pill, merged)
-                dismiss()
+                dismissEmbeddedOrPresented()
             }
         }
     }
@@ -765,7 +978,7 @@ struct MapSearchOverlay: View {
                 pendingResolve = false
                 HapticManager.light()
                 onSubmitSearch(trimmed, merged)
-                dismiss()
+                dismissEmbeddedOrPresented()
             }
         }
     }
@@ -857,6 +1070,24 @@ struct MapSearchOverlay: View {
 
 }
 
+/// Embedded places-sheet search: adds symmetric horizontal scroll insets so inset-grouped results
+/// don’t read flush against the sheet edge (negative margins were pulling content toward the bezel).
+private struct MapSearchEmbeddedScrollHorizontalBalanceModifier: ViewModifier {
+    var isEmbedded: Bool
+
+    func body(content: Content) -> some View {
+        if isEmbedded {
+            content
+                .contentMargins(.horizontal, Self.horizontalGutter, for: .scrollContent)
+        } else {
+            content
+        }
+    }
+
+    /// Matches the app’s standard readable margin (`AppSpacing.lg`) so focused search feels consistent with the pill row.
+    private static let horizontalGutter: CGFloat = AppSpacing.lg
+}
+
 // MARK: - Category pills row
 
 /// Apple Maps-style horizontal pill strip — neutral material capsule,
@@ -939,7 +1170,7 @@ private extension CategoryPill {
 // Order matters: brand-specific entries beat generic words. Add new
 // well-known global brands as they come up in user reports.
 
-private enum SearchRowIconHeuristic {
+enum SearchRowIconHeuristic {
     typealias Match = (symbol: String, family: PlaceCategoryFamily)
 
     static func icon(forTitle rawTitle: String) -> Match {
@@ -1090,7 +1321,7 @@ private enum SearchRowIconHeuristic {
     )
 }
 
-/// Same presentation chrome as `TripMapView.searchOverlaySheet` — use this in Canvas for a realistic sheet.
+/// Sheet presentation chrome for Canvas previews (legacy map uses a full-screen overlay instead).
 #Preview("Search overlay — in sheet (Canvas)") {
     @Previewable @State var showSheet = true
     Color.clear
