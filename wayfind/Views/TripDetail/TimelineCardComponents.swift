@@ -19,12 +19,13 @@ import SwiftUI
 struct TimePinView: View {
     let time: Date
     let tint: Color
+    var timeZone: TimeZone = .current
 
     private static let tailSize: CGFloat = 5
     private static let cornerRadius: CGFloat = 8
 
     var body: some View {
-        Text(hourMinuteString(time))
+        Text(hourMinuteString(time, timeZone: timeZone))
             .font(.appSmall.weight(.semibold))
             .monospacedDigit()
             .foregroundStyle(AppColors.textPrimary)
@@ -130,8 +131,10 @@ extension View {
 /// column has identical width. Locale-independent on purpose — the visual
 /// timeline reads better with a single, predictable format. Locale-aware
 /// strings live in accessibility labels via `Date.timeFormatted`.
-func hourMinuteString(_ date: Date) -> String {
-    let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
+func hourMinuteString(_ date: Date, timeZone: TimeZone = .current) -> String {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = timeZone
+    let comps = cal.dateComponents([.hour, .minute], from: date)
     let hour = comps.hour ?? 0
     let minute = comps.minute ?? 0
     return String(format: "%02d:%02d", hour, minute)

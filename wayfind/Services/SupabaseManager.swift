@@ -433,6 +433,11 @@ final class SupabaseManager {
         let image_source: String?
         let images_refreshed_at: String?
         let thumbnail_attribution: String?
+        /// Gallery JSONB: array of URL strings and/or objects with url-like keys
+        /// (`url`, `thumbnail`, …). Hero prefers `firstGalleryImageURL(from:)`.
+        let images: JSONValue?
+        /// Serp/Google-style popular times: `{ "current_day", "graph_results" }`.
+        let popular_times: JSONValue?
 
         // Phase I.1 — per-field attribution payload (CC license + DSA
         // compliance). Shape: `{ "summary": { "sources": [...] }, ... }`.
@@ -465,6 +470,92 @@ final class SupabaseManager {
         }
     }
 
+    // MARK: - city_places.images (hero gallery)
+
+    /// Keys aligned with `IMAGE_OBJECT_URL_KEYS` in `city_places_pool.ts`.
+    private static let cityPlaceImageObjectURLKeys: [String] = [
+        "url", "thumbnail", "serpapi_thumbnail", "photo_uri", "photoUri", "link", "src",
+    ]
+
+    /// First usable gallery URL from `city_places.images` JSONB (not `thumbnail_url`).
+    /// Mirrors `firstImageUrlFromImagesJson` in `city_places_pool.ts`.
+    static func firstGalleryImageURL(from images: JSONValue?) -> String? {
+        guard let images else { return nil }
+        switch images {
+        case .null:
+            return nil
+        case .string(let s):
+            return firstGalleryImageURLFromEncodedString(s)
+        case .array(let arr):
+            return firstGalleryImageURLFromJSONArray(arr)
+        default:
+            return nil
+        }
+    }
+
+    private static func firstGalleryImageURLFromEncodedString(_ s: String) -> String? {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return nil }
+        if t.hasPrefix("[") || t.hasPrefix("{") {
+            guard let data = t.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) else { return nil }
+            return firstGalleryImageURLFromJSONSerialization(obj)
+        }
+        return trimHTTPURLString(t)
+    }
+
+    private static func firstGalleryImageURLFromJSONArray(_ arr: [JSONValue]) -> String? {
+        for item in arr {
+            switch item {
+            case .string(let s):
+                if let u = trimHTTPURLString(s) { return u }
+                let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.hasPrefix("[") || trimmed.hasPrefix("{"),
+                   let nested = firstGalleryImageURLFromEncodedString(s) {
+                    return nested
+                }
+            case .object(let o):
+                if let u = firstURLFromImageObjectJSONValue(o) { return u }
+            default:
+                break
+            }
+        }
+        return nil
+    }
+
+    private static func firstGalleryImageURLFromJSONSerialization(_ any: Any) -> String? {
+        guard let arr = any as? [Any] else { return nil }
+        for item in arr {
+            if let s = item as? String, let u = trimHTTPURLString(s) { return u }
+            if let dict = item as? [String: Any], let u = firstURLFromImageObjectDict(dict) { return u }
+        }
+        return nil
+    }
+
+    private static func firstURLFromImageObjectJSONValue(_ o: [String: JSONValue]) -> String? {
+        for k in cityPlaceImageObjectURLKeys {
+            guard let v = o[k], case .string(let s) = v else { continue }
+            if let u = trimHTTPURLString(s) { return u }
+        }
+        return nil
+    }
+
+    private static func firstURLFromImageObjectDict(_ o: [String: Any]) -> String? {
+        for k in cityPlaceImageObjectURLKeys {
+            guard let s = o[k] as? String else { continue }
+            if let u = trimHTTPURLString(s) { return u }
+        }
+        return nil
+    }
+
+    private static func trimHTTPURLString(_ s: String) -> String? {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return nil }
+        let lower = t.lowercased()
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") { return t }
+        return nil
+    }
+
     /// Pulls distinct, non-empty Google `place_id`s from the activity rows so
     /// we can do one bulk `IN (…)` query instead of N round-trips.
     private static func distinctPlaceIds(from rows: [TripActivityRow]) -> [String] {
@@ -495,7 +586,8 @@ final class SupabaseManager {
                     website,formatted_phone_number,opening_hours,\
                     ai_editorial_summary,ai_review_summary,ai_why_go,ai_know_before_you_go,\
                     details_enriched_at,ai_enriched_at,\
-                    image_source,images_refreshed_at,thumbnail_attribution,\
+                    image_source,images_refreshed_at,thumbnail_attribution,images,\
+                    popular_times,\
                     ai_source_attribution
                     """
                 )
@@ -731,7 +823,8 @@ final class SupabaseManager {
                 website,formatted_phone_number,opening_hours,\
                 ai_editorial_summary,ai_review_summary,ai_why_go,ai_know_before_you_go,\
                 details_enriched_at,ai_enriched_at,\
-                image_source,images_refreshed_at,thumbnail_attribution,\
+                image_source,images_refreshed_at,thumbnail_attribution,images,\
+                popular_times,\
                 ai_source_attribution
                 """
             )
@@ -1833,6 +1926,7 @@ final class SupabaseManager {
         let trip_id: UUID
         let day_number: Int
         let date: String
+        let timezone: String?
     }
 
     private struct TripDayBatchInsert: Encodable, Sendable {
@@ -1973,11 +2067,13 @@ final class SupabaseManager {
     }
 
     private static func mapDayRow(_ row: TripDayRow, tripId: UUID) -> ItineraryDay {
-        ItineraryDay(
+        let tz = row.timezone?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ItineraryDay(
             id: row.id,
             tripId: tripId,
             dayNumber: row.day_number,
-            date: SupabaseModelMapping.parseDateOnly(row.date)
+            date: SupabaseModelMapping.parseDateOnly(row.date),
+            timeZoneIdentifier: (tz?.isEmpty == false) ? tz : nil
         )
     }
 
@@ -2022,7 +2118,7 @@ final class SupabaseManager {
             confirmationNumber: nil,
             bookingDetails: nil,
             googlePlaceId: row.place_id,
-            heroImageUrl: row.hero_image_url ?? enrichment?.thumbnail_url,
+            heroImageUrl: row.hero_image_url ?? enrichment?.mergedHeroImageURL,
             rating: row.rating ?? enrichment?.rating,
             userRatingsTotal: enrichment?.user_ratings_total,
             priceLevel: row.price_level ?? enrichment?.price_level,
@@ -2249,6 +2345,17 @@ final class SupabaseManager {
     }
 }
 
+extension SupabaseManager.CityPlaceEnrichmentRow {
+    /// Activity hero merge: first `images` gallery URL, else non-empty `thumbnail_url`.
+    var mergedHeroImageURL: String? {
+        SupabaseManager.firstGalleryImageURL(from: images) ?? thumbnailHeroFallback
+    }
+
+    private var thumbnailHeroFallback: String? {
+        guard let t = thumbnail_url?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        return t
+    }
+}
 
 // =============================================================================
 

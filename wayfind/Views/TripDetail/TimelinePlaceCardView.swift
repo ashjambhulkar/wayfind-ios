@@ -7,6 +7,8 @@ import SwiftUI
 struct TimelinePlaceCardView: View {
     let place: Place
     let dayNumber: Int
+    /// Wall-clock context for scheduled times (trip destination / day IANA zone).
+    var timelineDisplayTimeZone: TimeZone = .current
 
     var onEdit: () -> Void = {}
     var onMoveToDay: () -> Void = {}
@@ -90,7 +92,7 @@ struct TimelinePlaceCardView: View {
     @ViewBuilder
     private var leadingMarker: some View {
         if let start = place.startTime {
-            TimePinView(time: start, tint: familyColor)
+            TimePinView(time: start, tint: familyColor, timeZone: timelineDisplayTimeZone)
         } else {
             UnscheduledMarkerView(tint: familyColor)
         }
@@ -201,9 +203,9 @@ struct TimelinePlaceCardView: View {
         var pieces = ["\(place.categoryEnum.label): \(place.name)"]
         if let start = place.startTime {
             if let end = place.endTime {
-                pieces.append("\(start.timeFormatted) to \(end.timeFormatted)")
+                pieces.append("\(start.timeFormatted(timeZone: timelineDisplayTimeZone)) to \(end.timeFormatted(timeZone: timelineDisplayTimeZone))")
             } else {
-                pieces.append(start.timeFormatted)
+                pieces.append(start.timeFormatted(timeZone: timelineDisplayTimeZone))
             }
         }
         if let r = place.rating {

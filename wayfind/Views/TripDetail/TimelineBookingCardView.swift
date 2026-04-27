@@ -9,6 +9,7 @@ import SwiftUI
 struct TimelineBookingCardView: View {
     let place: Place
     let dayNumber: Int
+    var timelineDisplayTimeZone: TimeZone = .current
 
     var onEdit: () -> Void = {}
     var onMoveToDay: () -> Void = {}
@@ -56,7 +57,7 @@ struct TimelineBookingCardView: View {
     @ViewBuilder
     private var leadingMarker: some View {
         if let start = place.startTime {
-            TimePinView(time: start, tint: bookingColor)
+            TimePinView(time: start, tint: bookingColor, timeZone: timelineDisplayTimeZone)
         } else {
             UnscheduledMarkerView(tint: bookingColor)
         }
@@ -176,9 +177,9 @@ struct TimelineBookingCardView: View {
         }
         if let start = place.startTime {
             if let end = place.endTime {
-                pieces.append("\(start.timeFormatted) to \(end.timeFormatted)")
+                pieces.append("\(start.timeFormatted(timeZone: timelineDisplayTimeZone)) to \(end.timeFormatted(timeZone: timelineDisplayTimeZone))")
             } else {
-                pieces.append(start.timeFormatted)
+                pieces.append(start.timeFormatted(timeZone: timelineDisplayTimeZone))
             }
         }
         if let conf = place.confirmationNumber, !conf.isEmpty {

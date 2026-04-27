@@ -49,6 +49,14 @@ extension Date {
         DateFormatters.short.string(from: self)
     }
 
+    func shortFormatted(timeZone: TimeZone) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        f.locale = .autoupdatingCurrent
+        f.timeZone = timeZone
+        return f.string(from: self)
+    }
+
     /// Note list footer: Today / Yesterday / MMM d (this year) / MMM d, yyyy.
     var noteListCaption: String {
         let cal = Calendar.current
@@ -68,12 +76,28 @@ extension Date {
         DateFormatters.time.string(from: self)
     }
 
+    func timeFormatted(timeZone: TimeZone) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        f.locale = .autoupdatingCurrent
+        f.timeZone = timeZone
+        return f.string(from: self)
+    }
+
     var dayOfWeekFull: String {
         DateFormatters.weekdayFull.string(from: self)
     }
 
     var dayOfWeekShort: String {
         DateFormatters.weekdayShort.string(from: self)
+    }
+
+    func dayOfWeekShort(timeZone: TimeZone) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "EEE"
+        f.locale = .autoupdatingCurrent
+        f.timeZone = timeZone
+        return f.string(from: self)
     }
 
     var relativeDaysText: String {

@@ -76,9 +76,9 @@ final class TripDetailViewModel {
     }
 
     /// Secondary segment, e.g. `Tue, Apr 21` (abbreviated weekday + month/day).
-    func dayHeaderDateLabel(for day: ItineraryDay) -> String {
+    func dayHeaderDateLabel(for day: ItineraryDay, timelineTimeZone: TimeZone) -> String {
         let date = day.date ?? dateForScheduledDay(day.dayNumber)
-        return "\(date.dayOfWeekShort), \(date.shortFormatted)"
+        return "\(date.dayOfWeekShort(timeZone: timelineTimeZone)), \(date.shortFormatted(timeZone: timelineTimeZone))"
     }
 
     var totalBookingsCount: Int {

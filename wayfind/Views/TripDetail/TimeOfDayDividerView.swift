@@ -35,9 +35,11 @@ enum TimeOfDayChapter: String, CaseIterable {
 
     /// Buckets `5–11`, `12–16`, `17–21`, `22–4`. Returns `nil` when the date is
     /// `nil` (unscheduled stops) so callers can skip rendering a chapter.
-    static func from(_ date: Date?) -> TimeOfDayChapter? {
+    static func from(_ date: Date?, timeZone: TimeZone = .current) -> TimeOfDayChapter? {
         guard let date else { return nil }
-        let hour = Calendar.current.component(.hour, from: date)
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = timeZone
+        let hour = cal.component(.hour, from: date)
         switch hour {
         case 5..<12: return .morning
         case 12..<17: return .afternoon

@@ -1,12 +1,10 @@
+import CoreLocation
 import MapKit
 import SwiftUI
 
 struct PlaceDetailSheet: View {
     let place: Place
     let previousPlace: Place?
-    /// Wave 1.1 — required to scope `ActivityPhotosSheet` uploads to the
-    /// right `trip_id` (for storage path and RLS). Map callout doesn't
-    /// pass it; the Photos action is hidden when nil.
     var tripId: UUID? = nil
 
     var onEdit: () -> Void = {}
@@ -17,33 +15,26 @@ struct PlaceDetailSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(DataService.self) private var dataService
 
-    // Phase D.3 — silent gracefulness + shimmer + sheet-open enrichment
-    // refetch. We hold the most recent enrichment row separately from the
-    // injected `place` value so a refresh doesn't require the parent
-    // ViewModel to re-fetch the whole timeline. Fields fall back to the
-    // injected `place` when this is nil.
     @State private var liveEnrichment: SupabaseManager.CityPlaceEnrichmentRow?
     @State private var enrichmentLoadAttempted: Bool = false
 
-    // Phase E.3 — report flow state.
     @State private var showingReportSheet: Bool = false
     @State private var reportToastVisible: Bool = false
-
-    /// Wave 1.1 — present `ActivityPhotosSheet` for the activity that
-    /// backs this Place. Only meaningful when the place is part of a trip
-    /// (it always is in PlaceDetailSheet, but defensive `if let` below
-    /// guards against `tripId` being unavailable in previews).
     @State private var showingPhotosSheet: Bool = false
+    @State private var selectedPopularDayKey: String?
+    @State private var venueTimeZone: TimeZone?
 
-    /// True when the place could plausibly be enriched (has a Google
-    /// place_id) AND nothing useful has loaded yet. Drives shimmer
-    /// placeholders so the sheet doesn't feel half-empty during the
-    /// 0–2s window between sheet-open and the foreground enrichment job
-    /// completing.
+    // Apple Maps style interactive stage
+    @State private var mapPosition: MapCameraPosition = .automatic
+    @State private var mapPitchEnabled: Bool = true
+    @State private var showingExpandedMap = false
+    @State private var aboutSummaryExpanded = false
+
+    // MARK: - Derived Data
+
     private var isLikelyLoadingEnrichment: Bool {
         guard place.googlePlaceId?.isEmpty == false else { return false }
         let haveAnyEnrichment =
-            place.heroImageUrl != nil ||
             place.aiSummary != nil ||
             place.aiShortSummary != nil ||
             place.rating != nil ||
@@ -52,11 +43,11 @@ struct PlaceDetailSheet: View {
         return !haveAnyEnrichment && !enrichmentLoadAttempted
     }
 
-    /// Effective AI long-form summary, preferring the live refetch over the
-    /// initially-passed `place`.
     private var effectiveAISummary: String? {
-        liveEnrichment?.ai_editorial_summary ?? place.aiSummary ?? place.aiShortSummary
-            ?? liveEnrichment?.ai_short_summary
+        liveEnrichment?.ai_editorial_summary
+        ?? place.aiSummary
+        ?? place.aiShortSummary
+        ?? liveEnrichment?.ai_short_summary
     }
 
     private var effectiveWhyGo: [String]? {
@@ -87,48 +78,89 @@ struct PlaceDetailSheet: View {
         place.priceLevel ?? liveEnrichment?.price_level
     }
 
-    /// Phase H.6 — hero image read order:
-    ///
-    ///   1. live enrichment row's `thumbnail_url`. Once Phase H.5 ships,
-    ///      this slot is owned by an approved user-uploaded photo when one
-    ///      exists (image_source = 'user'); otherwise it's the freshest
-    ///      Google-sourced thumbnail.
-    ///   2. the trip-cached `place.heroImageUrl` baked in at trip-creation
-    ///      time (may be stale, but works offline).
-    ///   3. nil → the heroHeader falls back to the category-glyph
-    ///      placeholder.
-    private var effectiveHeroImageUrl: String? {
-        if let live = liveEnrichment?.thumbnail_url, !live.isEmpty {
-            return live
+    private var popularTimesModel: PopularTimesChartModel? {
+        PopularTimesParsing.chartModel(from: liveEnrichment?.popular_times)
+    }
+
+    private var typicalVisitDurationLine: String? {
+        TypicalVisitFormatting.line(
+            minMinutes: liveEnrichment?.time_spent_min ?? place.durationMinutes,
+            maxMinutes: liveEnrichment?.time_spent_max
+        )
+    }
+
+    private var resolvedPopularTimesDayId: String? {
+        guard let model = popularTimesModel else { return nil }
+        if let key = selectedPopularDayKey, model.column(forDayId: key) != nil {
+            return key
         }
-        return place.heroImageUrl
+        return model.preferredDayKey()
     }
 
-    /// Phase H.6 / Phase I.3 — provenance label for the hero image, when
-    /// known. Drives the small attribution chip / "Photo by you" badge.
-    private var effectiveImageSource: String? {
-        liveEnrichment?.image_source
+    private var openingHoursDisplay: OpeningHoursDisplay? {
+        OpeningHoursParsing.display(from: liveEnrichment?.opening_hours)
     }
 
-    /// Phase I.3 — assembles the human-readable attribution caption that
-    /// satisfies CC-BY/SA + DSA disclosure requirements. Returns `nil`
-    /// when we have nothing to attribute (e.g. fully Google-sourced row).
-    /// We deliberately keep this tiny: one line, plain text, no chrome,
-    /// stacked under the actions row so it never steals visual weight.
+    private var scheduleDerivedOpenNow: Bool? {
+        guard let hours = openingHoursDisplay, let tz = venueTimeZone else { return nil }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = tz
+        guard let row = hours.todayRow(calendar: cal) else { return nil }
+        return OpeningHoursOpenEvaluator.isOpen(hoursText: row.hoursText, at: Date(), timeZone: tz)
+    }
+
+    private var effectiveIsOpenNowForHero: Bool? {
+        if let fromSchedule = scheduleDerivedOpenNow {
+            return fromSchedule
+        }
+        if let fromLive = openingHoursDisplay?.openNow {
+            return fromLive
+        }
+        var cal = Calendar(identifier: .gregorian)
+        if let tz = venueTimeZone {
+            cal.timeZone = tz
+        }
+        if let today = openingHoursDisplay?.todayRow(calendar: cal),
+           today.hoursText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "closed" {
+            return false
+        }
+        return place.isOpenNow
+    }
+
+    private var effectiveOpeningHoursClockPill: String? {
+        if let hours = openingHoursDisplay, let tz = venueTimeZone {
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = tz
+            if let line = hours.clockSummaryLine(calendar: cal), !line.isEmpty {
+                return line
+            }
+        }
+        if let line = openingHoursDisplay?.clockSummaryLine(), !line.isEmpty {
+            return line
+        }
+        if let t = place.openingHoursText, !t.isEmpty {
+            return t
+        }
+        return nil
+    }
+
     private var attributionCaption: String? {
         let lines = PlaceAttributionFormatter.lines(
-            imageSource: effectiveImageSource,
+            imageSource: liveEnrichment?.image_source,
             thumbnailAttribution: liveEnrichment?.thumbnail_attribution,
             ai: liveEnrichment?.ai_source_attribution
         )
         return lines.isEmpty ? nil : lines.joined(separator: " · ")
     }
 
-    // MARK: – Computed helpers
-
     private var hasCoordinates: Bool {
         guard let lat = place.lat, let lng = place.lng else { return false }
         return !lat.isNaN && !lng.isNaN
+    }
+
+    private var coordinate: CLLocationCoordinate2D? {
+        guard hasCoordinates, let lat = place.lat, let lng = place.lng else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
     }
 
     private var categorySymbol: String {
@@ -151,13 +183,15 @@ struct PlaceDetailSheet: View {
         if let s = place.startTime, let e = place.endTime {
             let mins = Int(e.timeIntervalSince(s) / 60)
             if mins >= 60 {
-                let h = mins / 60, m = mins % 60
+                let h = mins / 60
+                let m = mins % 60
                 return m == 0 ? "\(h)h" : "\(h)h \(m)m"
             }
             return "\(mins) min"
         }
         if let mins = place.durationMinutes {
-            let h = mins / 60, m = mins % 60
+            let h = mins / 60
+            let m = mins % 60
             return m == 0 ? "~\(h)h" : "~\(h)h \(m)m"
         }
         return nil
@@ -175,859 +209,18 @@ struct PlaceDetailSheet: View {
         }
     }
 
-    private func priceLabel(_ level: Int) -> String { String(repeating: "€", count: level) }
+    private func priceLabel(_ level: Int) -> String {
+        String(repeating: "€", count: level)
+    }
 
-    // MARK: – Body
+    // MARK: - Body
 
     var body: some View {
-        if place.isBooking {
-            bookingDetailBody
-        } else {
-            activityDetailBody
-        }
-    }
-
-    // MARK: – Activity detail (museums, restaurants, parks, attractions…)
-
-    private var activityDetailBody: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                heroHeader
-
-                VStack(alignment: .leading, spacing: 0) {
-                    if scheduledTimeText != nil {
-                        scheduleCard
-                            .padding(.horizontal, 16)
-                            .padding(.top, 20)
-                    }
-
-                    if let summary = effectiveAISummary {
-                        aboutSection(summary: summary)
-                    } else if isLikelyLoadingEnrichment {
-                        aboutSkeleton
-                    }
-
-                    if let bullets = effectiveWhyGo, !bullets.isEmpty {
-                        bulletSection(title: "Why Go", icon: "sparkles", bullets: bullets, color: AppColors.appPrimary)
-                    } else if isLikelyLoadingEnrichment {
-                        bulletSkeleton(title: "Why Go", icon: "sparkles", color: AppColors.appPrimary)
-                    }
-
-                    if let tips = effectiveKnowBefore, !tips.isEmpty {
-                        bulletSection(title: "Know Before You Go", icon: "lightbulb.fill", bullets: tips, color: .orange)
-                    }
-
-                    if let tags = place.reviewsTags, !tags.isEmpty {
-                        tagsRow(tags: tags)
-                    }
-
-                    gettingThereSection
-
-                    if effectiveWebsite != nil || effectivePhone != nil {
-                        contactSection
-                    }
-
-                    if let notes = place.notes, !notes.isEmpty {
-                        notesSection(notes: notes)
-                    }
-
-                    actionsSection
-
-                    if let caption = attributionCaption {
-                        attributionFooter(caption: caption)
-                            .padding(.bottom, 40)
-                    } else {
-                        Color.clear.frame(height: 40)
-                    }
-                }
-            }
-        }
-        .ignoresSafeArea(edges: .top)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-        .background(Color(UIColor.systemBackground))
-        .task { await refetchEnrichment(requestRefresh: true) }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                Task { await refetchEnrichment(requestRefresh: false) }
-            }
-        }
-    }
-
-    // MARK: – Booking detail (flights, hotels, restaurants with reservations, car rentals…)
-
-    private var bookingDetailBody: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    bookingHeroStrip
-                    bookingContent
-                }
-            }
-            .background(Color(UIColor.systemBackground))
-            .navigationTitle(categoryLabel)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 22))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
-    }
-
-    // ── Booking hero strip (no full-bleed image — functional info first) ───
-
-    private var bookingHeroStrip: some View {
-        HStack(spacing: 16) {
-            // Category icon badge
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill((place.bookingCategoryEnum?.color ?? AppColors.appPrimary).opacity(0.12))
-                    .frame(width: 56, height: 56)
-                Image(systemName: categorySymbol)
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(place.name)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(.primary)
-                if let provider = bookingProvider {
-                    Text(provider)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
-
-            if let conf = place.confirmationNumber, !conf.isEmpty {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("CONF.")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .kerning(0.5)
-                    Text(conf)
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundStyle(place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
-                }
-            }
-        }
-        .padding(20)
-        .background(Color(UIColor.secondarySystemBackground))
-    }
-
-    private var bookingProvider: String? {
-        guard let details = place.bookingDetails else { return nil }
-        switch details {
-        case .flight(let f): return f.airline
-        case .hotel: return nil
-        case .restaurant: return nil
-        case .carRental(let c): return c.company
-        case .activity(let a): return a.provider
-        case .transport(let t): return t.operatorName
-        }
-    }
-
-    // ── Booking-specific content ────────────────────────────────────────────
-
-    @ViewBuilder
-    private var bookingContent: some View {
-        if let details = place.bookingDetails {
-            switch details {
-            case .flight(let f): flightContent(f)
-            case .hotel(let h): hotelContent(h)
-            case .restaurant(let r): restaurantContent(r)
-            case .carRental(let c): carRentalContent(c)
-            case .activity(let a): activityContent(a)
-            case .transport(let t): transportContent(t)
-            }
-        }
-
-        // Common: user notes
-        if let notes = place.notes, !notes.isEmpty {
-            notesSection(notes: notes)
-        }
-
-        // Common: actions
-        actionsSection
-            .padding(.bottom, 40)
-    }
-
-    // Flight
-    private func flightContent(_ f: FlightDetails) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Route visual
-            bookingInfoCard {
-                VStack(spacing: 16) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(f.departureAirport)
-                                .font(.system(size: 32, weight: .bold, design: .rounded))
-                                .foregroundStyle(.primary)
-                            if let t = f.departureTime {
-                                Text(t.timeFormatted)
-                                    .font(.title3.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                                Text(t.shortFormatted)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Spacer()
-                        Image(systemName: "airplane")
-                            .font(.system(size: 22))
-                            .foregroundStyle(BookingCategory.flight.color)
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(f.arrivalAirport)
-                                .font(.system(size: 32, weight: .bold, design: .rounded))
-                                .foregroundStyle(.primary)
-                            if let t = f.arrivalTime {
-                                Text(t.timeFormatted)
-                                    .font(.title3.weight(.semibold))
-                                    .foregroundStyle(.primary)
-                                Text(t.shortFormatted)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-
-            bookingInfoCard {
-                bookingRow(label: "Flight", value: "\(f.airline) \(f.flightNumber)")
-                if !f.terminal.isEmpty { bookingRow(label: "Terminal", value: f.terminal) }
-                if !f.gate.isEmpty     { bookingRow(label: "Gate",     value: f.gate) }
-                if !f.seat.isEmpty     { bookingRow(label: "Seat",     value: f.seat) }
-            }
-        }
-    }
-
-    // Hotel
-    private func hotelContent(_ h: HotelDetails) -> some View {
-        bookingInfoCard {
-            if let checkIn = h.checkInDate {
-                bookingRow(label: "Check-in",  value: "\(checkIn.shortFormatted)\(h.checkInTime.map { " · \($0)" } ?? "")")
-            }
-            if let checkOut = h.checkOutDate {
-                bookingRow(label: "Check-out", value: "\(checkOut.shortFormatted)\(h.checkOutTime.map { " · \($0)" } ?? "")")
-            }
-            if let nights = h.nights        { bookingRow(label: "Nights",    value: "\(nights)") }
-            if !h.roomType.isEmpty          { bookingRow(label: "Room",      value: h.roomType) }
-        }
-    }
-
-    // Restaurant
-    private func restaurantContent(_ r: RestaurantDetails) -> some View {
-        bookingInfoCard {
-            if let t = r.reservationTime { bookingRow(label: "Time",  value: t.timeFormatted) }
-            if let p = r.partySize       { bookingRow(label: "Party", value: "\(p) people") }
-        }
-    }
-
-    // Car rental
-    private func carRentalContent(_ c: CarRentalDetails) -> some View {
-        bookingInfoCard {
-            bookingRow(label: "Pick-up",    value: c.pickupLocation)
-            bookingRow(label: "Drop-off",   value: c.dropoffLocation)
-            if let t = c.pickupTime        { bookingRow(label: "Pick-up time",  value: t.timeFormatted) }
-            if let t = c.dropoffTime       { bookingRow(label: "Drop-off time", value: t.timeFormatted) }
-            if !c.carType.isEmpty          { bookingRow(label: "Car",           value: c.carType) }
-        }
-    }
-
-    // Activity
-    private func activityContent(_ a: ActivityDetails) -> some View {
-        bookingInfoCard {
-            if let d = a.duration, !d.isEmpty { bookingRow(label: "Duration", value: d) }
-            if !a.provider.isEmpty             { bookingRow(label: "Provider", value: a.provider) }
-            if !a.ticketNumber.isEmpty         { bookingRow(label: "Ticket",   value: a.ticketNumber) }
-        }
-    }
-
-    // Transport
-    private func transportContent(_ t: TransportDetails) -> some View {
-        bookingInfoCard {
-            bookingRow(label: "From",     value: t.departureStation)
-            bookingRow(label: "To",       value: t.arrivalStation)
-            if let dep = t.departureTime { bookingRow(label: "Departs", value: dep.timeFormatted) }
-            if let arr = t.arrivalTime   { bookingRow(label: "Arrives", value: arr.timeFormatted) }
-            if !t.serviceNumber.isEmpty  { bookingRow(label: "Service", value: t.serviceNumber) }
-            if !t.seat.isEmpty           { bookingRow(label: "Seat",    value: t.seat) }
-        }
-    }
-
-    // Shared booking card wrapper
-    private func bookingInfoCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            content()
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(UIColor.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
-    }
-
-    // Shared label-value row inside booking cards
-    private func bookingRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(width: 90, alignment: .leading)
-            Text(value)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.primary)
-            Spacer()
-        }
-    }
-
-    // MARK: – Hero Header
-
-    private var heroHeader: some View {
-        ZStack(alignment: .bottom) {
-            // Image
-            Group {
-                if let urlStr = effectiveHeroImageUrl, let url = URL(string: urlStr) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                        case .empty:
-                            // Loading from cache or network — keep the
-                            // placeholder gradient + soft shimmer overlay so
-                            // the layout never collapses.
-                            ZStack {
-                                placeholderGradient
-                                if !isLikelyLoadingEnrichment {
-                                    SkeletonView(cornerRadius: 0, height: 280)
-                                        .opacity(0.6)
-                                }
-                            }
-                        default:
-                            placeholderGradient
-                        }
-                    }
-                } else if isLikelyLoadingEnrichment {
-                    // No hero yet AND enrichment hasn't completed — soft
-                    // shimmer over the gradient sets expectation that an
-                    // image is coming.
-                    ZStack {
-                        placeholderGradient
-                        SkeletonView(cornerRadius: 0, height: 280)
-                            .opacity(0.6)
-                    }
-                } else {
-                    placeholderGradient
-                }
-            }
-            .frame(height: 280)
-            .clipped()
-
-            // Gradient overlay
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.7)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-
-            // Overlay content
-            VStack(alignment: .leading, spacing: 8) {
-                // Category + open badge
-                HStack {
-                    Label(categoryLabel, systemImage: categorySymbol)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(.ultraThinMaterial.opacity(0.8))
-                        .clipShape(Capsule())
-
-                    Spacer()
-
-                    if let isOpen = place.isOpenNow {
-                        Text(isOpen ? "Open" : "Closed")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(isOpen ? .white : Color(UIColor.systemRed))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(isOpen ? Color.green.opacity(0.85) : Color(UIColor.systemBackground).opacity(0.9))
-                            .clipShape(Capsule())
-                    }
-                }
-
-                // Place name
-                Text(place.name)
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-
-                // Rating + price row
-                HStack(spacing: 12) {
-                    if let rating = effectiveRating {
-                        HStack(spacing: 4) {
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.yellow)
-                            Text(String(format: "%.1f", rating))
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
-                            if let total = effectiveUserRatingsTotal {
-                                Text("(\(total.formatted()))")
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.8))
-                            }
-                        }
-                    } else if isLikelyLoadingEnrichment {
-                        SkeletonView(cornerRadius: 4, height: 14)
-                            .frame(width: 60)
-                    }
-
-                    if let level = effectivePriceLevel, level > 0 {
-                        Text(priceLabel(level))
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.9))
-                    }
-
-                    if let hours = place.openingHoursText, place.isOpenNow != nil {
-                        Text(hours)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.8))
-                            .lineLimit(1)
-                    }
-                }
-            }
-            .padding(20)
-        }
-        .frame(height: 280)
-        .overlay(alignment: .topLeading) {
-            // Close button
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(.ultraThinMaterial)
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .padding(16)
-            .padding(.top, 50)
-        }
-    }
-
-    private var placeholderGradient: some View {
-        let colors: [Color] = {
-            switch place.categoryEnum {
-            case .attraction: return [Color(hue: 0.58, saturation: 0.6, brightness: 0.5), Color(hue: 0.62, saturation: 0.7, brightness: 0.35)]
-            case .restaurant: return [Color(hue: 0.05, saturation: 0.7, brightness: 0.55), Color(hue: 0.08, saturation: 0.6, brightness: 0.35)]
-            case .nature: return [Color(hue: 0.35, saturation: 0.5, brightness: 0.45), Color(hue: 0.38, saturation: 0.6, brightness: 0.3)]
-            case .nightlife: return [Color(hue: 0.75, saturation: 0.6, brightness: 0.3), Color(hue: 0.8, saturation: 0.7, brightness: 0.2)]
-            case .shopping: return [Color(hue: 0.0, saturation: 0.5, brightness: 0.5), Color(hue: 0.95, saturation: 0.6, brightness: 0.35)]
-            default: return [Color(hue: 0.55, saturation: 0.4, brightness: 0.5), Color(hue: 0.58, saturation: 0.5, brightness: 0.35)]
-            }
-        }()
-        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // MARK: – Schedule Card
-
-    private var scheduleCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 16) {
-                // Time
-                if let timeText = scheduledTimeText {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("TIME")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .kerning(0.5)
-                        Text(timeText)
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.primary)
-                    }
-                }
-
-                if scheduledTimeText != nil && durationText != nil {
-                    Color(UIColor.separator).frame(width: 0.5, height: 36)
-                }
-
-                // Duration
-                if let dur = durationText {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("DURATION")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .kerning(0.5)
-                        Text(dur)
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.primary)
-                    }
-                }
-
-                Spacer()
-
-                // Confirmation number for bookings
-                if let conf = place.confirmationNumber, !conf.isEmpty {
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text("CONFIRMATION")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .kerning(0.5)
-                        Text(conf)
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(AppColors.appPrimary)
-                    }
-                }
-            }
-            .padding(16)
-        }
-        .background(Color(UIColor.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    // MARK: – About
-
-    private func aboutSection(summary: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("About")
-            Text(summary)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .lineSpacing(4)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-    }
-
-    // MARK: – Bullet sections (Why Go / Know Before You Go)
-
-    private func bulletSection(title: String, icon: String, bullets: [String], color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(color)
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                    .kerning(0.5)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(bullets, id: \.self) { bullet in
-                    HStack(alignment: .top, spacing: 10) {
-                        Circle()
-                            .fill(color)
-                            .frame(width: 5, height: 5)
-                            .padding(.top, 6)
-                        Text(bullet)
-                            .font(.body)
-                            .foregroundStyle(.primary)
-                            .lineSpacing(3)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-    }
-
-    // MARK: – Reviews tags
-
-    private func tagsRow(tags: [String]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(tags, id: \.self) { tag in
-                    Text(tag)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color(UIColor.tertiarySystemFill))
-                        .clipShape(Capsule())
-                }
-            }
-            .padding(.horizontal, 20)
-        }
-        .padding(.top, 16)
-    }
-
-    // MARK: – Getting There
-
-    private var gettingThereSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Getting There")
-
-            // Travel time from previous stop
-            if let previous = previousPlace, hasCoordinates,
-               let pLat = previous.lat, let pLng = previous.lng,
-               !pLat.isNaN, !pLng.isNaN {
-
-                Text("From \(previous.name)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 10) {
-                    ForEach(HaversineDistance.TravelMode.allCases, id: \.self) { mode in
-                        let mins = HaversineDistance.estimateTravelTime(
-                            from: previous.coordinate, to: place.coordinate, mode: mode
-                        )
-                        VStack(spacing: 4) {
-                            Image(systemName: mode.sfSymbol)
-                                .font(.system(size: 18))
-                                .foregroundStyle(AppColors.appPrimary)
-                            Text("\(mins) min")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.primary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
-                }
+        Group {
+            if place.isBooking {
+                bookingDetailBody
             } else {
-                Text("First stop of the day")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-            }
-
-            // Address + navigate
-            if let address = place.address, !address.isEmpty {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "mappin.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(AppColors.appPrimary)
-                    Text(address)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                    Spacer()
-                }
-
-                if hasCoordinates {
-                    Button {
-                        let mapItem = MKMapItem(placemark: MKPlacemark(coordinate: place.coordinate))
-                        mapItem.name = place.name
-                        mapItem.openInMaps()
-                    } label: {
-                        Label("Navigate", systemImage: "arrow.triangle.turn.up.right.circle.fill")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 50)
-                            .background(AppColors.appPrimary)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-    }
-
-    // MARK: – Contact
-
-    private var contactSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Contact")
-
-            if let website = effectiveWebsite, let url = URL(string: website) {
-                Link(destination: url) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "globe")
-                            .font(.system(size: 16))
-                            .foregroundStyle(AppColors.appPrimary)
-                            .frame(width: 24)
-                        Text(website
-                            .replacingOccurrences(of: "https://", with: "")
-                            .replacingOccurrences(of: "http://", with: "")
-                            .replacingOccurrences(of: "www.", with: ""))
-                            .font(.body)
-                            .foregroundStyle(AppColors.appPrimary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-
-            if let phone = effectivePhone {
-                HStack(spacing: 12) {
-                    Image(systemName: "phone")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24)
-                    Text(phone)
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-    }
-
-    // MARK: – Skeletons (Phase D.3)
-
-    private var aboutSkeleton: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("About")
-            VStack(alignment: .leading, spacing: 8) {
-                SkeletonView(cornerRadius: 6, height: 14)
-                SkeletonView(cornerRadius: 6, height: 14)
-                SkeletonView(cornerRadius: 6, height: 14)
-                    .frame(maxWidth: .infinity)
-                    .padding(.trailing, 80)
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-        .accessibilityHidden(true)
-    }
-
-    private func bulletSkeleton(title: String, icon: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(color)
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                    .kerning(0.5)
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(0..<3, id: \.self) { _ in
-                    HStack(alignment: .top, spacing: 10) {
-                        Circle()
-                            .fill(color.opacity(0.4))
-                            .frame(width: 5, height: 5)
-                            .padding(.top, 6)
-                        SkeletonView(cornerRadius: 6, height: 14)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-        .accessibilityHidden(true)
-    }
-
-    // MARK: – Enrichment refresh (Phase D.3)
-
-    /// Refetches `city_places` for this `place_id` and optionally enqueues a
-    /// foreground enrichment job. Called on `.task` (sheet open) and on
-    /// `scenePhase == .active` (foreground from background) so the user
-    /// doesn't see stale fields after returning to the app.
-    ///
-    /// Phase H.6 — also fires the TTL-driven lazy refresh
-    /// (`refresh_city_place_if_stale`) so a sheet open silently triggers a
-    /// targeted 'details' or 'images' enrichment job whenever the row is
-    /// past TTL. This is fire-and-forget; the next sheet open will pick up
-    /// whatever the worker wrote.
-    private func refetchEnrichment(requestRefresh: Bool) async {
-        guard let placeId = place.googlePlaceId, !placeId.isEmpty else {
-            enrichmentLoadAttempted = true
-            return
-        }
-        let service = dataService
-        if requestRefresh {
-            // Fire-and-forget — the RPC is stampede-deduped server-side and
-            // we treat the actual data refresh as the source of truth.
-            Task.detached(priority: .utility) {
-                await service.requestCityPlaceEnrichment(googlePlaceId: placeId)
-            }
-            // Phase H.6 — silent staleness sweep. Free when nothing is
-            // stale (single SELECT inside the RPC). Background priority so
-            // the worker doesn't preempt the foreground request above.
-            Task.detached(priority: .background) {
-                await service.refreshCityPlaceIfStale(
-                    googlePlaceId: placeId,
-                    priority: "background"
-                )
-            }
-        }
-        let row = await service.fetchCityPlaceEnrichment(googlePlaceId: placeId)
-        liveEnrichment = row
-        enrichmentLoadAttempted = true
-    }
-
-    // MARK: – Notes
-
-    private func notesSection(notes: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("My Notes")
-            Text(notes)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(UIColor.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 24)
-    }
-
-    // MARK: – Booking details
-
-    // MARK: – Actions
-
-    private var actionsSection: some View {
-        VStack(spacing: 0) {
-            Divider()
-                .padding(.top, 32)
-                .padding(.horizontal, 20)
-
-            HStack(spacing: 0) {
-                actionButton(label: "Edit", icon: "pencil") { onEdit(); dismiss() }
-                Divider().frame(height: 20)
-                if tripId != nil {
-                    actionButton(label: "Photos", icon: "photo.on.rectangle.angled") {
-                        showingPhotosSheet = true
-                    }
-                    Divider().frame(height: 20)
-                }
-                actionButton(label: "Move", icon: "arrow.right.circle") { onMove(); dismiss() }
-                Divider().frame(height: 20)
-                actionButton(label: "Delete", icon: "trash", destructive: true) { onDelete(); dismiss() }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-
-            // Phase E.3 — report link, dimmer than the destructive Delete
-            // so it doesn't steal focus from the primary actions.
-            if place.googlePlaceId?.isEmpty == false {
-                Button { showingReportSheet = true } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "flag")
-                            .font(.system(size: 12, weight: .medium))
-                        Text("Report this place")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundStyle(AppColors.textTertiary)
-                    .padding(.top, 12)
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Opens a sheet to report a problem with this place.")
+                activityDetailBody
             }
         }
         .sheet(isPresented: $showingReportSheet) {
@@ -1058,29 +251,1144 @@ struct PlaceDetailSheet: View {
         }
     }
 
-    private func handleReport(reason: ReportPlaceSheet.Reason, googlePlaceId: String) {
-        Task.detached(priority: .utility) { [dataService] in
-            await dataService.reportCityPlace(
-                googlePlaceId: googlePlaceId,
-                reason: reason.rawValue
+    // MARK: - Activity Detail
+
+    private var activityDetailBody: some View {
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    mapStageHeader
+
+                    VStack(spacing: 22) {
+                        titleSection
+                        routeAndTimingSection
+                        
+
+                        if let summary = effectiveAISummary {
+                            aboutSection(summary)
+                        } else if isLikelyLoadingEnrichment {
+                            aboutSkeleton
+                        }
+
+                        popularTimesAndVisitSection
+                        if let why = effectiveWhyGo, !why.isEmpty {
+                            bulletCardSection(
+                                title: "Why go",
+                                icon: "sparkles",
+                                color: AppColors.appPrimary,
+                                bullets: why
+                            )
+                        } else if isLikelyLoadingEnrichment {
+                            bulletSkeleton(title: "Why Go", icon: "sparkles", color: AppColors.appPrimary)
+                        }
+
+                        if let tips = effectiveKnowBefore, !tips.isEmpty {
+                            bulletCardSection(
+                                title: "Know before you go",
+                                icon: "lightbulb.fill",
+                                color: .orange,
+                                bullets: tips
+                            )
+                        }
+
+                        if let tags = place.reviewsTags, !tags.isEmpty {
+                            tagsSection(tags)
+                        }
+
+                        practicalSection
+
+                        if let notes = place.notes, !notes.isEmpty {
+                            notesCard(notes)
+                        }
+
+                        if let caption = attributionCaption {
+                            attributionFooter(caption: caption)
+                                .padding(.top, 4)
+                                .padding(.bottom, 8)
+                        } else {
+                            Color.clear.frame(height: 8)
+                        }
+                    }
+                    .padding(.top, 20)
+                    .padding(.bottom, 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .fill(Color(uiColor: .systemBackground))
+                    )
+                    .offset(y: -18)
+                }
+            }
+            .background(Color(uiColor: .systemBackground))
+            .toolbar(.hidden, for: .navigationBar)
+            .toolbar {
+                placeDetailBottomToolbarItems
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .fullScreenCover(isPresented: $showingExpandedMap) {
+            PlaceExpandedMapView(
+                place: place,
+                categorySymbol: categorySymbol,
+                initialPosition: mapPosition
             )
         }
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-            reportToastVisible = true
+        .task {
+            await refetchEnrichment(requestRefresh: true)
+            updateMapCamera(animated: false)
         }
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            withAnimation(.easeOut(duration: 0.3)) {
-                reportToastVisible = false
+        .task(id: place.id) {
+            await resolveVenueTimeZone()
+            updateMapCamera(animated: false)
+        }
+        .onChange(of: place.id) { _, _ in
+            selectedPopularDayKey = nil
+            venueTimeZone = nil
+            aboutSummaryExpanded = false
+            updateMapCamera(animated: false)
+        }
+        .onChange(of: liveEnrichment?.place_id) { _, _ in
+            selectedPopularDayKey = nil
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await refetchEnrichment(requestRefresh: false) }
             }
         }
     }
 
-    /// Phase I.3 — bottom-of-sheet attribution caption. Tiny, low-contrast,
-    /// single line so it satisfies CC-BY-SA / DSA disclosure without
-    /// stealing visual weight from the actions row above. Uses
-    /// `accessibilityElement(.combine)` so VoiceOver reads it as one
-    /// statement instead of dot-by-dot.
+    // MARK: - Map Stage Header
+
+    private var mapStageHeader: some View {
+        ZStack(alignment: .top) {
+            RoundedRectangle(cornerRadius: 0, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
+                .frame(height: 300)
+
+            if let coordinate {
+                mapStage
+                    .frame(height: 300)
+            } else {
+                unavailableMapStage
+                    .frame(height: 300)
+            }
+
+            topMapChrome
+        }
+        .frame(height: 300)
+        .clipped()
+    }
+
+    private var mapStage: some View {
+        ZStack {
+            Map(position: $mapPosition, interactionModes: [.pan, .zoom, .pitch, .rotate]) {
+                if let coordinate {
+                    Marker(place.name, systemImage: categorySymbol, coordinate: coordinate)
+                        .tint(AppColors.appPrimary)
+                }
+            }
+            .mapStyle(.standard(elevation: .realistic, emphasis: .muted))
+            .mapControlVisibility(.hidden)
+            .onTapGesture {
+                showingExpandedMap = true
+            }
+
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button {
+                        showingExpandedMap = true
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(String(localized: "Expand map"))
+                    .padding(16)
+                }
+            }
+        }
+    }
+
+    private var unavailableMapStage: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(uiColor: .tertiarySystemFill),
+                    Color(uiColor: .secondarySystemFill)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            VStack(spacing: 12) {
+                Image(systemName: "map")
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                Text("Map preview unavailable")
+                    .font(.headline.weight(.medium))
+                    .foregroundStyle(.primary)
+
+                Text("This place doesn’t have location coordinates yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(24)
+        }
+    }
+
+    private var topMapChrome: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 38, height: 38)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(localized: "Close"))
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+    }
+
+    @ToolbarContentBuilder
+    private var placeDetailBottomToolbarItems: some ToolbarContent {
+        ToolbarItemGroup(placement: .bottomBar) {
+            Button {
+                openInMaps()
+            } label: {
+                Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
+                    .symbolRenderingMode(.monochrome)
+            }
+            .tint(Color.primary)
+            .accessibilityLabel(String(localized: "Directions"))
+
+            Button {
+                onEdit()
+                dismiss()
+            } label: {
+                Image(systemName: "pencil")
+                    .symbolRenderingMode(.monochrome)
+            }
+            .tint(Color.primary)
+            .accessibilityLabel(String(localized: "Edit"))
+
+            if tripId != nil {
+                Button {
+                    showingPhotosSheet = true
+                } label: {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .symbolRenderingMode(.monochrome)
+                }
+                .tint(Color.primary)
+                .accessibilityLabel(String(localized: "Photos"))
+            }
+
+            Button {
+                onMove()
+                dismiss()
+            } label: {
+                Image(systemName: "arrow.right.circle")
+                    .symbolRenderingMode(.monochrome)
+            }
+            .tint(Color.primary)
+            .accessibilityLabel(String(localized: "Move"))
+
+            Menu {
+                if place.googlePlaceId?.isEmpty == false {
+                    Button {
+                        showingReportSheet = true
+                    } label: {
+                        Label(String(localized: "Report this place"), systemImage: "flag")
+                    }
+                }
+                Button(role: .destructive) {
+                    onDelete()
+                    dismiss()
+                } label: {
+                    Label(String(localized: "Delete"), systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .symbolRenderingMode(.monochrome)
+            }
+            .tint(Color.primary)
+            .accessibilityLabel(String(localized: "More"))
+        }
+    }
+
+    // MARK: - Title / Metadata
+
+    private var titleSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(place.name)
+                        .font(.system(size: 30, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .lineLimit(3)
+
+                    if let bookingDetailLine {
+                        Text(bookingDetailLine)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    } else if let address = place.address, !address.isEmpty {
+                        Text(address)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer()
+
+                Circle()
+                    .fill(Color(uiColor: .secondarySystemBackground))
+                    .frame(width: 44, height: 44)
+                    .overlay {
+                        Image(systemName: categorySymbol)
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(AppColors.appPrimary)
+                    }
+            }
+
+            HStack(spacing: 8) {
+                chip(categoryLabel, icon: categorySymbol)
+
+                if let isOpen = effectiveIsOpenNowForHero {
+                    statusChip(
+                        text: isOpen ? "Open now" : "Closed",
+                        tint: isOpen ? .green : .red
+                    )
+                }
+
+                if let level = effectivePriceLevel, level > 0 {
+                    chip(priceLabel(level), icon: "creditcard")
+                }
+            }
+
+            HStack(spacing: 12) {
+                if let rating = effectiveRating {
+                    statRow(
+                        icon: "star.fill",
+                        text: effectiveUserRatingsTotal != nil
+                        ? "\(String(format: "%.1f", rating)) • \(effectiveUserRatingsTotal!.formatted()) reviews"
+                        : String(format: "%.1f", rating)
+                    )
+                }
+
+                if let line = effectiveOpeningHoursClockPill, !line.isEmpty {
+                    statRow(icon: "clock", text: line)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    // MARK: - Route & Timing
+
+    private var routeAndTimingSection: some View {
+        let showVisit = scheduledTimeText != nil || durationText != nil
+        let previousForRoute = gettingTherePreviousPlace
+
+        return Group {
+            if showVisit || previousForRoute != nil {
+                VStack(alignment: .leading, spacing: AppSpacing.xl) {
+                    if showVisit {
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            sectionTitle("Visit")
+
+                            HStack(alignment: .top, spacing: AppSpacing.md) {
+                                if let scheduledTimeText {
+                                    visitMetricTile(
+                                        title: String(localized: "Time"),
+                                        value: scheduledTimeText,
+                                        icon: "clock"
+                                    )
+                                }
+
+                                if let durationText {
+                                    visitMetricTile(
+                                        title: String(localized: "Duration"),
+                                        value: durationText,
+                                        icon: "timer"
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if let previous = previousForRoute {
+                        VStack(alignment: .leading, spacing: AppSpacing.md) {
+                            fromPreviousHeadline(previousName: previous.name)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            HStack(alignment: .top, spacing: AppSpacing.sm) {
+                                ForEach(HaversineDistance.TravelMode.allCases, id: \.self) { mode in
+                                    travelModeEstimateTile(
+                                        mode: mode,
+                                        from: previous.coordinate,
+                                        to: place.coordinate
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    /// Previous stop with valid coordinates for “Getting there” estimates.
+    private var gettingTherePreviousPlace: Place? {
+        guard let previous = previousPlace, hasCoordinates,
+              let pLat = previous.lat, let pLng = previous.lng,
+              !pLat.isNaN, !pLng.isNaN else { return nil }
+        return previous
+    }
+
+    private func travelModeShortLabel(_ mode: HaversineDistance.TravelMode) -> String {
+        switch mode {
+        case .walking: return String(localized: "Walk")
+        case .driving: return String(localized: "Drive")
+        case .cycling: return String(localized: "Bike")
+        case .transit: return String(localized: "Transit")
+        }
+    }
+
+    private func fromPreviousHeadline(previousName: String) -> Text {
+        Text(String(localized: "From"))
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(.secondary)
+        + Text(verbatim: " ")
+        + Text(previousName)
+            .font(.body.weight(.medium))
+            .foregroundStyle(.primary)
+    }
+
+    /// Single surface per metric — no outer card wrapper.
+    private func visitMetricTile(title: String, value: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(AppColors.appPrimary)
+
+                Text(title)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.tertiary)
+                    .textCase(.uppercase)
+                    .kerning(0.6)
+            }
+
+            Text(value)
+                .font(.system(size: 22, weight: .medium, design: .rounded))
+                .foregroundStyle(.primary)
+                .minimumScaleFactor(0.85)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.vertical, 14)
+        .background(Color(uiColor: .tertiarySystemFill))
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+    }
+
+    private func travelModeEstimateTile(
+        mode: HaversineDistance.TravelMode,
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D
+    ) -> some View {
+        let mins = HaversineDistance.estimateTravelTime(from: from, to: to, mode: mode)
+        return VStack(spacing: 8) {
+            Image(systemName: mode.sfSymbol)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(AppColors.appPrimary)
+
+            Text(travelModeShortLabel(mode))
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .kerning(0.45)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Text("\(mins) min")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, AppSpacing.xs)
+        .padding(.vertical, AppSpacing.md)
+        .background(Color(uiColor: .tertiarySystemFill))
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(travelModeShortLabel(mode)), \(mins) minutes")
+    }
+
+    // MARK: - Popular Times
+
+    @ViewBuilder
+    private var popularTimesAndVisitSection: some View {
+        let chart = popularTimesModel
+        let visit = typicalVisitDurationLine
+
+        if chart != nil || visit != nil {
+            VStack(alignment: .leading, spacing: 12) {
+                sectionTitle("Popular times")
+
+                infoCard {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let visit {
+                            HStack(spacing: 10) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(AppColors.appPrimary)
+
+                                Text(visit)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        if let model = chart {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(model.days) { day in
+                                        let isSelected = day.id == resolvedPopularTimesDayId
+                                        Button {
+                                            selectedPopularDayKey = day.id
+                                        } label: {
+                                            Text(day.weekdayShort)
+                                                .font(.subheadline.weight(.medium))
+                                                .foregroundStyle(isSelected ? .white : .primary)
+                                                .padding(.horizontal, 14)
+                                                .padding(.vertical, 8)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                        .fill(isSelected ? AppColors.appPrimary : Color(uiColor: .tertiarySystemFill))
+                                                )
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityAddTraits(isSelected ? .isSelected : [])
+                                    }
+                                }
+                            }
+
+                            if let dayId = resolvedPopularTimesDayId,
+                               let column = model.column(forDayId: dayId) {
+                                PopularTimesBarChart(slots: column.slots)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    // MARK: - About
+
+    private func aboutSection(_ summary: String) -> some View {
+        let showMoreToggle = aboutSummaryLikelyExceedsFiveLines(summary)
+        return VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("About")
+
+            Text(summary)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .lineSpacing(5)
+                .lineLimit(showMoreToggle && !aboutSummaryExpanded ? 5 : nil)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if showMoreToggle {
+                Button {
+                    aboutSummaryExpanded.toggle()
+                } label: {
+                    Text(aboutSummaryExpanded ? String(localized: "Less") : String(localized: "More"))
+                        .font(.subheadline.weight(.medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(
+                    aboutSummaryExpanded
+                    ? String(localized: "Show less about this place")
+                    : String(localized: "Show more about this place")
+                )
+            }
+        }
+        .padding(.horizontal, 20)
+        .onChange(of: summary) { _, _ in
+            aboutSummaryExpanded = false
+        }
+    }
+
+    /// Heuristic for body text at typical sheet width (~5 lines ≈ this many characters); avoids a “More” control when the copy is short.
+    private func aboutSummaryLikelyExceedsFiveLines(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count >= 240 { return true }
+        let hardLines = trimmed.components(separatedBy: .newlines).filter { !$0.isEmpty }.count
+        return hardLines > 5
+    }
+
+    // MARK: - Bullet Cards
+
+    private func bulletCardSection(title: String, icon: String, color: Color, bullets: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle(title)
+
+            infoCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(bullets, id: \.self) { bullet in
+                        HStack(alignment: .top, spacing: 10) {
+                            Circle()
+                                .fill(color)
+                                .frame(width: 6, height: 6)
+                                .padding(.top, 7)
+
+                            Text(bullet)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                                .lineSpacing(4)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    // MARK: - Tags
+
+    private func tagsSection(_ tags: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("Popular for")
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(tags, id: \.self) { tag in
+                        Text(tag)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color(uiColor: .tertiarySystemFill))
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    // MARK: - Practical Info
+
+    private var practicalSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("Practical info")
+
+            infoCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let address = place.address, !address.isEmpty {
+                        detailRow(icon: "mappin.circle.fill", title: "Address", value: address, tint: AppColors.appPrimary)
+                    }
+
+                    if let hours = openingHoursDisplay, !hours.rows.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 10) {
+                                Image(systemName: "clock")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(AppColors.appPrimary)
+                                    .frame(width: 22)
+                                Text("Hours")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.primary)
+                            }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(hours.rows) { row in
+                                    HStack(alignment: .top, spacing: 12) {
+                                        Text(row.dayLabel)
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(.primary)
+                                            .frame(width: 96, alignment: .leading)
+
+                                        Text(row.hoursText)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                            }
+                            .padding(.leading, 34)
+                        }
+                    }
+
+                    if let website = effectiveWebsite, let url = URL(string: website) {
+                        Link(destination: url) {
+                            detailRow(
+                                icon: "globe",
+                                title: "Website",
+                                value: website
+                                    .replacingOccurrences(of: "https://", with: "")
+                                    .replacingOccurrences(of: "http://", with: "")
+                                    .replacingOccurrences(of: "www.", with: ""),
+                                tint: AppColors.appPrimary
+                            )
+                        }
+                    }
+
+                    if let phone = effectivePhone {
+                        detailRow(icon: "phone", title: "Phone", value: phone, tint: .secondary)
+                    }
+
+                    let hasHours = !(openingHoursDisplay?.rows.isEmpty ?? true)
+                    let hasContact = effectiveWebsite != nil || effectivePhone != nil
+                    let hasAddress = place.address?.isEmpty == false
+
+                    if !hasHours && !hasContact && !hasAddress {
+                        Text("No practical details available")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    // MARK: - Notes
+
+    private func notesCard(_ notes: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionTitle("My notes")
+
+            infoCard {
+                Text(notes)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    // MARK: - Booking Detail Body
+
+    private var bookingDetailBody: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    bookingHeroStrip
+                    bookingContent
+                }
+                .padding(.bottom, 24)
+            }
+            .background(Color(uiColor: .systemBackground))
+            .navigationTitle(categoryLabel)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.secondary)
+                            .font(.system(size: 22))
+                    }
+                    .buttonStyle(.plain)
+                }
+                placeDetailBottomToolbarItems
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden)
+    }
+
+    private var bookingHeroStrip: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill((place.bookingCategoryEnum?.color ?? AppColors.appPrimary).opacity(0.12))
+                    .frame(width: 60, height: 60)
+
+                Image(systemName: categorySymbol)
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(place.name)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                if let provider = bookingProvider {
+                    Text(provider)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            if let conf = place.confirmationNumber, !conf.isEmpty {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("CONF.")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .kerning(0.5)
+
+                    Text(conf)
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
+                }
+            }
+        }
+        .padding(20)
+        .background(Color(uiColor: .secondarySystemBackground))
+    }
+
+    private var bookingProvider: String? {
+        guard let details = place.bookingDetails else { return nil }
+        switch details {
+        case .flight(let f): return f.airline
+        case .hotel: return nil
+        case .restaurant: return nil
+        case .carRental(let c): return c.company
+        case .activity(let a): return a.provider
+        case .transport(let t): return t.operatorName
+        }
+    }
+
+    @ViewBuilder
+    private var bookingContent: some View {
+        if let details = place.bookingDetails {
+            switch details {
+            case .flight(let f): flightContent(f)
+            case .hotel(let h): hotelContent(h)
+            case .restaurant(let r): restaurantContent(r)
+            case .carRental(let c): carRentalContent(c)
+            case .activity(let a): activityContent(a)
+            case .transport(let t): transportContent(t)
+            }
+        }
+
+        if let notes = place.notes, !notes.isEmpty {
+            notesCard(notes)
+        }
+    }
+
+    private func flightContent(_ f: FlightDetails) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            bookingInfoCard {
+                VStack(spacing: 16) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(f.departureAirport)
+                                .font(.system(size: 32, weight: .semibold, design: .rounded))
+                            if let t = f.departureTime {
+                                Text(t.timeFormatted)
+                                    .font(.title3.weight(.medium))
+                                Text(t.shortFormatted)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "airplane")
+                            .font(.system(size: 22))
+                            .foregroundStyle(BookingCategory.flight.color)
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text(f.arrivalAirport)
+                                .font(.system(size: 32, weight: .semibold, design: .rounded))
+                            if let t = f.arrivalTime {
+                                Text(t.timeFormatted)
+                                    .font(.title3.weight(.medium))
+                                Text(t.shortFormatted)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+
+            bookingInfoCard {
+                bookingRow(label: "Flight", value: "\(f.airline) \(f.flightNumber)")
+                if !f.terminal.isEmpty { bookingRow(label: "Terminal", value: f.terminal) }
+                if !f.gate.isEmpty { bookingRow(label: "Gate", value: f.gate) }
+                if !f.seat.isEmpty { bookingRow(label: "Seat", value: f.seat) }
+            }
+        }
+    }
+
+    private func hotelContent(_ h: HotelDetails) -> some View {
+        bookingInfoCard {
+            if let checkIn = h.checkInDate {
+                bookingRow(label: "Check-in", value: "\(checkIn.shortFormatted)\(h.checkInTime.map { " · \($0)" } ?? "")")
+            }
+            if let checkOut = h.checkOutDate {
+                bookingRow(label: "Check-out", value: "\(checkOut.shortFormatted)\(h.checkOutTime.map { " · \($0)" } ?? "")")
+            }
+            if let nights = h.nights { bookingRow(label: "Nights", value: "\(nights)") }
+            if !h.roomType.isEmpty { bookingRow(label: "Room", value: h.roomType) }
+        }
+    }
+
+    private func restaurantContent(_ r: RestaurantDetails) -> some View {
+        bookingInfoCard {
+            if let t = r.reservationTime { bookingRow(label: "Time", value: t.timeFormatted) }
+            if let p = r.partySize { bookingRow(label: "Party", value: "\(p) people") }
+        }
+    }
+
+    private func carRentalContent(_ c: CarRentalDetails) -> some View {
+        bookingInfoCard {
+            bookingRow(label: "Pick-up", value: c.pickupLocation)
+            bookingRow(label: "Drop-off", value: c.dropoffLocation)
+            if let t = c.pickupTime { bookingRow(label: "Pick-up time", value: t.timeFormatted) }
+            if let t = c.dropoffTime { bookingRow(label: "Drop-off time", value: t.timeFormatted) }
+            if !c.carType.isEmpty { bookingRow(label: "Car", value: c.carType) }
+        }
+    }
+
+    private func activityContent(_ a: ActivityDetails) -> some View {
+        bookingInfoCard {
+            if let d = a.duration, !d.isEmpty { bookingRow(label: "Duration", value: d) }
+            if !a.provider.isEmpty { bookingRow(label: "Provider", value: a.provider) }
+            if !a.ticketNumber.isEmpty { bookingRow(label: "Ticket", value: a.ticketNumber) }
+        }
+    }
+
+    private func transportContent(_ t: TransportDetails) -> some View {
+        bookingInfoCard {
+            bookingRow(label: "From", value: t.departureStation)
+            bookingRow(label: "To", value: t.arrivalStation)
+            if let dep = t.departureTime { bookingRow(label: "Departs", value: dep.timeFormatted) }
+            if let arr = t.arrivalTime { bookingRow(label: "Arrives", value: arr.timeFormatted) }
+            if !t.serviceNumber.isEmpty { bookingRow(label: "Service", value: t.serviceNumber) }
+            if !t.seat.isEmpty { bookingRow(label: "Seat", value: t.seat) }
+        }
+    }
+
+    private func bookingInfoCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+    }
+
+    private func bookingRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 90, alignment: .leading)
+
+            Text(value)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func chip(_ text: String, icon: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color(uiColor: .secondarySystemBackground))
+            .clipShape(Capsule())
+    }
+
+    private func statusChip(text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(tint.opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+    private func statRow(icon: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(AppColors.appPrimary)
+
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private func detailRow(icon: String, title: String, value: String, tint: Color) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundStyle(tint)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .kerning(0.5)
+
+                Text(value)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+        }
+    }
+
+    private var aboutSkeleton: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("About")
+            VStack(alignment: .leading, spacing: 8) {
+                SkeletonView(cornerRadius: 6, height: 14)
+                SkeletonView(cornerRadius: 6, height: 14)
+                SkeletonView(cornerRadius: 6, height: 14)
+                    .padding(.trailing, 80)
+            }
+        }
+        .padding(.horizontal, 20)
+        .accessibilityHidden(true)
+    }
+
+    private func bulletSkeleton(title: String, icon: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle(title)
+            infoCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        HStack(alignment: .top, spacing: 10) {
+                            Circle()
+                                .fill(color.opacity(0.4))
+                                .frame(width: 5, height: 5)
+                                .padding(.top, 6)
+                            SkeletonView(cornerRadius: 6, height: 14)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .accessibilityHidden(true)
+    }
+
+    private func resolveVenueTimeZone() async {
+        guard hasCoordinates,
+              let lat = place.lat, let lng = place.lng,
+              !lat.isNaN, !lng.isNaN else {
+            venueTimeZone = nil
+            return
+        }
+        let geocoder = CLGeocoder()
+        let location = CLLocation(latitude: lat, longitude: lng)
+        do {
+            let marks = try await geocoder.reverseGeocodeLocation(location)
+            venueTimeZone = marks.first?.timeZone
+        } catch {
+            venueTimeZone = nil
+        }
+    }
+
+    private func updateMapCamera(animated: Bool) {
+        guard let coordinate else { return }
+
+        let distance: CLLocationDistance = mapPitchEnabled ? 900 : 1400
+        let pitch: CGFloat = mapPitchEnabled ? 58 : 0
+
+        let camera = MapCamera(
+            centerCoordinate: coordinate,
+            distance: distance,
+            heading: 0,
+            pitch: pitch
+        )
+
+        if animated {
+            withAnimation(.easeInOut(duration: 0.35)) {
+                mapPosition = .camera(camera)
+            }
+        } else {
+            mapPosition = .camera(camera)
+        }
+    }
+
+    private func openInMaps() {
+        guard let coordinate else { return }
+        let mapItem = MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
+        mapItem.name = place.name
+        mapItem.openInMaps()
+    }
+
+    private func refetchEnrichment(requestRefresh: Bool) async {
+        guard let placeId = place.googlePlaceId, !placeId.isEmpty else {
+            enrichmentLoadAttempted = true
+            return
+        }
+
+        let service = dataService
+
+        if requestRefresh {
+            Task.detached(priority: .utility) {
+                await service.requestCityPlaceEnrichment(googlePlaceId: placeId)
+            }
+
+            Task.detached(priority: .background) {
+                await service.refreshCityPlaceIfStale(
+                    googlePlaceId: placeId,
+                    priority: "background"
+                )
+            }
+        }
+
+        let row = await service.fetchCityPlaceEnrichment(googlePlaceId: placeId)
+        liveEnrichment = row
+        enrichmentLoadAttempted = true
+    }
+
     private func attributionFooter(caption: String) -> some View {
         Text(caption)
             .font(.system(size: 11))
@@ -1088,34 +1396,47 @@ struct PlaceDetailSheet: View {
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 24)
-            .padding(.top, 24)
+            .padding(.top, 12)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Attribution: \(caption)")
     }
 
-    private func actionButton(label: String, icon: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .medium))
-                Text(label)
-                    .font(.caption.weight(.medium))
-            }
-            .foregroundStyle(destructive ? Color(UIColor.systemRed) : AppColors.appPrimary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: – Helpers
-
-    private func sectionHeader(_ title: String) -> some View {
+    private func sectionTitle(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: 13, weight: .medium))
             .foregroundStyle(.secondary)
             .textCase(.uppercase)
             .kerning(0.5)
+    }
+
+    private func infoCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func handleReport(reason: ReportPlaceSheet.Reason, googlePlaceId: String) {
+        Task.detached(priority: .utility) { [dataService] in
+            await dataService.reportCityPlace(
+                googlePlaceId: googlePlaceId,
+                reason: reason.rawValue
+            )
+        }
+
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+            reportToastVisible = true
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            withAnimation(.easeOut(duration: 0.3)) {
+                reportToastVisible = false
+            }
+        }
     }
 }
 
@@ -1123,15 +1444,14 @@ extension HaversineDistance.TravelMode: CaseIterable {
     public static var allCases: [HaversineDistance.TravelMode] { [.walking, .driving, .cycling, .transit] }
 }
 
-// MARK: – Report thank-you toast (Phase E.3)
-
 private struct ReportThankYouToast: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.white)
-            Text("Thanks — we'll take a look.")
-                .font(.system(size: 14, weight: .semibold))
+
+            Text("Thanks — we’ll take a look.")
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.white)
         }
         .padding(.horizontal, 16)
@@ -1144,7 +1464,3 @@ private struct ReportThankYouToast: View {
         .accessibilityLabel("Report submitted, thank you.")
     }
 }
-
-
-// =============================================================================
-

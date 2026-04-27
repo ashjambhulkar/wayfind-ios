@@ -35,7 +35,7 @@ struct Place: Identifiable, Codable, Hashable {
     var bookingCurrencyCode: String?
 
     // MARK: – city_places enrichment (joined via place_id / googlePlaceId)
-    var heroImageUrl: String?          // city_places.thumbnail_url
+    var heroImageUrl: String?          // trip_activities.hero_image_url, else city_places.images[0], else thumbnail_url
     var rating: Double?                // city_places.rating
     var userRatingsTotal: Int?         // city_places.user_ratings_total
     var priceLevel: Int?               // city_places.price_level (1–4)

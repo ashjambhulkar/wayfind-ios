@@ -1,3 +1,4 @@
+import CoreLocation
 import Observation
 import SwiftUI
 
@@ -53,6 +54,8 @@ struct TripDetailView: View {
     /// Wave 3.3 — live-updating flight status cache for this trip's
     /// flight bookings. Bound on `.task`; unbound on `.onDisappear`.
     @State private var flightTracking: FlightTrackingService = FlightTrackingService()
+    /// Fallback when `trip_days.timezone` is missing: trip-center geocode, else device.
+    @State private var tripTimelineGeocodedTimeZone: TimeZone = .current
 
     @Environment(\.dismiss) private var dismiss
     @State private var isDayHeaderPinnedToNavigation = false
@@ -669,6 +672,9 @@ struct TripDetailView: View {
                     }
                 }
             }
+            .task(id: tripTimelineTimeZoneRefreshKey(viewModel)) {
+                await refreshTripTimelineGeocodedTimeZone(for: viewModel)
+            }
         }
     }
 
@@ -727,8 +733,47 @@ struct TripDetailView: View {
 
     // MARK: - Day Section
 
+    private func displayTimeZone(for day: ItineraryDay, viewModel: TripDetailViewModel) -> TimeZone {
+        if let raw = day.timeZoneIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
+           let tz = TimeZone(identifier: raw) {
+            return tz
+        }
+        return tripTimelineGeocodedTimeZone
+    }
+
+    private func tripTimelineTimeZoneRefreshKey(_ vm: TripDetailViewModel) -> String {
+        let tzKey = vm.scheduledDays
+            .filter { $0.dayNumber > 0 }
+            .map { "\($0.id.uuidString):\($0.timeZoneIdentifier ?? "")" }
+            .joined(separator: ";")
+        let c = "\(vm.trip.lat ?? 0),\(vm.trip.lng ?? 0)"
+        return "\(vm.trip.id.uuidString)|\(tzKey)|\(c)|\(vm.scheduledDays.count)"
+    }
+
+    private func refreshTripTimelineGeocodedTimeZone(for vm: TripDetailViewModel) async {
+        if let raw = vm.scheduledDays.first(where: { $0.dayNumber > 0 })?.timeZoneIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty,
+           let tz = TimeZone(identifier: raw) {
+            await MainActor.run { tripTimelineGeocodedTimeZone = tz }
+            return
+        }
+        guard let lat = vm.trip.lat, let lng = vm.trip.lng, !lat.isNaN, !lng.isNaN else {
+            await MainActor.run { tripTimelineGeocodedTimeZone = .current }
+            return
+        }
+        let geocoder = CLGeocoder()
+        do {
+            let marks = try await geocoder.reverseGeocodeLocation(CLLocation(latitude: lat, longitude: lng))
+            let tz = marks.first?.timeZone ?? .current
+            await MainActor.run { tripTimelineGeocodedTimeZone = tz }
+        } catch {
+            await MainActor.run { tripTimelineGeocodedTimeZone = .current }
+        }
+    }
+
     @ViewBuilder
     private func daySection(day: ItineraryDay, viewModel: TripDetailViewModel) -> some View {
+        let dayTZ = displayTimeZone(for: day, viewModel: viewModel)
         let places = viewModel.places(for: day)
         let ongoingForDay = viewModel.ongoingBookings(for: day)
         let isQuietEmptyDay = places.isEmpty && ongoingForDay.isEmpty
@@ -772,9 +817,9 @@ struct TripDetailView: View {
                         // time-of-day bucket changes. Within the same chapter
                         // we keep the lightweight gap row.
                         let prevChapter = index > 0
-                            ? TimeOfDayChapter.from(places[index - 1].startTime)
+                            ? TimeOfDayChapter.from(places[index - 1].startTime, timeZone: dayTZ)
                             : nil
-                        let currChapter = TimeOfDayChapter.from(place.startTime)
+                        let currChapter = TimeOfDayChapter.from(place.startTime, timeZone: dayTZ)
 
                         if let chapter = currChapter, chapter != prevChapter {
                             TimeOfDayDividerView(chapter: chapter)
@@ -788,6 +833,7 @@ struct TripDetailView: View {
                                 TimelineBookingCardView(
                                     place: place,
                                     dayNumber: day.dayNumber,
+                                    timelineDisplayTimeZone: dayTZ,
                                     onEdit: { placeToEdit = place },
                                     onMoveToDay: { placeToMove = place },
                                     onDelete: { deletePlace(place, viewModel: viewModel) },
@@ -802,6 +848,7 @@ struct TripDetailView: View {
                                 TimelinePlaceCardView(
                                     place: place,
                                     dayNumber: day.dayNumber,
+                                    timelineDisplayTimeZone: dayTZ,
                                     onEdit: { placeToEdit = place },
                                     onMoveToDay: { placeToMove = place },
                                     onMoveToIdeas: { moveToIdeas(place, viewModel: viewModel) },
@@ -842,7 +889,7 @@ struct TripDetailView: View {
             DaySectionHeaderView(
                 day: day,
                 dayLabel: viewModel.dayHeaderDayLabel(for: day),
-                dateLabel: viewModel.dayHeaderDateLabel(for: day),
+                dateLabel: viewModel.dayHeaderDateLabel(for: day, timelineTimeZone: dayTZ),
                 isCollapsed: viewModel.isDayCollapsed(day),
                 contentPreview: preview,
                 isQuietEmptyDay: isQuietEmptyDay
@@ -1033,6 +1080,7 @@ struct TripDetailView: View {
                             TimelineBookingCardView(
                                 place: place,
                                 dayNumber: 0,
+                                timelineDisplayTimeZone: tripTimelineGeocodedTimeZone,
                                 onEdit: { placeToEdit = place },
                                 onMoveToDay: { placeToMove = place },
                                 onDelete: { deletePlace(place, viewModel: viewModel) },
@@ -1047,6 +1095,7 @@ struct TripDetailView: View {
                             TimelinePlaceCardView(
                                 place: place,
                                 dayNumber: 0,
+                                timelineDisplayTimeZone: tripTimelineGeocodedTimeZone,
                                 onEdit: { placeToEdit = place },
                                 onMoveToDay: { placeToMove = place },
                                 onDelete: { deletePlace(place, viewModel: viewModel) },
