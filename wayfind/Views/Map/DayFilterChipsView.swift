@@ -36,6 +36,20 @@ struct DayFilterChipsView: View {
             .padding(.vertical, AppSpacing.xs)
             .padding(.horizontal, AppSpacing.sm)
         }
+        // Subtle edge fade hints that content scrolls horizontally when there
+        // are too many days to fit. Only the trailing edge fades — the leading
+        // edge stays opaque so the "All" anchor remains readable at rest.
+        .mask(
+            LinearGradient(
+                stops: [
+                    .init(color: .black, location: 0.0),
+                    .init(color: .black, location: 0.92),
+                    .init(color: .black.opacity(0.0), location: 1.0),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
     }
 }
 
@@ -55,13 +69,18 @@ private struct DayFilterCapsuleButton: View {
             action()
         } label: {
             label
+                .padding(.horizontal, controlSize == .small ? 10 : 12)
+                .padding(.vertical, controlSize == .small ? 5 : 7)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(
+                            Color.primary.opacity(isSelected ? 0.18 : 0.10),
+                            lineWidth: 0.5
+                        )
+                }
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .controlSize(controlSize)
-        /// `Color.primary` inverts per appearance; opacity gives a neutral outline on
-        /// materials in both light and dark mode (secondary tint alone can wash out on dark materials).
-        .tint(Color.primary.opacity(isSelected ? 0.38 : 0.22))
+        .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 

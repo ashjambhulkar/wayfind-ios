@@ -52,7 +52,11 @@ struct MapChromeIconButton: View {
                 .symbolRenderingMode(symbolRenderingMode)
                 .foregroundStyle(monochromeForeground)
                 .frame(width: minTouchSize, height: minTouchSize)
-                .background(Color(UIColor.tertiarySystemFill), in: Circle())
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                }
         } else {
             Image(systemName: systemName)
                 .font(iconFont)

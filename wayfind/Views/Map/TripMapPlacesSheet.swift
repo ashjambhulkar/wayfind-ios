@@ -10,8 +10,10 @@ enum PlacesSheetLayout: Equatable {
     case half
     case full
 
-    /// Grabber + day chips only (no second floating accessory).
-    static let compactDetent = PresentationDetent.height(132)
+    /// Grabber + exactly one compact chrome row. Keep this tight so the docked
+    /// state reads as the search bar or day-pill slider itself, not a larger
+    /// mini sheet with extra vertical dead space.
+    static let compactDetent = PresentationDetent.height(84)
 
     /// Shorter than system `.medium` so more of the map stays visible.
     static let halfOpenDetent = PresentationDetent.height(285)
@@ -38,7 +40,8 @@ enum PlacesSheetLayout: Equatable {
 // MARK: - Places Sheet
 
 /// Day filters + places list. Top chrome: grabber, search pill, **Suggested Places** (sparkles)
-/// whenever the inline search UI is hidden. Tapping the pill opens `MapSearchOverlay` inside this sheet.
+/// whenever the inline search UI is hidden. In the docked detent, active search text keeps the search
+/// pill visible with a close button; otherwise only the day filters remain.
 /// Dock the sheet by dragging to the compact detent.
 struct TripMapPlacesExpandedSheet: View {
     let trip: Trip
@@ -66,18 +69,70 @@ struct TripMapPlacesExpandedSheet: View {
     @State private var isInlineMapSearchActive = false
     @State private var inlineSearchFieldActivationDelayMs = 0
 
-    private var showsPlacesSearchBar: Bool {
-        placesSheetLayout != .docked
-    }
+    /// Settled layout used for content-structure decisions. iOS's
+    /// `.presentationDetents(_:selection:)` binding can emit transient values
+    /// during a quick flick when the sheet briefly crosses a detent threshold
+    /// before the physics decide to bounce back. Gating content structure on
+    /// the raw binding causes docked content to appear inside a half-size
+    /// sheet. We debounce commits here so only stable detents flip content.
+    @State private var committedLayout: PlacesSheetLayout?
+    @State private var layoutCommitTask: Task<Void, Never>?
+
+    /// Drives motion choice for chrome transitions so we honour Accessibility > Reduce Motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var showsMapSearchResultsList: Bool {
         !mapSearchResults.isEmpty
     }
 
-    /// After a query is committed (or text remains in the pill), show the **clear (X)** control — not sparkles.
-    private var trailingChromeShowsMapSearchCancel: Bool {
-        showsMapSearchResultsList
-            || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var hasActiveMapSearchText: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Settled layout the content decisions read. Falls back to the raw
+    /// binding only until the first committed value is known (initial render).
+    private var effectiveLayout: PlacesSheetLayout {
+        committedLayout ?? placesSheetLayout
+    }
+
+    /// Composite key that collapses every driver of chrome layout into a single
+    /// value, so the body's `.animation(_, value:)` re-runs exactly once per
+    /// state change. Prevents the previous mismatch where two independent
+    /// `.animation` modifiers could disagree mid flick-release.
+    private struct ChromeAnimationKey: Hashable {
+        let layout: PlacesSheetLayout
+        let hasSearchText: Bool
+    }
+
+    private var chromeAnimationKey: ChromeAnimationKey {
+        ChromeAnimationKey(layout: effectiveLayout, hasSearchText: hasActiveMapSearchText)
+    }
+
+    /// Spring matched to iOS sheet detent animation (response ~0.35, damping ~0.82).
+    /// Collapses to a short linear cross-fade when Reduce Motion is on — matches HIG.
+    private var chromeAnimation: Animation {
+        reduceMotion
+            ? .linear(duration: 0.12)
+            : .spring(response: 0.35, dampingFraction: 0.82)
+    }
+
+    /// Summarises the sheet's current state for VoiceOver (announced as a container label).
+    private var sheetAccessibilityLabel: String {
+        switch effectiveLayout {
+        case .docked:
+            if hasActiveMapSearchText {
+                return String(localized: "Minimized. Search: \(searchText).")
+            }
+            return String(localized: "Minimized. Day filters.")
+        case .half:
+            return hasActiveMapSearchText
+                ? String(localized: "Places. Search: \(searchText).")
+                : String(localized: "Places. Day filters and activities.")
+        case .full:
+            return hasActiveMapSearchText
+                ? String(localized: "Places expanded. Search: \(searchText).")
+                : String(localized: "Places expanded. Day filters and activities.")
+        }
     }
 
     var body: some View {
@@ -87,39 +142,47 @@ struct TripMapPlacesExpandedSheet: View {
             if isInlineMapSearchActive {
                 inlineMapSearchView
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            } else if placesSheetLayout == .docked {
-                dockedDayFilterOnly
             } else {
-                mapsStyleTopChromeRow
+                // Docked: top row only (pills OR search bar). Expanded content is
+                // removed from the hierarchy entirely so VoiceOver cannot reach it
+                // and no offscreen list rows are laid out.
+                // Half / Full: top row + divider + expanded content. The removal
+                // uses opacity + move so the transition feels "of the sheet"
+                // during a flick-release, co-timed with the sheet height animation.
+                // NOTE: gated on `effectiveLayout`, not the raw binding, so
+                // transient flick-induced .docked updates don't thrash the tree.
+                topChromeRow
 
-                if showsMapSearchResultsList {
+                if effectiveLayout != .docked {
                     Divider()
-                    mapSubmittedSearchResultsList
+
+                    expandedContentArea
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                } else {
-                    filterChrome
-
-                    Divider()
-
-                    TripMapPlacesDayListContent(
-                        trip: trip,
-                        selectedDayFilter: $selectedDayFilter,
-                        allPlacesForList: allPlacesForList,
-                        dayNumberByDayId: dayNumberByDayId,
-                        onSelectPlace: onSelectPlace,
-                        showsDayTabs: false
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .transition(
+                            .asymmetric(
+                                insertion: .opacity.combined(with: .move(edge: .bottom)),
+                                removal: .opacity.combined(with: .move(edge: .bottom))
+                            )
+                        )
+                        .accessibilityHidden(effectiveLayout == .docked)
                 }
             }
         }
-        .background(.regularMaterial)
-        .ignoresSafeArea()
-        .onChange(of: placesSheetLayout) { _, layout in
-            if layout == .docked {
-                isSearchPresented = false
-                isInlineMapSearchActive = false
-            }
+        .background(Color.clear)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(sheetAccessibilityLabel)
+        .animation(chromeAnimation, value: chromeAnimationKey)
+        .onAppear {
+            // Sync the committed layout to whatever the sheet opened at, so the
+            // first drag starts from a known stable value (not nil).
+            committedLayout = placesSheetLayout
+        }
+        .onDisappear {
+            layoutCommitTask?.cancel()
+            layoutCommitTask = nil
+        }
+        .onChange(of: placesSheetLayout) { _, newLayout in
+            scheduleLayoutCommit(newLayout)
         }
         .onChange(of: openInlineMapSearch) { _, shouldOpen in
             guard shouldOpen else { return }
@@ -127,6 +190,33 @@ struct TripMapPlacesExpandedSheet: View {
             inlineSearchFieldActivationDelayMs = (placesSheetLayout == .full) ? 0 : 260
             placesSheetLayout = .full
             isInlineMapSearchActive = true
+        }
+    }
+
+    /// Debounce content-layer commits by ~120ms to filter out iOS's transient
+    /// mid-gesture detent binding updates. A rapid flick that briefly crosses a
+    /// detent threshold before snapping back cancels the pending commit, so the
+    /// body never structurally rebuilds around a phantom intermediate state.
+    private func scheduleLayoutCommit(_ newLayout: PlacesSheetLayout) {
+        layoutCommitTask?.cancel()
+        layoutCommitTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+            commitLayout(newLayout)
+        }
+    }
+
+    /// Commit a settled detent: update content state, reset search overlays
+    /// when docking, and fire a detent-change haptic only on real transitions.
+    private func commitLayout(_ newLayout: PlacesSheetLayout) {
+        let previous = committedLayout
+        committedLayout = newLayout
+        if newLayout == .docked {
+            isSearchPresented = false
+            isInlineMapSearchActive = false
+        }
+        if let previous, previous != newLayout {
+            HapticManager.selection()
         }
     }
 
@@ -141,6 +231,99 @@ struct TripMapPlacesExpandedSheet: View {
 
     private var inlineMapSearchView: some View {
         mapSearchOverlay(true, inlineSearchFieldActivationDelayMs, endInlineMapSearch)
+    }
+
+    /// Single top row used at every detent.
+    /// - Docked + empty → day pills only (user's rule).
+    /// - Docked + text → search bar with X.
+    /// - Expanded  → always search bar (expanded content below hosts the pills).
+    ///
+    /// Uses a conditional `Group` (not `ZStack`) so the row sizes to the active
+    /// variant's natural height — avoids the ~22pt of dead space the ZStack max
+    /// height introduced in docked+empty. The crossfade is driven by the body's
+    /// single spring animation via `.transition(.opacity)`.
+    @ViewBuilder
+    private var topChromeRow: some View {
+        if effectiveLayout == .docked && !hasActiveMapSearchText {
+            dayPillsChromeRow
+                .transition(.opacity)
+        } else {
+            searchBarChromeRow
+                .transition(.opacity)
+        }
+    }
+
+    /// Content below the top row. Always rendered so the system sheet simply
+    /// clips during detent animations — avoids mid-drag empty panels.
+    /// - Has results → results list.
+    /// - Otherwise → (optional) day pills as filter chrome + activities list.
+    /// In docked+empty the top row is already the pills, so we skip the filter row
+    /// to avoid a duplicate pill row appearing briefly as the sheet grows.
+    @ViewBuilder
+    private var expandedContentArea: some View {
+        if showsMapSearchResultsList {
+            mapSubmittedSearchResultsList
+        } else {
+            VStack(spacing: 0) {
+                let topIsPills = effectiveLayout == .docked && !hasActiveMapSearchText
+                if !topIsPills {
+                    dayPillsChromeRow
+                    Divider()
+                }
+                TripMapPlacesDayListContent(
+                    trip: trip,
+                    selectedDayFilter: $selectedDayFilter,
+                    allPlacesForList: allPlacesForList,
+                    dayNumberByDayId: dayNumberByDayId,
+                    onSelectPlace: onSelectPlace,
+                    showsDayTabs: false
+                )
+            }
+        }
+    }
+
+    private var searchBarChromeRow: some View {
+        HStack(alignment: .center, spacing: 10) {
+            mapsStyleSearchPillButton
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Trailing accessory mirrors the original behaviour:
+            // - Active search text (or committed results) → clear (X) button.
+            // - Otherwise → Suggested Places (sparkles) shortcut.
+            if hasActiveMapSearchText || showsMapSearchResultsList {
+                activeMapSearchClearButton
+            } else {
+                mapsStyleSuggestedPlacesButton
+            }
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .padding(.top, 2)
+        .padding(.bottom, AppSpacing.sm)
+    }
+
+    private var dayPillsChromeRow: some View {
+        DayFilterChipsView(
+            selectedDay: $selectedDayFilter,
+            dayCount: max(trip.dayCount, 1),
+            controlSize: .regular
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard effectiveLayout == .docked else { return }
+            HapticManager.light()
+            placesSheetLayout = .half
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            String(localized: "\(allPlacesForList.count) activities on map. Tap to expand the list.")
+        )
+        .accessibilityAction(named: Text(String(localized: "Expand places list"))) {
+            placesSheetLayout = .half
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
     }
 
     private func mapSubmittedSearchRowSymbolAndFamily(for preview: MapSearchPreview) -> (
@@ -227,27 +410,6 @@ struct TripMapPlacesExpandedSheet: View {
         .environment(\.defaultMinListRowHeight, 52)
     }
 
-    /// Search pill + suggested places (always when not in inline search).
-    private var mapsStyleTopChromeRow: some View {
-        HStack(alignment: .center, spacing: 10) {
-            if showsPlacesSearchBar {
-                mapsStyleSearchPillButton
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Spacer(minLength: 0)
-            }
-
-            if trailingChromeShowsMapSearchCancel {
-                activeMapSearchClearButton
-            } else {
-                mapsStyleSuggestedPlacesButton
-            }
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .padding(.top, 2)
-        .padding(.bottom, 6)
-    }
-
     /// Trailing **clear** control (filled X), same glyph family as the system search field dismiss.
     private var activeMapSearchClearButton: some View {
         MapChromeIconButton.mapSearchDismiss(
@@ -293,7 +455,11 @@ struct TripMapPlacesExpandedSheet: View {
             .padding(.leading, 14)
             .padding(.trailing, 12)
             .padding(.vertical, 11)
-            .background(Color(UIColor.tertiarySystemFill), in: Capsule())
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(String(localized: "Search places"))
@@ -321,50 +487,6 @@ struct TripMapPlacesExpandedSheet: View {
             .accessibilityHidden(true)
     }
 
-    private var filterChrome: some View {
-        DayFilterChipsView(
-            selectedDay: $selectedDayFilter,
-            dayCount: max(trip.dayCount, 1),
-            controlSize: .regular
-        )
-        .padding(.horizontal, AppSpacing.lg)
-        .padding(.top, AppSpacing.xs)
-        .padding(.bottom, AppSpacing.sm)
-    }
-
-    /// Docked detent: day chips + same suggested-places control as the expanded search row.
-    private var dockedDayFilterOnly: some View {
-        HStack(alignment: .center, spacing: 8) {
-            DayFilterChipsView(
-                selectedDay: $selectedDayFilter,
-                dayCount: max(trip.dayCount, 1),
-                controlSize: .regular
-            )
-            .frame(maxWidth: .infinity, alignment: .center)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                HapticManager.light()
-                placesSheetLayout = .half
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(
-                String(localized: "\(allPlacesForList.count) activities on map. Tap to expand the list.")
-            )
-            .accessibilityAction(named: Text(String(localized: "Expand places list"))) {
-                placesSheetLayout = .half
-            }
-
-            if trailingChromeShowsMapSearchCancel {
-                activeMapSearchClearButton
-            } else {
-                mapsStyleSuggestedPlacesButton
-            }
-        }
-        .padding(.leading, AppSpacing.sm)
-        .padding(.trailing, AppSpacing.md)
-        .padding(.top, 4)
-        .padding(.bottom, AppSpacing.sm)
-    }
 }
 
 // MARK: - Day list content
@@ -402,7 +524,7 @@ private struct TripMapPlacesDayListContent: View {
                     .padding(.horizontal, 8)
                 }
                 .frame(height: 42)
-                .background(Color(UIColor.systemBackground))
+                .background(.regularMaterial)
 
                 Divider()
             }
@@ -470,6 +592,7 @@ private struct TripMapPlacesDayListContent: View {
             }
         }
         .listStyle(.insetGrouped)
+        .listSectionSpacing(.compact)
         .listRowSpacing(6)
         .scrollContentBackground(.hidden)
         .background(.clear)
