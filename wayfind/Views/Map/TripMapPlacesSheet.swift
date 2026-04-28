@@ -15,10 +15,8 @@ enum PlacesSheetLayout: Equatable {
     /// mini sheet with extra vertical dead space.
     static let compactDetent = PresentationDetent.height(84)
 
-    /// Shorter than system `.medium` so more of the map stays visible, and
-    /// tight enough that short result lists don't leave a dead band at the
-    /// bottom of the sheet.
-    static let halfOpenDetent = PresentationDetent.height(270)
+    /// Proportional sheet stop so the half-open map sheet scales with screen height.
+    static let halfOpenDetent = PresentationDetent.fraction(0.46)
 
     var presentationDetent: PresentationDetent {
         switch self {
@@ -100,10 +98,10 @@ struct TripMapPlacesExpandedSheet: View {
     /// Top scroll inset for the overlaid search row + day capsules. The rows
     /// scroll underneath this chrome instead of the chrome living in a solid
     /// header band.
-    private static let searchAndDayChromeScrollTopMargin: CGFloat = 108
+    private static let searchAndDayChromeScrollTopMargin: CGFloat = 0
     /// Top scroll inset for submitted search results, where only the search row
     /// is overlaid.
-    private static let searchChromeScrollTopMargin: CGFloat = 56
+    private static let searchChromeScrollTopMargin: CGFloat = 0
 
     private var showsMapSearchResultsList: Bool {
         !mapSearchResults.isEmpty
@@ -412,6 +410,7 @@ struct TripMapPlacesExpandedSheet: View {
         .listStyle(.insetGrouped)
         .contentMargins(.top, Self.searchChromeScrollTopMargin, for: .scrollContent)
         .contentMargins(.bottom, 0, for: .scrollContent)
+        .listSectionSpacing(0)
         .scrollContentBackground(.hidden)
         .environment(\.defaultMinListRowHeight, 52)
     }

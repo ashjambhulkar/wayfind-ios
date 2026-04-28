@@ -949,6 +949,8 @@ struct TripMapView: View {
             cityProfileId: resolvedCityProfileId,
             excludedPlaceIds: mapState.scheduledDayPlaceIds
         ) { preview in
+            returnToSearchOverlay = false
+            returnToSuggestedPlacesBrowser = true
             pendingSuggestedPlacesPreview = preview
             showSuggestedPlacesBrowser = false
         } onCancel: {
@@ -1651,7 +1653,7 @@ struct TripMapView: View {
 
     private func handleSearchSheetSuggestedPicked(_ preview: MapSearchPreview) {
         if sharedState != nil {
-            returnToSearchOverlay = false
+            returnToSearchOverlay = true
             returnToSuggestedPlacesBrowser = false
             pendingSuggestedPlacesPreview = nil
             presentSuggestedPlacesPreviewAfterEmbeddedSearchCollapse(preview)
@@ -1666,7 +1668,7 @@ struct TripMapView: View {
     private func handleSuggestedPlacesPicked(_ preview: MapSearchPreview) {
         if sharedState != nil {
             returnToSearchOverlay = false
-            returnToSuggestedPlacesBrowser = false
+            returnToSuggestedPlacesBrowser = true
             pendingSuggestedPlacesPreview = nil
             presentSuggestedPlacesPreviewAfterEmbeddedSearchCollapse(preview)
             return
