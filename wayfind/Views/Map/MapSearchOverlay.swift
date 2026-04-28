@@ -134,6 +134,10 @@ struct MapSearchOverlay: View {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var showsCategoryPills: Bool {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Focused or any typed text: hide the suggested-places shortcut (system search supplies Cancel / dismiss).
     private var embeddedSearchHidesSuggestedShortcut: Bool {
         guard embedsInParentSheet else { return false }
@@ -276,7 +280,9 @@ struct MapSearchOverlay: View {
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
-                categoryPillsInset
+                if showsCategoryPills {
+                    categoryPillsInset
+                }
             }
     }
 
@@ -349,7 +355,9 @@ struct MapSearchOverlay: View {
                 .padding(.horizontal, AppSpacing.md)
                 .padding(.bottom, 2)
             }
-            categoryPillsInsetEmbeddedUnderSearch
+            if showsCategoryPills {
+                categoryPillsInsetEmbeddedUnderSearch
+            }
         }
     }
 
@@ -392,7 +400,6 @@ struct MapSearchOverlay: View {
             HapticManager.selection()
             runCategorySearch(pill)
         }
-        .padding(.horizontal, AppSpacing.lg)
         .padding(.vertical, AppSpacing.sm)
         .frame(maxWidth: .infinity)
         .background(searchSurfaceBackground)
@@ -404,7 +411,6 @@ struct MapSearchOverlay: View {
             HapticManager.selection()
             runCategorySearch(pill)
         }
-        .padding(.horizontal, AppSpacing.lg)
         .padding(.top, AppSpacing.xs)
         .padding(.bottom, AppSpacing.sm)
         .frame(maxWidth: .infinity)
@@ -428,6 +434,11 @@ struct MapSearchOverlay: View {
         // city, rendered with thumbnails so the user can recognise them
         // at a glance. "See all" hands the full list off to a dedicated sheet.
         List {
+            suggestedPlacesHeaderRow
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
             // Suggested Places — always render the section so the user
             // sees the header even before `resolvedCityProfileId` lands.
             // The body adapts to loading / unresolved / empty / loaded
@@ -442,25 +453,22 @@ struct MapSearchOverlay: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
+                    .listRowBackground(AppColors.appSurface)
                 } else if cityProfileId == nil {
                     Text("Suggestions appear here once your destination loads.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .listRowBackground(AppColors.appSurface)
                 } else if suggestedPlaces.isEmpty {
                     Text("No curated places yet for this city.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .listRowBackground(AppColors.appSurface)
                 } else {
                     ForEach(suggestedPlaces.prefix(4)) { preview in
                         suggestedPlaceRow(preview)
                     }
                 }
-            } header: {
-                sectionHeader(
-                    "Suggested Places",
-                    trailing: suggestedPlaces.count > 4 ? "See all" : nil,
-                    trailingAction: { showAllSuggested = true }
-                )
             }
 
             if suggestedPlaces.isEmpty && !loadingSuggested && cityProfileId == nil {
@@ -473,48 +481,40 @@ struct MapSearchOverlay: View {
             }
         }
         .listStyle(.insetGrouped)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .listSectionSpacing(AppSpacing.xs)
         .scrollContentBackground(.hidden)
         .modifier(MapSearchEmbeddedScrollHorizontalBalanceModifier(isEmbedded: embedsInParentSheet))
         .scrollDismissesKeyboard(.interactively)
     }
 
-    /// Section header that mimics Apple Maps' "Title chevron" pattern —
-    /// a bold large-title with an optional trailing tappable label (e.g.
-    /// "See all"). `.textCase(nil)` defeats the inset-grouped list's
-    /// default uppercase/secondary treatment so the header reads like a
-    /// real heading rather than a tiny caption.
-    @ViewBuilder
-    private func sectionHeader(
-        _ title: String,
-        trailing: String? = nil,
-        trailingAction: (() -> Void)? = nil
-    ) -> some View {
+    /// Custom header row instead of a `Section` header because inset-grouped
+    /// lists apply extra leading padding to section headers.
+    private var suggestedPlacesHeaderRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title)
-                .font(.title2.weight(.bold))
+            Text("Suggested Places")
+                .font(.headline.weight(.semibold))
                 .foregroundStyle(.primary)
                 .textCase(nil)
             Spacer(minLength: 0)
-            if let trailing, let trailingAction {
+            if suggestedPlaces.count > 4 {
                 Button {
                     HapticManager.selection()
-                    trailingAction()
+                    showAllSuggested = true
                 } label: {
                     HStack(spacing: 2) {
-                        Text(trailing)
-                            .font(.subheadline.weight(.semibold))
+                        Text("See all")
+                            .font(.footnote.weight(.semibold))
                         Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
+                            .font(.caption2.weight(.semibold))
                     }
                     .foregroundStyle(AppColors.appPrimary)
                     .textCase(nil)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(trailing) \(title.lowercased())")
+                .accessibilityLabel("See all suggested places")
             }
         }
-        .padding(.top, 8)
-        .padding(.bottom, 4)
     }
 
     /// Suggested-place row used in the empty state. Mirrors the Apple
@@ -548,6 +548,8 @@ struct MapSearchOverlay: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.lg, bottom: AppSpacing.sm, trailing: AppSpacing.lg))
+        .listRowBackground(AppColors.appSurface)
     }
 
     private var mergedSuggestions: some View {
@@ -581,37 +583,25 @@ struct MapSearchOverlay: View {
 
             Section {
                 searchNearbyRow
-            }
 
-            if !ownedRows.isEmpty {
-                Section {
+                if !ownedRows.isEmpty {
                     ForEach(ownedRows) { preview in
                         ownedRowButton(preview)
                     }
-                } header: {
-                    typedSectionHeader("Wayfind Suggestions")
                 }
-            }
 
-            switch provider {
-            case .apple, .chinaFallback:
-                if !apple.suggestions.isEmpty {
-                    Section {
+                switch provider {
+                case .apple, .chinaFallback:
+                    if !apple.suggestions.isEmpty {
                         ForEach(apple.suggestions) { suggestion in
                             appleRowButton(suggestion)
                         }
-                    } header: {
-                        typedSectionHeader("Suggestions")
                     }
-                }
-            case .google:
-                if !google.results.isEmpty {
-                    Section {
+                case .google:
+                    if !google.results.isEmpty {
                         ForEach(google.results) { prediction in
                             googleRowButton(prediction)
                         }
-                    } header: {
-                        typedSectionHeader("Suggestions")
                     }
                 }
             }
@@ -632,6 +622,7 @@ struct MapSearchOverlay: View {
             }
         }
         .listStyle(.insetGrouped)
+        .contentMargins(.top, AppSpacing.xs, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .modifier(MapSearchEmbeddedScrollHorizontalBalanceModifier(isEmbedded: embedsInParentSheet))
         .scrollDismissesKeyboard(.interactively)
@@ -689,14 +680,6 @@ struct MapSearchOverlay: View {
         .listRowBackground(AppColors.appSurface)
         .accessibilityLabel("Search nearby for \(query)")
         .accessibilityHint("Finds matching places in the visible map area")
-    }
-
-    private func typedSectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .textCase(nil)
-            .padding(.top, AppSpacing.xs)
     }
 
     @ViewBuilder

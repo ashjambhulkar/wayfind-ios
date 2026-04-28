@@ -15,8 +15,10 @@ enum PlacesSheetLayout: Equatable {
     /// mini sheet with extra vertical dead space.
     static let compactDetent = PresentationDetent.height(84)
 
-    /// Shorter than system `.medium` so more of the map stays visible.
-    static let halfOpenDetent = PresentationDetent.height(285)
+    /// Shorter than system `.medium` so more of the map stays visible, and
+    /// tight enough that short result lists don't leave a dead band at the
+    /// bottom of the sheet.
+    static let halfOpenDetent = PresentationDetent.height(270)
 
     var presentationDetent: PresentationDetent {
         switch self {
@@ -69,17 +71,39 @@ struct TripMapPlacesExpandedSheet: View {
     @State private var isInlineMapSearchActive = false
     @State private var inlineSearchFieldActivationDelayMs = 0
 
-    /// Settled layout used for content-structure decisions. iOS's
-    /// `.presentationDetents(_:selection:)` binding can emit transient values
-    /// during a quick flick when the sheet briefly crosses a detent threshold
-    /// before the physics decide to bounce back. Gating content structure on
-    /// the raw binding causes docked content to appear inside a half-size
-    /// sheet. We debounce commits here so only stable detents flip content.
-    @State private var committedLayout: PlacesSheetLayout?
-    @State private var layoutCommitTask: Task<Void, Never>?
+    /// Committed (settled) structural layout.
+    ///
+    /// `presentationDetents(_:selection:)` writes to its selection binding
+    /// *during* the drag gesture as the sheet crosses detent thresholds —
+    /// not only when the user commits. If we gate structural view swaps
+    /// directly on `placesSheetLayout`, a short downward pull from `.half`
+    /// briefly sets the binding to `.docked`; the content collapses to
+    /// pill-only chrome, but the sheet springs back to `.half` when the
+    /// gesture ends, leaving a half-height sheet showing docked-style
+    /// content until the binding settles. Apple Maps keeps its sheet in
+    /// sync by updating content structure only after the detent has
+    /// actually settled. We replicate that by debouncing commits here.
+    ///
+    /// Default is `.docked` (the collapsed state) so the first frame never
+    /// renders expanded content before `.onAppear` syncs to the live
+    /// binding — matches the map shared state's own default.
+    @State private var committedLayout: PlacesSheetLayout = .docked
+    @State private var commitTask: Task<Void, Never>?
 
     /// Drives motion choice for chrome transitions so we honour Accessibility > Reduce Motion.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Debounce window covering the sheet's own settle animation (~0.3s system
+    /// spring). Transient detent crossings during an interactive drag are
+    /// cancelled by the next change before they ever commit.
+    private static let layoutCommitDebounceMs: UInt64 = 180
+    /// Top scroll inset for the overlaid search row + day capsules. The rows
+    /// scroll underneath this chrome instead of the chrome living in a solid
+    /// header band.
+    private static let searchAndDayChromeScrollTopMargin: CGFloat = 108
+    /// Top scroll inset for submitted search results, where only the search row
+    /// is overlaid.
+    private static let searchChromeScrollTopMargin: CGFloat = 56
 
     private var showsMapSearchResultsList: Bool {
         !mapSearchResults.isEmpty
@@ -89,36 +113,30 @@ struct TripMapPlacesExpandedSheet: View {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Settled layout the content decisions read. Falls back to the raw
-    /// binding only until the first committed value is known (initial render).
-    private var effectiveLayout: PlacesSheetLayout {
-        committedLayout ?? placesSheetLayout
-    }
-
     /// Composite key that collapses every driver of chrome layout into a single
-    /// value, so the body's `.animation(_, value:)` re-runs exactly once per
-    /// state change. Prevents the previous mismatch where two independent
-    /// `.animation` modifiers could disagree mid flick-release.
+    /// value so the body's `.animation(_, value:)` re-runs exactly once per change.
     private struct ChromeAnimationKey: Hashable {
         let layout: PlacesSheetLayout
         let hasSearchText: Bool
     }
 
     private var chromeAnimationKey: ChromeAnimationKey {
-        ChromeAnimationKey(layout: effectiveLayout, hasSearchText: hasActiveMapSearchText)
+        ChromeAnimationKey(layout: committedLayout, hasSearchText: hasActiveMapSearchText)
     }
 
-    /// Spring matched to iOS sheet detent animation (response ~0.35, damping ~0.82).
-    /// Collapses to a short linear cross-fade when Reduce Motion is on — matches HIG.
+    /// Flat ease that co-runs with the native sheet detent animation without
+    /// overshoot. A spring with low damping reads as an additional "bounce" on
+    /// top of the sheet's own critically damped spring, which is the artifact
+    /// Apple Maps avoids. Reduce Motion falls back to a short linear fade.
     private var chromeAnimation: Animation {
         reduceMotion
-            ? .linear(duration: 0.12)
-            : .spring(response: 0.35, dampingFraction: 0.82)
+            ? .linear(duration: 0.10)
+            : .easeInOut(duration: 0.22)
     }
 
     /// Summarises the sheet's current state for VoiceOver (announced as a container label).
     private var sheetAccessibilityLabel: String {
-        switch effectiveLayout {
+        switch committedLayout {
         case .docked:
             if hasActiveMapSearchText {
                 return String(localized: "Minimized. Search: \(searchText).")
@@ -135,6 +153,21 @@ struct TripMapPlacesExpandedSheet: View {
         }
     }
 
+    /// Settles a pending commit after the detent value has been stable for
+    /// `layoutCommitDebounceMs`. Cancelling-then-rescheduling means transient
+    /// mid-drag threshold crossings (e.g. `.half → .docked → .half` within
+    /// ~300 ms) never commit — only a truly settled detent does.
+    private func scheduleLayoutCommit(_ target: PlacesSheetLayout) {
+        commitTask?.cancel()
+        guard target != committedLayout else { return }
+        commitTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: Self.layoutCommitDebounceMs * 1_000_000)
+            guard !Task.isCancelled else { return }
+            guard placesSheetLayout == target, committedLayout != target else { return }
+            committedLayout = target
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             expandedSheetDragGrabber
@@ -143,28 +176,23 @@ struct TripMapPlacesExpandedSheet: View {
                 inlineMapSearchView
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
-                // Docked: top row only (pills OR search bar). Expanded content is
-                // removed from the hierarchy entirely so VoiceOver cannot reach it
-                // and no offscreen list rows are laid out.
-                // Half / Full: top row + divider + expanded content. The removal
-                // uses opacity + move so the transition feels "of the sheet"
-                // during a flick-release, co-timed with the sheet height animation.
-                // NOTE: gated on `effectiveLayout`, not the raw binding, so
-                // transient flick-induced .docked updates don't thrash the tree.
-                topChromeRow
+                // Structural gates read `committedLayout` (settled detent),
+                // not the transient selection binding. During an interactive
+                // drag the system may write a mid-threshold detent into the
+                // selection binding that the sheet never actually commits to;
+                // ignoring those transients keeps the content in lockstep
+                // with the sheet's real settle position.
+                if committedLayout == .docked {
+                    topChromeRow
+                } else {
+                    ZStack(alignment: .top) {
+                        expandedContentArea
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .transition(.opacity)
+                            .accessibilityHidden(committedLayout == .docked)
 
-                if effectiveLayout != .docked {
-                    Divider()
-
-                    expandedContentArea
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .transition(
-                            .asymmetric(
-                                insertion: .opacity.combined(with: .move(edge: .bottom)),
-                                removal: .opacity.combined(with: .move(edge: .bottom))
-                            )
-                        )
-                        .accessibilityHidden(effectiveLayout == .docked)
+                        expandedChromeOverlay
+                    }
                 }
             }
         }
@@ -173,16 +201,21 @@ struct TripMapPlacesExpandedSheet: View {
         .accessibilityLabel(sheetAccessibilityLabel)
         .animation(chromeAnimation, value: chromeAnimationKey)
         .onAppear {
-            // Sync the committed layout to whatever the sheet opened at, so the
-            // first drag starts from a known stable value (not nil).
             committedLayout = placesSheetLayout
         }
         .onDisappear {
-            layoutCommitTask?.cancel()
-            layoutCommitTask = nil
+            commitTask?.cancel()
+            commitTask = nil
         }
         .onChange(of: placesSheetLayout) { _, newLayout in
             scheduleLayoutCommit(newLayout)
+            if newLayout == .docked {
+                isSearchPresented = false
+                isInlineMapSearchActive = false
+            }
+            // No detent-change haptic: Apple Maps does not add an app-level
+            // haptic here, and doing so stacks on top of the subtle system
+            // feedback already produced by the sheet's gesture recognizer.
         }
         .onChange(of: openInlineMapSearch) { _, shouldOpen in
             guard shouldOpen else { return }
@@ -190,33 +223,6 @@ struct TripMapPlacesExpandedSheet: View {
             inlineSearchFieldActivationDelayMs = (placesSheetLayout == .full) ? 0 : 260
             placesSheetLayout = .full
             isInlineMapSearchActive = true
-        }
-    }
-
-    /// Debounce content-layer commits by ~120ms to filter out iOS's transient
-    /// mid-gesture detent binding updates. A rapid flick that briefly crosses a
-    /// detent threshold before snapping back cancels the pending commit, so the
-    /// body never structurally rebuilds around a phantom intermediate state.
-    private func scheduleLayoutCommit(_ newLayout: PlacesSheetLayout) {
-        layoutCommitTask?.cancel()
-        layoutCommitTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled else { return }
-            commitLayout(newLayout)
-        }
-    }
-
-    /// Commit a settled detent: update content state, reset search overlays
-    /// when docking, and fire a detent-change haptic only on real transitions.
-    private func commitLayout(_ newLayout: PlacesSheetLayout) {
-        let previous = committedLayout
-        committedLayout = newLayout
-        if newLayout == .docked {
-            isSearchPresented = false
-            isInlineMapSearchActive = false
-        }
-        if let previous, previous != newLayout {
-            HapticManager.selection()
         }
     }
 
@@ -233,6 +239,18 @@ struct TripMapPlacesExpandedSheet: View {
         mapSearchOverlay(true, inlineSearchFieldActivationDelayMs, endInlineMapSearch)
     }
 
+    private var expandedChromeOverlay: some View {
+        VStack(spacing: 0) {
+            searchBarChromeRow
+
+            if !showsMapSearchResultsList {
+                dayPillsChromeRow
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .allowsHitTesting(true)
+    }
+
     /// Single top row used at every detent.
     /// - Docked + empty → day pills only (user's rule).
     /// - Docked + text → search bar with X.
@@ -244,7 +262,7 @@ struct TripMapPlacesExpandedSheet: View {
     /// single spring animation via `.transition(.opacity)`.
     @ViewBuilder
     private var topChromeRow: some View {
-        if effectiveLayout == .docked && !hasActiveMapSearchText {
+        if committedLayout == .docked && !hasActiveMapSearchText {
             dayPillsChromeRow
                 .transition(.opacity)
         } else {
@@ -264,21 +282,15 @@ struct TripMapPlacesExpandedSheet: View {
         if showsMapSearchResultsList {
             mapSubmittedSearchResultsList
         } else {
-            VStack(spacing: 0) {
-                let topIsPills = effectiveLayout == .docked && !hasActiveMapSearchText
-                if !topIsPills {
-                    dayPillsChromeRow
-                    Divider()
-                }
-                TripMapPlacesDayListContent(
-                    trip: trip,
-                    selectedDayFilter: $selectedDayFilter,
-                    allPlacesForList: allPlacesForList,
-                    dayNumberByDayId: dayNumberByDayId,
-                    onSelectPlace: onSelectPlace,
-                    showsDayTabs: false
-                )
-            }
+            TripMapPlacesDayListContent(
+                trip: trip,
+                selectedDayFilter: $selectedDayFilter,
+                allPlacesForList: allPlacesForList,
+                dayNumberByDayId: dayNumberByDayId,
+                onSelectPlace: onSelectPlace,
+                showsDayTabs: false,
+                topContentMargin: Self.searchAndDayChromeScrollTopMargin
+            )
         }
     }
 
@@ -310,7 +322,9 @@ struct TripMapPlacesExpandedSheet: View {
         .frame(maxWidth: .infinity, alignment: .center)
         .contentShape(Rectangle())
         .onTapGesture {
-            guard effectiveLayout == .docked else { return }
+            // Tap is only hittable when the pill row is the top chrome, which
+            // only happens in the settled docked state.
+            guard committedLayout == .docked else { return }
             HapticManager.light()
             placesSheetLayout = .half
         }
@@ -372,7 +386,7 @@ struct TripMapPlacesExpandedSheet: View {
                                     Text(preview.subtitle)
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
-                                        .lineLimit(2)
+                                        .lineLimit(1)
                                 }
                                 if preview.isOwnedRow {
                                     Label("Wayfind suggestion", systemImage: "checkmark.seal.fill")
@@ -394,18 +408,11 @@ struct TripMapPlacesExpandedSheet: View {
                     .listRowInsets(EdgeInsets(top: 4, leading: AppSpacing.lg, bottom: 4, trailing: AppSpacing.lg))
                     .listRowBackground(AppColors.appSurface)
                 }
-            } header: {
-                Text(
-                    searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? String(localized: "Results on map")
-                        : searchText
-                )
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(nil)
             }
         }
         .listStyle(.insetGrouped)
+        .contentMargins(.top, Self.searchChromeScrollTopMargin, for: .scrollContent)
+        .contentMargins(.bottom, 0, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .environment(\.defaultMinListRowHeight, 52)
     }
@@ -501,6 +508,7 @@ private struct TripMapPlacesDayListContent: View {
     let dayNumberByDayId: [UUID: Int]
     let onSelectPlace: (Place) -> Void
     var showsDayTabs: Bool = true
+    var topContentMargin: CGFloat = AppSpacing.xs
 
     private var dayCount: Int { max(trip.dayCount, 1) }
 
@@ -592,6 +600,8 @@ private struct TripMapPlacesDayListContent: View {
             }
         }
         .listStyle(.insetGrouped)
+        .contentMargins(.top, topContentMargin, for: .scrollContent)
+        .contentMargins(.bottom, 0, for: .scrollContent)
         .listSectionSpacing(.compact)
         .listRowSpacing(6)
         .scrollContentBackground(.hidden)
@@ -631,7 +641,7 @@ private struct TripMapPlacesDayListContent: View {
                         Text(addr)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                            .lineLimit(1)
                     } else {
                         Text(place.isBooking ? "Booking" : place.categoryEnum.label)
                             .font(.subheadline)

@@ -646,18 +646,34 @@ struct TripMapView: View {
         )
     }
 
+    @ViewBuilder
     private var mapSheetsView: some View {
-        mapSharedStateView
-            .sheet(item: $selectedPlace, content: placeDetailSheet)
-            .sheet(isPresented: $showMapModesSheet) {
-                mapModesSheet
-            }
-            .sheet(isPresented: $showAddPlace) {
-                addPlaceSheetContent
-            }
-            .sheet(isPresented: placesSheetPresentationBinding) {
-                tripPlacesExpandedSheet
-            }
+        if sharedState != nil {
+            // Tab context (iOS 26+): the places sheet is always presented
+            // (`placesSheetPresentationBinding.get` unconditionally returns
+            // true). Root-level secondary sheets — place detail, map style,
+            // add place — MUST nest inside the places sheet, otherwise iOS
+            // has to dismiss the places sheet to present them and never
+            // auto-re-presents it (the `isPresented` binding never
+            // transitions false→true on the dismissal path, so SwiftUI has
+            // no trigger). Stacking them on top keeps the places sheet
+            // continuously on screen, which is the product requirement.
+            mapSharedStateView
+                .sheet(isPresented: placesSheetPresentationBinding) {
+                    tripPlacesExpandedSheet
+                }
+        } else {
+            // No always-presented places sheet in this context; attach
+            // secondary sheets at the root — no conflict is possible.
+            mapSharedStateView
+                .sheet(item: $selectedPlace, content: placeDetailSheet)
+                .sheet(isPresented: $showMapModesSheet) {
+                    mapModesSheet
+                }
+                .sheet(isPresented: $showAddPlace) {
+                    addPlaceSheetContent
+                }
+        }
     }
 
     @ViewBuilder
@@ -719,11 +735,24 @@ struct TripMapView: View {
             .presentationDragIndicator(.hidden)
             .interactiveDismissDisabled(true)
             .tint(AppColors.appPrimary)
+            // All secondary sheets nest here so they stack on top of the
+            // always-presented places sheet instead of replacing it. Root-
+            // level attachment would cause iOS to dismiss the places sheet
+            // to present these, and the places sheet wouldn't re-present
+            // (see `mapSheetsView` note).
+            .sheet(item: $selectedPlace, content: placeDetailSheet)
+            .sheet(isPresented: $showMapModesSheet) {
+                mapModesSheet
+            }
+            .sheet(isPresented: $showAddPlace) {
+                addPlaceSheetContent
+            }
+            .sheet(isPresented: $showSuggestedPlacesBrowser) {
+                suggestedPlacesBrowserSheet
+            }
             .sheet(item: searchPreviewSheetBindingForPlacesSheet) { preview in
                 searchPreviewSheet(for: preview)
             }
-            // Present add-to-day from the places sheet so it stacks above the nested search preview;
-            // a root-level `.sheet` on `mapHandoffView` often never appears while those sheets are up.
             .sheet(isPresented: $showAddToDay) {
                 addToDaySheet
             }
@@ -818,9 +847,9 @@ struct TripMapView: View {
                     expandMapPlacesSheetToHalfAfterTransition()
                 }
             }
-            .sheet(isPresented: $showSuggestedPlacesBrowser) {
+            .modifier(RootSuggestedPlacesBrowserSheetModifier(isLegacyMap: sharedState == nil, isPresented: $showSuggestedPlacesBrowser) {
                 suggestedPlacesBrowserSheet
-            }
+            })
             .sheet(item: searchPreviewSheetBindingForRoot, content: searchPreviewSheet)
             .modifier(RootAddToDaySheetModifier(isLegacyMap: sharedState == nil, showAddToDay: $showAddToDay) {
                 addToDaySheet
@@ -1932,6 +1961,22 @@ private struct RootAddToDaySheetModifier<Sheet: View>: ViewModifier {
     func body(content: Content) -> some View {
         if isLegacyMap {
             content.sheet(isPresented: $showAddToDay, content: sheet)
+        } else {
+            content
+        }
+    }
+}
+
+/// Presents the suggested-places browser from the map handoff root only for the legacy map tab (`sharedState == nil`).
+/// In the persistent places-sheet path, this sheet is attached to the places sheet so it stacks above it instead of being swallowed by SwiftUI's one-root-sheet presentation.
+private struct RootSuggestedPlacesBrowserSheetModifier<Sheet: View>: ViewModifier {
+    var isLegacyMap: Bool
+    @Binding var isPresented: Bool
+    @ViewBuilder var sheet: () -> Sheet
+
+    func body(content: Content) -> some View {
+        if isLegacyMap {
+            content.sheet(isPresented: $isPresented, content: sheet)
         } else {
             content
         }

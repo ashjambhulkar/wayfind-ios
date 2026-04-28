@@ -98,7 +98,7 @@ private struct DayFilterCapsuleButton: View {
             }
             Text(title)
                 .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                .foregroundStyle(Color(uiColor: isSelected ? .label : .secondaryLabel))
+                .foregroundStyle(.white)
                 .lineLimit(1)
         }
     }

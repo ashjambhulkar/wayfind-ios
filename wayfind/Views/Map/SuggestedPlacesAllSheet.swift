@@ -39,17 +39,17 @@ struct SuggestedPlacesAllSheet: View {
     @State private var selectedFilter: PlaceCategory? = nil
     @State private var loadTask: Task<Void, Never>?
 
+    private static let filterOverlayScrollTopMargin: CGFloat = 56
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                filterStrip
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 6)
-
-                Divider().opacity(0.4)
-
+            ZStack(alignment: .top) {
                 content
+
+                filterStrip
+                    .padding(.horizontal, AppSpacing.md)
+                    .padding(.top, AppSpacing.sm)
+                    .padding(.bottom, AppSpacing.xs)
             }
             .background(AppColors.appBackground)
             .navigationTitle("Suggested Places")
@@ -134,33 +134,19 @@ struct SuggestedPlacesAllSheet: View {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isSelected ? .white : family.color)
+                    .foregroundStyle(family.color)
                 Text(label)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isSelected ? .white : .primary)
+                    .foregroundStyle(isSelected ? family.color : Color.primary)
                     .lineLimit(1)
                     .fixedSize()
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 14)
-            .background(
-                Capsule()
-                    .fill(isSelected ? AppColors.appPrimary : Color.clear)
-                    .background(
-                        Capsule().fill(.regularMaterial).opacity(isSelected ? 0 : 1)
-                    )
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(
-                        isSelected
-                            ? Color.clear
-                            : Color.primary.opacity(0.08),
-                        lineWidth: 0.5
-                    )
-            )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .controlSize(.regular)
+        .tint(isSelected ? family.color : Color.primary)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     // MARK: - Content list
@@ -188,20 +174,24 @@ struct SuggestedPlacesAllSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             List {
-                ForEach(rows) { preview in
-                    Button {
-                        HapticManager.light()
-                        onPick(preview)
-                    } label: {
-                        SuggestedPlaceListRow(preview: preview)
-                            .contentShape(Rectangle())
+                Section {
+                    ForEach(rows) { preview in
+                        Button {
+                            HapticManager.light()
+                            onPick(preview)
+                        } label: {
+                            SuggestedPlaceListRow(preview: preview)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.lg, bottom: AppSpacing.sm, trailing: AppSpacing.lg))
+                        .listRowBackground(AppColors.appSurface)
                     }
-                    .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                    .listRowSeparator(.visible, edges: .bottom)
                 }
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
+            .contentMargins(.top, Self.filterOverlayScrollTopMargin, for: .scrollContent)
+            .contentMargins(.bottom, 0, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .scrollDismissesKeyboard(.immediately)
         }
@@ -255,9 +245,6 @@ struct SuggestedPlaceListRow: View {
                 }
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 6)
     }
