@@ -1107,7 +1107,6 @@ private struct CategoryPillsRow: View {
                 }
             }
             .padding(.horizontal, AppSpacing.lg)
-            .padding(.vertical, 2) // breathing room for the shadow
         }
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
@@ -1116,13 +1115,12 @@ private struct CategoryPillsRow: View {
 private extension View {
     @ViewBuilder
     func mapSearchCategoryGlassPill() -> some View {
-        if #available(iOS 26.0, *) {
-            self
-                .glassEffect(.regular.interactive(), in: .capsule)
-        } else {
-            self
-                .background(.thinMaterial, in: Capsule())
-        }
+        self
+            .background(.thinMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+            }
     }
 }
 

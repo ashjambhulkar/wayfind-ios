@@ -137,15 +137,26 @@ struct SuggestedPlacesAllSheet: View {
                     .foregroundStyle(family.color)
                 Text(label)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(isSelected ? family.color : Color.primary)
+                    .foregroundStyle(Color.primary)
                     .lineLimit(1)
                     .fixedSize()
             }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(.thinMaterial)
+                    .overlay {
+                        Capsule(style: .continuous)
+                            .fill(Color.primary.opacity(isSelected ? 0.08 : 0.03))
+                    }
+            )
+            .overlay {
+                Capsule(style: .continuous)
+                    .strokeBorder(Color.primary.opacity(isSelected ? 0.22 : 0.10), lineWidth: 0.5)
+            }
         }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .controlSize(.regular)
-        .tint(isSelected ? family.color : Color.primary)
+        .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 

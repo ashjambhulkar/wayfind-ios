@@ -117,15 +117,9 @@ struct MapSearchPreviewSheet: View {
 
             Spacer(minLength: 0)
 
-            Button(role: .cancel) {
+            MapChromeIconButton.placeDismiss {
                 onDismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.title3)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
             .accessibilityLabel("Close preview")
         }
         .padding(.top, AppSpacing.xs)

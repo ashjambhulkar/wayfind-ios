@@ -79,7 +79,6 @@ struct TripMapView: View {
     /// Per-trip preference, persisted via AppStorage. Defaults to `.auto`
     /// so users get smart per-leg mode selection without a single tap.
     @AppStorage private var transportModeRaw: String
-    @State private var showTransportPicker = false
     /// Bumped after a server-seed completes so `routeSegments` recomputes
     /// with the freshly-loaded polylines without us needing to mutate
     /// `places` or any other published state.
@@ -1225,9 +1224,19 @@ struct TripMapView: View {
 
             mapPillDivider
 
-            Button {
-                HapticManager.light()
-                showTransportPicker = true
+            Menu {
+                ForEach(TripTransportMode.allCases) { mode in
+                    Button {
+                        HapticManager.selection()
+                        transportMode = mode
+                        polylineCacheVersion &+= 1
+                    } label: {
+                        Label(
+                            mode.displayName,
+                            systemImage: transportMode == mode ? "checkmark" : mode.sfSymbol
+                        )
+                    }
+                }
             } label: {
                 mapPillIcon(transportMode.sfSymbol)
             }
@@ -1235,24 +1244,6 @@ struct TripMapView: View {
             .accessibilityLabel("Transport mode")
             .accessibilityValue(transportMode.displayName)
             .accessibilityHint("Changes how routes between stops are drawn")
-            .confirmationDialog(
-                "Route style",
-                isPresented: $showTransportPicker,
-                titleVisibility: .visible
-            ) {
-                ForEach(TripTransportMode.allCases) { mode in
-                    Button {
-                        HapticManager.selection()
-                        transportMode = mode
-                        polylineCacheVersion &+= 1
-                    } label: {
-                        Text("\(mode.displayName)\(transportMode == mode ? "  ✓" : "")")
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(transportMode.pickerSubtitle)
-            }
         }
         .frame(width: 42)
         .environment(\.colorScheme, .dark)
@@ -1659,6 +1650,13 @@ struct TripMapView: View {
     }
 
     private func handleSearchSheetSuggestedPicked(_ preview: MapSearchPreview) {
+        if sharedState != nil {
+            returnToSearchOverlay = false
+            returnToSuggestedPlacesBrowser = false
+            pendingSuggestedPlacesPreview = nil
+            presentSuggestedPlacesPreviewAfterEmbeddedSearchCollapse(preview)
+            return
+        }
         returnToSearchOverlay = true
         returnToSuggestedPlacesBrowser = false
         pendingSuggestedPlacesPreview = preview
@@ -1666,10 +1664,26 @@ struct TripMapView: View {
     }
 
     private func handleSuggestedPlacesPicked(_ preview: MapSearchPreview) {
+        if sharedState != nil {
+            returnToSearchOverlay = false
+            returnToSuggestedPlacesBrowser = false
+            pendingSuggestedPlacesPreview = nil
+            presentSuggestedPlacesPreviewAfterEmbeddedSearchCollapse(preview)
+            return
+        }
         returnToSearchOverlay = false
         returnToSuggestedPlacesBrowser = true
         pendingSuggestedPlacesPreview = preview
         showSearchOverlay = false
+    }
+
+    private func presentSuggestedPlacesPreviewAfterEmbeddedSearchCollapse(_ preview: MapSearchPreview) {
+        Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            await MainActor.run {
+                presentSuggestedPlacesPreview(preview)
+            }
+        }
     }
 
     private func presentSuggestedPlacesPreview(_ preview: MapSearchPreview) {

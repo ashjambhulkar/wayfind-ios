@@ -175,6 +175,10 @@ struct TripMapPlacesExpandedSheet: View {
             if isInlineMapSearchActive {
                 inlineMapSearchView
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    // Native `.searchable` inside the embedded `NavigationStack`
+                    // reserves its own top chrome. Pull the search surface back
+                    // toward our custom sheet grabber so the two read as one unit.
+                    .padding(.top, -AppSpacing.sm)
             } else {
                 // Structural gates read `committedLayout` (settled detent),
                 // not the transient selection binding. During an interactive
@@ -388,11 +392,6 @@ struct TripMapPlacesExpandedSheet: View {
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                 }
-                                if preview.isOwnedRow {
-                                    Label("Wayfind suggestion", systemImage: "checkmark.seal.fill")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(AppColors.appPrimary)
-                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -439,7 +438,7 @@ struct TripMapPlacesExpandedSheet: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.primary.opacity(0.82))
 
                 Group {
                     if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -456,7 +455,7 @@ struct TripMapPlacesExpandedSheet: View {
 
                 Image(systemName: "mic.fill")
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.primary.opacity(0.68))
                     .accessibilityHidden(true)
             }
             .padding(.leading, 14)
