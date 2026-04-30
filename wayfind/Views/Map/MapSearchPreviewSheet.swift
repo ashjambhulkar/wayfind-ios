@@ -8,8 +8,7 @@
 //  Strict free-data only: name, formatted address, phone, website,
 //  category icon, and (iOS 16+) an optional Look Around scene.
 //
-//  Actions: Add to Day, Search nearby, Open in Apple Maps, Directions
-//  in Apple Maps.
+//  Actions: Add to trip and view Look Around when available.
 //
 //  Detents are owned by the presenter: minimized, medium, and large native
 //  SwiftUI sheet stops so the user can keep map context while browsing.
@@ -20,13 +19,11 @@ import SwiftUI
 
 struct MapSearchPreviewSheet: View {
     let preview: MapSearchPreview
+    let scheduledDays: [ItineraryDay]
+    let preselectedDayId: UUID?
 
-    /// Tap "Add to Day" — caller swaps in `MapAddToDaySheet`.
-    var onAddToDay: () -> Void
-
-    /// Tap "Search nearby" — caller refires the active category in a
-    /// region centered on the preview.
-    var onSearchNearby: () -> Void
+    /// Tap "Add" — caller saves the place directly to the current trip day.
+    var onAdd: (UUID, Date?, String?) -> Void
 
     /// Caller dismisses (X / drag-down).
     var onDismiss: () -> Void
@@ -34,8 +31,27 @@ struct MapSearchPreviewSheet: View {
     @State private var lookAroundScene: MKLookAroundScene?
     @State private var fetchedLookAround = false
     @State private var showLookAround = false
+    @State private var selectedDayId: UUID?
+    @State private var includeTime = false
+    @State private var startTime = Date()
+    @State private var notes = ""
 
     @Environment(\.openURL) private var openURL
+
+    init(
+        preview: MapSearchPreview,
+        scheduledDays: [ItineraryDay],
+        preselectedDayId: UUID?,
+        onAdd: @escaping (UUID, Date?, String?) -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.preview = preview
+        self.scheduledDays = scheduledDays
+        self.preselectedDayId = preselectedDayId
+        self.onAdd = onAdd
+        self.onDismiss = onDismiss
+        _selectedDayId = State(initialValue: preselectedDayId ?? scheduledDays.first?.id)
+    }
 
     var body: some View {
         NavigationStack {
@@ -44,10 +60,7 @@ struct MapSearchPreviewSheet: View {
                     placeSummary
                         .padding(.horizontal, AppSpacing.lg)
 
-                    primaryAction
-                        .padding(.horizontal, AppSpacing.lg)
-
-                    quickActionsRow
+                    scheduleAndNotesCard
                         .padding(.horizontal, AppSpacing.lg)
 
                     visualPreviewCard
@@ -66,8 +79,26 @@ struct MapSearchPreviewSheet: View {
             .background {
                 AppColors.appBackground.ignoresSafeArea()
             }
+            .navigationTitle("Place Details")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.hidden, for: .navigationBar)
+            .toolbarBackground(AppColors.appBackground, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        onDismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        PlatformUsageTelemetry.mapSearch(.addToDayTapped, origin: preview.origin)
+                        savePreview()
+                    }
+                    .font(.appBody.weight(.semibold))
+                    .disabled(selectedDayId == nil && scheduledDays.first?.id == nil)
+                }
+            }
         }
         .task {
             PlatformUsageTelemetry.mapSearch(.previewShown, origin: preview.origin)
@@ -101,29 +132,61 @@ struct MapSearchPreviewSheet: View {
                         .lineLimit(2)
                 }
 
-                HStack(spacing: AppSpacing.sm) {
-                    categoryBadge
-
-                    if preview.isOwnedRow {
-                        ownedSuggestionBadge
-                    }
-                }
-                .padding(.top, AppSpacing.xs)
             }
 
-            Spacer(minLength: 0)
-
-            MapChromeIconButton(
-                systemName: "xmark.circle.fill",
-                iconFont: .system(size: MapChromeIconMetrics.dismissGlyphPointSize, weight: .regular),
-                symbolRenderingMode: .hierarchical,
-                tint: AppColors.iconOnColoredSurface,
-                accessibilityLabel: String(localized: "Close preview")
-            ) {
-                onDismiss()
-            }
         }
         .padding(.top, AppSpacing.xs)
+    }
+
+    private var scheduleAndNotesCard: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                Text("Schedule")
+                    .font(.appCaption.weight(.semibold))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .textCase(.uppercase)
+
+                Picker("Day", selection: Binding(
+                    get: { selectedDayId ?? scheduledDays.first?.id ?? UUID() },
+                    set: { selectedDayId = $0 }
+                )) {
+                    ForEach(scheduledDays, id: \.id) { day in
+                        Text(dayLabel(day)).tag(day.id)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Toggle(isOn: $includeTime.animation(AppSpring.smooth)) {
+                    Label("Set start time", systemImage: "clock")
+                }
+
+                if includeTime {
+                    DatePicker("Start time", selection: $startTime, displayedComponents: .hourAndMinute)
+                }
+            }
+            .padding(AppSpacing.md)
+
+            Divider()
+                .overlay(AppColors.appDivider)
+
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                Text("Notes")
+                    .font(.appCaption.weight(.semibold))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .textCase(.uppercase)
+
+                TextField("Notes (optional)", text: $notes, axis: .vertical)
+                    .lineLimit(2...5)
+            }
+            .padding(AppSpacing.md)
+        }
+        .font(.appBody)
+        .foregroundStyle(AppColors.textPrimary)
+        .background(AppColors.appSurface, in: RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
+        }
     }
 
     private var visualPreviewCard: some View {
@@ -216,113 +279,6 @@ struct MapSearchPreviewSheet: View {
         }
     }
 
-    // MARK: - Actions
-
-    private var primaryAction: some View {
-        Button {
-            PlatformUsageTelemetry.mapSearch(.addToDayTapped, origin: preview.origin)
-            onAddToDay()
-        } label: {
-            Label("Add to itinerary", systemImage: "calendar.badge.plus")
-                .font(.appButton.weight(.semibold))
-                .foregroundStyle(AppColors.iconOnColoredSurface)
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(AppColors.appPrimary, in: RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityHint("Choose a day and add this place to your trip")
-    }
-
-    private var quickActionsRow: some View {
-        HStack(spacing: AppSpacing.md) {
-            quickAction(
-                title: "Directions",
-                systemImage: "arrow.triangle.turn.up.right.diamond.fill"
-            ) {
-                openDirections()
-            }
-
-            quickAction(
-                title: "Nearby",
-                systemImage: "location.magnifyingglass"
-            ) {
-                PlatformUsageTelemetry.mapSearch(.searchThisAreaTapped)
-                onSearchNearby()
-            }
-
-            quickAction(
-                title: "Maps",
-                systemImage: "map.fill"
-            ) {
-                openInAppleMaps()
-            }
-
-        }
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-    }
-
-    private func quickAction(
-        title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(spacing: AppSpacing.xs) {
-                Image(systemName: systemImage)
-                    .font(.sectionHeader.weight(.semibold))
-                    .symbolRenderingMode(.monochrome)
-                    .foregroundStyle(AppColors.iconOnColoredSurface)
-                    .frame(width: 48, height: 48)
-                    .background(AppColors.iconBadgeGradient(accent: AppColors.appPrimary), in: Circle())
-                    .overlay {
-                        Circle()
-                            .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
-                    }
-
-                Text(title)
-                    .font(.appCaption.weight(.medium))
-                    .foregroundStyle(AppColors.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-    }
-
-    private var categoryBadge: some View {
-        HStack(spacing: AppSpacing.xs) {
-            Image(systemName: previewIconSymbol)
-                .font(.appCaption.weight(.semibold))
-                .symbolRenderingMode(.monochrome)
-                .foregroundStyle(AppColors.iconOnColoredSurface)
-            Text(categoryTitle)
-                .font(.appCaption.weight(.semibold))
-                .foregroundStyle(AppColors.iconOnColoredSurface)
-        }
-        .padding(.horizontal, AppSpacing.sm)
-        .padding(.vertical, AppSpacing.xs)
-        .background(AppColors.iconBadgeGradient(accent: placeBadgeAccent), in: Capsule())
-    }
-
-    private var ownedSuggestionBadge: some View {
-        HStack(spacing: AppSpacing.xs) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.appCaption.weight(.semibold))
-                .symbolRenderingMode(.monochrome)
-                .foregroundStyle(AppColors.iconOnColoredSurface)
-            Text("Wayfind suggestion")
-                .font(.appCaption.weight(.semibold))
-                .foregroundStyle(AppColors.iconOnColoredSurface)
-        }
-        .padding(.horizontal, AppSpacing.sm)
-        .padding(.vertical, AppSpacing.xs)
-        .background(AppColors.iconBadgeGradient(accent: AppColors.appPrimary), in: Capsule())
-    }
-
     private var placeIcon: some View {
         ZStack {
             Circle()
@@ -342,6 +298,7 @@ struct MapSearchPreviewSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             let hasAddress = !preview.subtitle.isEmpty
             let hasPhone = preview.phone?.isEmpty == false
+            let hasWebsite = preview.website != nil
             if !preview.subtitle.isEmpty {
                 infoRow(
                     icon: "mappin.and.ellipse",
@@ -374,6 +331,16 @@ struct MapSearchPreviewSheet: View {
                     action: { openURL(website) }
                 )
             }
+
+            if hasAddress || hasPhone || hasWebsite {
+                Divider().padding(.leading, 50)
+            }
+            infoRow(
+                icon: "map.fill",
+                title: "Open in Maps",
+                text: "Apple Maps",
+                action: openInAppleMaps
+            )
         }
         .padding(.vertical, AppSpacing.xs)
         .background(AppColors.appSurface, in: RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
@@ -437,10 +404,6 @@ struct MapSearchPreviewSheet: View {
         preview.category?.mapBadgeSymbol ?? "mappin"
     }
 
-    private var categoryTitle: String {
-        preview.category?.label ?? "Place"
-    }
-
     private func infoRowBadgeAccent(for icon: String) -> Color {
         icon.hasPrefix("mappin") ? AppColors.appError : AppColors.appPrimary
     }
@@ -449,25 +412,22 @@ struct MapSearchPreviewSheet: View {
         !preview.subtitle.isEmpty || preview.phone?.isEmpty == false || preview.website != nil
     }
 
-    // MARK: - Apple Maps deep links
+    private func savePreview() {
+        guard let dayId = selectedDayId ?? scheduledDays.first?.id else { return }
+        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        onAdd(dayId, includeTime ? startTime : nil, trimmedNotes.isEmpty ? nil : trimmedNotes)
+    }
+
+    private func dayLabel(_ day: ItineraryDay) -> String {
+        guard let date = day.date else { return "Day \(day.dayNumber)" }
+        return "Day \(day.dayNumber) · \(date.shortFormatted)"
+    }
 
     private func openInAppleMaps() {
         let placemark = MKPlacemark(coordinate: preview.coordinate)
         let item = MKMapItem(placemark: placemark)
         item.name = preview.name
         item.openInMaps()
-    }
-
-    private func openDirections() {
-        let placemark = MKPlacemark(coordinate: preview.coordinate)
-        let dest = MKMapItem(placemark: placemark)
-        dest.name = preview.name
-        MKMapItem.openMaps(
-            with: [MKMapItem.forCurrentLocation(), dest],
-            launchOptions: [
-                MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving,
-            ]
-        )
     }
 
     // MARK: - Look Around fetch
@@ -553,6 +513,12 @@ private extension String {
 
 #if DEBUG
 #Preview("Preview sheet — Wayfind suggestion") {
+    let tripId = UUID()
+    let day1Id = UUID()
+    let days = [
+        ItineraryDay(id: day1Id, tripId: tripId, dayNumber: 1, date: Date()),
+        ItineraryDay(id: UUID(), tripId: tripId, dayNumber: 2, date: Date().addingTimeInterval(86_400)),
+    ]
     let preview = MapSearchPreview(
         id: "louvre-city-places",
         origin: .cityPlaces,
@@ -567,13 +533,20 @@ private extension String {
     )
     MapSearchPreviewSheet(
         preview: preview,
-        onAddToDay: {},
-        onSearchNearby: {},
+        scheduledDays: days,
+        preselectedDayId: day1Id,
+        onAdd: { _, _, _ in },
         onDismiss: {}
     )
 }
 
 #Preview("Preview sheet — Apple result") {
+    let tripId = UUID()
+    let day1Id = UUID()
+    let days = [
+        ItineraryDay(id: day1Id, tripId: tripId, dayNumber: 1, date: Date()),
+        ItineraryDay(id: UUID(), tripId: tripId, dayNumber: 2, date: Date().addingTimeInterval(86_400)),
+    ]
     let preview = MapSearchPreview(
         id: "eiffel-apple",
         origin: .apple,
@@ -588,8 +561,9 @@ private extension String {
     )
     MapSearchPreviewSheet(
         preview: preview,
-        onAddToDay: {},
-        onSearchNearby: {},
+        scheduledDays: days,
+        preselectedDayId: day1Id,
+        onAdd: { _, _, _ in },
         onDismiss: {}
     )
 }

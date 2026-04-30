@@ -59,9 +59,6 @@ struct TripMapView: View {
 
     @State private var mapState = TripMapState()
     @State private var showSearchOverlay = false
-    @State private var showAddToDay = false
-    @State private var addToDayPreview: MapSearchPreview?
-    @State private var pendingAddToDayPresentation = false
     @State private var showSuggestedPlacesBrowser = false
     @State private var returnToSearchOverlay = false
     @State private var returnToSuggestedPlacesBrowser = false
@@ -752,9 +749,6 @@ struct TripMapView: View {
             .sheet(item: searchPreviewSheetBindingForPlacesSheet) { preview in
                 searchPreviewSheet(for: preview)
             }
-            .sheet(isPresented: $showAddToDay) {
-                addToDaySheet
-            }
         }
     }
 
@@ -850,9 +844,6 @@ struct TripMapView: View {
                 suggestedPlacesBrowserSheet
             })
             .sheet(item: searchPreviewSheetBindingForRoot, content: searchPreviewSheet)
-            .modifier(RootAddToDaySheetModifier(isLegacyMap: sharedState == nil, showAddToDay: $showAddToDay) {
-                addToDaySheet
-            })
             .onChange(of: showSuggestedPlacesBrowser) { _, isPresented in
                 if isPresented {
                     dockMapPlacesSheet()
@@ -871,19 +862,7 @@ struct TripMapView: View {
                 }
             }
             .onChange(of: mapState.selectedSearchResult) { _, newVal in
-                // Single-sheet ownership: collapse the day sheet when a
-                // search preview takes the bottom region. Restore on
-                // dismiss.
-                if newVal == nil && pendingAddToDayPresentation {
-                    Task {
-                        try? await Task.sleep(for: .milliseconds(350))
-                        await MainActor.run {
-                            guard pendingAddToDayPresentation, addToDayPreview != nil else { return }
-                            pendingAddToDayPresentation = false
-                            showAddToDay = true
-                        }
-                    }
-                } else if newVal == nil && returnToSuggestedPlacesBrowser {
+                if newVal == nil && returnToSuggestedPlacesBrowser {
                     Task {
                         try? await Task.sleep(for: .milliseconds(350))
                         await MainActor.run {
@@ -911,13 +890,6 @@ struct TripMapView: View {
                 } else if newVal != nil {
                     dockMapPlacesSheet()
                     searchPreviewDetent = PlacesSheetLayout.halfOpenDetent
-                } else {
-                    expandMapPlacesSheetToHalfAfterTransition()
-                }
-            }
-            .onChange(of: showAddToDay) { _, isPresented in
-                if isPresented {
-                    dockMapPlacesSheet()
                 } else {
                     expandMapPlacesSheetToHalfAfterTransition()
                 }
@@ -968,15 +940,18 @@ struct TripMapView: View {
     private func searchPreviewSheet(for preview: MapSearchPreview) -> some View {
         MapSearchPreviewSheet(
             preview: preview,
-            onAddToDay: {
-                addToDayPreview = preview
-                pendingAddToDayPresentation = true
+            scheduledDays: scheduledDays,
+            preselectedDayId: scheduledDays.first(where: { dayNumberByDayId[$0.id] == selectedDayFilter })?.id,
+            onAdd: { dayId, startTime, notes in
+                persistAddToDay(
+                    preview: preview,
+                    dayId: dayId,
+                    startTime: startTime,
+                    notes: notes
+                )
                 returnToSearchOverlay = false
                 returnToSuggestedPlacesBrowser = false
                 mapState.selectedSearchResult = nil
-            },
-            onSearchNearby: {
-                runSearchNearby(around: preview.coordinate)
             },
             onDismiss: {
                 mapState.selectedSearchResult = nil
@@ -989,37 +964,6 @@ struct TripMapView: View {
         .presentationDragIndicator(.visible)
         .presentationBackgroundInteraction(.enabled(upThrough: PlacesSheetLayout.halfOpenDetent))
         .presentationBackground(AppColors.appBackground)
-    }
-
-    @ViewBuilder
-    private var addToDaySheet: some View {
-        if let preview = addToDayPreview {
-            MapAddToDaySheet(
-                preview: preview,
-                scheduledDays: scheduledDays,
-                preselectedDayId: scheduledDays.first(where: { dayNumberByDayId[$0.id] == selectedDayFilter })?.id,
-                onSave: { dayId, startTime, notes in
-                    persistAddToDay(
-                        preview: preview,
-                        dayId: dayId,
-                        startTime: startTime,
-                        notes: notes
-                    )
-                    showAddToDay = false
-                    addToDayPreview = nil
-                    pendingAddToDayPresentation = false
-                    mapState.selectedSearchResult = nil
-                },
-                onCancel: {
-                    showAddToDay = false
-                    addToDayPreview = nil
-                    pendingAddToDayPresentation = false
-                }
-            )
-            .presentationDetents([.height(420), .large])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(AppColors.appBackground)
-        }
     }
 
     private var mapRoot: some View {
@@ -1924,22 +1868,6 @@ struct TripMapView: View {
 // The same mapping lives privately inside `MapSearchOverlay`. Mirrored
 // here so `TripMapView` can re-run searches without depending on the
 // overlay being on screen.
-
-/// Presents `MapAddToDaySheet` from the map handoff root only for the legacy map tab (`sharedState == nil`).
-/// When the persistent places sheet is up, add-to-day is attached to that sheet so it stacks above the nested search preview.
-private struct RootAddToDaySheetModifier<Sheet: View>: ViewModifier {
-    var isLegacyMap: Bool
-    @Binding var showAddToDay: Bool
-    @ViewBuilder var sheet: () -> Sheet
-
-    func body(content: Content) -> some View {
-        if isLegacyMap {
-            content.sheet(isPresented: $showAddToDay, content: sheet)
-        } else {
-            content
-        }
-    }
-}
 
 /// Presents the suggested-places browser from the map handoff root only for the legacy map tab (`sharedState == nil`).
 /// In the persistent places-sheet path, this sheet is attached to the places sheet so it stacks above it instead of being swallowed by SwiftUI's one-root-sheet presentation.

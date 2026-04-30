@@ -721,16 +721,13 @@ struct AddActivitySheet: View {
                 .listRowBackground(AppColors.appSurface)
             }
 
-            if scheduleLookAroundScene != nil {
-                AddActivityDetailRow(
-                    icon: "binoculars.fill",
-                    title: "Look Around",
-                    value: "Preview this area",
-                    isActionable: true
-                ) {
+            if let scheduleLookAroundScene {
+                AddActivityLookAroundPreviewCard(scene: scheduleLookAroundScene) {
                     showScheduleLookAround = true
                 }
-                .listRowBackground(AppColors.appSurface)
+                .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.md, bottom: AppSpacing.sm, trailing: AppSpacing.md))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
         }
     }
@@ -1268,6 +1265,75 @@ private struct AddActivityPlaceSummary: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct AddActivityLookAroundPreviewCard: View {
+    let scene: MKLookAroundScene
+    let action: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            AddActivityLookAroundPreviewWrapper(scene: scene, onTap: action)
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.0),
+                    Color.black.opacity(0.44),
+                    Color.black.opacity(0.62),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+        }
+        .frame(height: 220)
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .onTapGesture(perform: action)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(String(localized: "Look Around preview"))
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// UIKit wrapper is required here because SwiftUI's Look Around preview APIs are not available across every supported iOS 16 target.
+private struct AddActivityLookAroundPreviewWrapper: UIViewControllerRepresentable {
+    let scene: MKLookAroundScene
+    var onTap: () -> Void
+
+    func makeUIViewController(context: Context) -> MKLookAroundViewController {
+        let viewController = MKLookAroundViewController(scene: scene)
+        viewController.isNavigationEnabled = false
+        viewController.showsRoadLabels = true
+        let tap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleTap)
+        )
+        viewController.view.addGestureRecognizer(tap)
+        context.coordinator.onTap = onTap
+        return viewController
+    }
+
+    func updateUIViewController(_ uiViewController: MKLookAroundViewController, context: Context) {
+        uiViewController.scene = scene
+        context.coordinator.onTap = onTap
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator: NSObject {
+        var onTap: (() -> Void)?
+
+        @objc func handleTap() {
+            onTap?()
+        }
     }
 }
 
