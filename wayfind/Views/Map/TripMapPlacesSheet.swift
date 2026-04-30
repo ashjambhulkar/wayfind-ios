@@ -10,7 +10,7 @@ enum PlacesSheetLayout: Equatable {
     case full
 
     /// Grabber + exactly one compact chrome row. Keep this tight so the docked
-    /// state reads as the search bar or day-pill slider itself, not a larger
+    /// state reads as the search bar or day-capsule slider itself, not a larger
     /// mini sheet with extra vertical dead space.
     static let compactDetent = PresentationDetent.height(84)
 
@@ -38,9 +38,9 @@ enum PlacesSheetLayout: Equatable {
 
 // MARK: - Places Sheet
 
-/// Day filters + places list. Top chrome: grabber, search pill, **Suggested Places** (sparkles)
+/// Day filters + places list. Top chrome: grabber, search capsule, **Suggested Places** (sparkles)
 /// whenever the inline search UI is hidden. In the docked detent, active search text keeps the search
-/// pill visible with a close button; otherwise only the day filters remain.
+/// capsule visible with a close button; otherwise only the day filters remain.
 /// Dock the sheet by dragging to the compact detent.
 struct TripMapPlacesExpandedSheet: View {
     let trip: Trip
@@ -57,10 +57,10 @@ struct TripMapPlacesExpandedSheet: View {
     @Binding var openInlineMapSearch: Bool
     /// Opens the suggested-places sheet (sparkles control in docked / half / full chrome).
     let onOpenSuggestedPlaces: () -> Void
-    /// Pins from the last map search (keyboard Search / category). Shown in the half sheet under the search pill.
+    /// Pins from the last map search (keyboard Search / category). Shown in the half sheet under the search capsule.
     var mapSearchResults: [MapSearchPreview] = []
     let onSelectMapSearchPreview: (MapSearchPreview) -> Void
-    /// Clears map search pins + pill text (same outcome as clearing the system search field).
+    /// Clears map search pins + capsule text (same outcome as clearing the system search field).
     let onClearActiveMapSearch: () -> Void
     /// Builds map search UI; `activationDelayMs` is 0 when the places sheet is already at `.full`, otherwise a short delay while the detent animates.
     let mapSearchOverlay: (_ embedsInParentSheet: Bool, _ activationDelayMs: Int, _ endInlineSearch: @escaping () -> Void) -> MapSearchOverlay
@@ -75,7 +75,7 @@ struct TripMapPlacesExpandedSheet: View {
     /// not only when the user commits. If we gate structural view swaps
     /// directly on `placesSheetLayout`, a short downward pull from `.half`
     /// briefly sets the binding to `.docked`; the content collapses to
-    /// pill-only chrome, but the sheet springs back to `.half` when the
+    /// capsule-only chrome, but the sheet springs back to `.half` when the
     /// gesture ends, leaving a half-height sheet showing docked-style
     /// content until the binding settles. Apple Maps keeps its sheet in
     /// sync by updating content structure only after the detent has
@@ -196,7 +196,9 @@ struct TripMapPlacesExpandedSheet: View {
                 }
             }
         }
-        .background(Color.clear)
+        .background {
+            AppColors.appBackground.ignoresSafeArea()
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(sheetAccessibilityLabel)
         .animation(chromeAnimation, value: chromeAnimationKey)
@@ -244,7 +246,7 @@ struct TripMapPlacesExpandedSheet: View {
             searchBarChromeRow
 
             if !showsMapSearchResultsList {
-                dayPillsChromeRow
+                dayCapsulesChromeRow
             }
         }
         .frame(maxWidth: .infinity, alignment: .top)
@@ -252,9 +254,9 @@ struct TripMapPlacesExpandedSheet: View {
     }
 
     /// Single top row used at every detent.
-    /// - Docked + empty → day pills only (user's rule).
+    /// - Docked + empty → day capsules only (user's rule).
     /// - Docked + text → search bar with X.
-    /// - Expanded  → always search bar (expanded content below hosts the pills).
+    /// - Expanded  → always search bar (expanded content below hosts the capsules).
     ///
     /// Uses a conditional `Group` (not `ZStack`) so the row sizes to the active
     /// variant's natural height — avoids the ~22pt of dead space the ZStack max
@@ -263,7 +265,7 @@ struct TripMapPlacesExpandedSheet: View {
     @ViewBuilder
     private var topChromeRow: some View {
         if committedLayout == .docked && !hasActiveMapSearchText {
-            dayPillsChromeRow
+            dayCapsulesChromeRow
                 .transition(.opacity)
         } else {
             searchBarChromeRow
@@ -274,9 +276,9 @@ struct TripMapPlacesExpandedSheet: View {
     /// Content below the top row. Always rendered so the system sheet simply
     /// clips during detent animations — avoids mid-drag empty panels.
     /// - Has results → results list.
-    /// - Otherwise → (optional) day pills as filter chrome + activities list.
-    /// In docked+empty the top row is already the pills, so we skip the filter row
-    /// to avoid a duplicate pill row appearing briefly as the sheet grows.
+    /// - Otherwise → (optional) day capsules as filter chrome + activities list.
+    /// In docked+empty the top row is already the capsules, so we skip the filter row
+    /// to avoid a duplicate capsule row appearing briefly as the sheet grows.
     @ViewBuilder
     private var expandedContentArea: some View {
         if showsMapSearchResultsList {
@@ -296,7 +298,7 @@ struct TripMapPlacesExpandedSheet: View {
 
     private var searchBarChromeRow: some View {
         HStack(alignment: .center, spacing: AppSpacing.sm) {
-            mapsStyleSearchPillButton
+            mapSearchCapsuleButton
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             // Trailing accessory mirrors the original behaviour:
@@ -313,8 +315,8 @@ struct TripMapPlacesExpandedSheet: View {
         .padding(.bottom, AppSpacing.sm)
     }
 
-    private var dayPillsChromeRow: some View {
-        DayFilterChipsView(
+    private var dayCapsulesChromeRow: some View {
+        DayFilterCapsulesView(
             selectedDay: $selectedDayFilter,
             dayCount: max(trip.dayCount, 1),
             controlSize: .regular
@@ -322,7 +324,7 @@ struct TripMapPlacesExpandedSheet: View {
         .frame(maxWidth: .infinity, alignment: .center)
         .contentShape(Rectangle())
         .onTapGesture {
-            // Tap is only hittable when the pill row is the top chrome, which
+            // Tap is only hittable when the capsule row is the top chrome, which
             // only happens in the settled docked state.
             guard committedLayout == .docked else { return }
             HapticManager.light()
@@ -353,16 +355,21 @@ struct TripMapPlacesExpandedSheet: View {
     @ViewBuilder
     private func mapSubmittedSearchRowLeadingIcon(preview: MapSearchPreview) -> some View {
         let icon = mapSubmittedSearchRowSymbolAndFamily(for: preview)
+        let badgeAccent = mapRowIconBadgeAccent(symbol: icon.symbol, family: icon.family)
         ZStack {
             Circle()
-                .fill(icon.family.tint)
+                .fill(AppColors.iconBadgeGradient(accent: badgeAccent))
             Image(systemName: icon.symbol)
                 .font(.appCaption.weight(.semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(icon.family.color)
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(AppColors.iconOnColoredSurface)
         }
         .frame(width: 34, height: 34)
         .accessibilityHidden(true)
+    }
+
+    private func mapRowIconBadgeAccent(symbol: String, family: PlaceCategoryFamily) -> Color {
+        symbol.hasPrefix("mappin") || family == .generic ? AppColors.appError : family.color
     }
 
     /// After keyboard Search: same pins as the map, in a scannable list (half detent).
@@ -405,12 +412,18 @@ struct TripMapPlacesExpandedSheet: View {
         .contentMargins(.bottom, 0, for: .scrollContent)
         .listSectionSpacing(0)
         .scrollContentBackground(.hidden)
+        .background(AppColors.appBackground)
         .environment(\.defaultMinListRowHeight, 52)
     }
 
     /// Trailing **clear** control (filled X), same glyph family as the system search field dismiss.
     private var activeMapSearchClearButton: some View {
-        MapChromeIconButton.mapSearchDismiss(
+        MapChromeIconButton(
+            systemName: "xmark.circle.fill",
+            iconFont: .system(size: MapChromeIconMetrics.dismissGlyphPointSize, weight: .regular),
+            symbolRenderingMode: .hierarchical,
+            tint: AppColors.iconOnColoredSurface,
+            accessibilityLabel: String(localized: "Close"),
             accessibilityHint: String(localized: "Clears the search and removes results from the map")
         ) {
             HapticManager.light()
@@ -418,7 +431,7 @@ struct TripMapPlacesExpandedSheet: View {
         }
     }
 
-    private var mapsStyleSearchPillButton: some View {
+    private var mapSearchCapsuleButton: some View {
         Button {
             HapticManager.light()
             isSearchPresented = false
@@ -430,7 +443,7 @@ struct TripMapPlacesExpandedSheet: View {
             HStack(spacing: AppSpacing.sm) {
                 Image(systemName: "magnifyingglass")
                     .font(.appBody.weight(.medium))
-                    .foregroundStyle(AppColors.textSecondary)
+                    .foregroundStyle(AppColors.iconOnColoredSurface)
 
                 Group {
                     if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -447,7 +460,7 @@ struct TripMapPlacesExpandedSheet: View {
 
                 Image(systemName: "mic.fill")
                     .font(.appCaption.weight(.medium))
-                    .foregroundStyle(AppColors.textSecondary)
+                    .foregroundStyle(AppColors.iconOnColoredSurface)
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, AppSpacing.md)
@@ -464,7 +477,15 @@ struct TripMapPlacesExpandedSheet: View {
     }
 
     private var mapsStyleSuggestedPlacesButton: some View {
-        MapChromeIconButton.suggestedPlaces {
+        MapChromeIconButton(
+            systemName: "sparkles",
+            iconFont: .system(size: MapChromeIconMetrics.accessoryGlyphPointSize, weight: .semibold),
+            symbolRenderingMode: .monochrome,
+            monochromeForeground: AppColors.iconOnColoredSurface,
+            legacyDiskFill: true,
+            accessibilityLabel: String(localized: "Suggested Places"),
+            accessibilityHint: String(localized: "Opens the list of suggested places for this trip")
+        ) {
             HapticManager.light()
             onOpenSuggestedPlaces()
         }
@@ -488,7 +509,7 @@ struct TripMapPlacesExpandedSheet: View {
 
 // MARK: - Day list content
 //
-// Search is gone — the floating pill (Phase 3) takes that responsibility.
+// Search is gone — the floating capsule (Phase 3) takes that responsibility.
 // This view hosts only day tabs, day pages, and place rows.
 
 private struct TripMapPlacesDayListContent: View {
@@ -522,9 +543,12 @@ private struct TripMapPlacesDayListContent: View {
                     .padding(.horizontal, AppSpacing.sm)
                 }
                 .frame(height: 44)
-                .background(.regularMaterial)
-
-                Divider()
+                .background(AppColors.appSurface)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(AppColors.appDivider)
+                        .frame(height: 1)
+                }
             }
 
             TabView(selection: dayFilterTabBinding) {
@@ -595,7 +619,7 @@ private struct TripMapPlacesDayListContent: View {
         .listSectionSpacing(.compact)
         .listRowSpacing(AppSpacing.sm)
         .scrollContentBackground(.hidden)
-        .background(.clear)
+        .background(AppColors.appBackground)
         .scrollDismissesKeyboard(.interactively)
     }
 
@@ -605,21 +629,16 @@ private struct TripMapPlacesDayListContent: View {
             onSelectPlace(place)
         } label: {
             HStack(alignment: .center, spacing: AppSpacing.md) {
-                let iconColor: Color = place.isBooking
-                    ? (place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
-                    : place.categoryEnum.color
-                let iconName: String = place.isBooking
-                    ? (place.bookingCategoryEnum?.sfSymbol ?? "ticket.fill")
-                    : place.categoryEnum.sfSymbol
+                let icon = placeRowIcon(for: place)
 
                 ZStack {
                     RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                        .fill(iconColor.opacity(0.14))
+                        .fill(AppColors.iconBadgeGradient(accent: icon.badgeAccent))
                         .frame(width: 44, height: 44)
-                    Image(systemName: iconName)
+                    Image(systemName: icon.symbol)
                         .font(.appBody.weight(.medium))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(iconColor)
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(AppColors.iconOnColoredSurface)
                 }
 
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
@@ -648,12 +667,31 @@ private struct TripMapPlacesDayListContent: View {
         .accessibilityLabel(place.name)
     }
 
+    private func placeRowIcon(for place: Place) -> (symbol: String, badgeAccent: Color) {
+        if place.isBooking {
+            guard let bookingCategory = place.bookingCategoryEnum else {
+                return (symbol: "mappin", badgeAccent: AppColors.appError)
+            }
+            return (symbol: bookingCategory.sfSymbol, badgeAccent: bookingCategory.family.color)
+        }
+
+        let family = place.categoryEnum.family
+        let symbol = family == .generic ? "mappin" : place.categoryEnum.sfSymbol
+        return (symbol: symbol, badgeAccent: family == .generic ? AppColors.appError : family.color)
+    }
+
     private var emptyDayState: some View {
         VStack(spacing: AppSpacing.md) {
-            Image(systemName: "mappin.and.ellipse")
-                .font(.screenTitle)
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(AppColors.textSecondary)
+            ZStack {
+                Circle()
+                    .fill(AppColors.iconBadgeGradient(accent: AppColors.appError))
+                    .frame(width: 56, height: 56)
+                Image(systemName: "mappin")
+                    .font(.sectionHeader)
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(AppColors.iconOnColoredSurface)
+            }
+            .accessibilityHidden(true)
             Text(String(localized: "No activities yet"))
                 .font(.sectionHeader)
                 .foregroundStyle(AppColors.textPrimary)

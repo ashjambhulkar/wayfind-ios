@@ -673,7 +673,8 @@ struct MapSearchOverlay: View {
             HStack(spacing: AppSpacing.md) {
                 rowLeadingIcon(
                     symbol: "magnifyingglass",
-                    family: .generic
+                    family: .generic,
+                    badgeFill: AppColors.appSurface
                 )
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(query.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -687,9 +688,11 @@ struct MapSearchOverlay: View {
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.up.right.circle.fill")
-                    .font(.title3)
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(AppColors.appPrimary)
+                    .font(.sectionHeader.weight(.semibold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(AppColors.iconOnColoredSurface)
+                    .frame(width: 34, height: 34)
+                    .background(AppColors.iconBadgeGradient(accent: AppColors.appPrimary), in: Circle())
             }
             .padding(.vertical, AppSpacing.xs)
             .accessibilityElement(children: .combine)
@@ -703,32 +706,47 @@ struct MapSearchOverlay: View {
 
     @ViewBuilder
     private var emptyStateRow: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            Label("No places found nearby", systemImage: "mappin.slash")
-                .font(.appBody.weight(.semibold))
-                .foregroundStyle(AppColors.textPrimary)
-            Text("Try a broader term or pan the map to a different area.")
-                .font(.appCaption)
-                .foregroundStyle(AppColors.textSecondary)
+        HStack(alignment: .top, spacing: AppSpacing.md) {
+            rowLeadingIcon(symbol: "mappin.slash", family: .generic)
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                Text("No places found nearby")
+                    .font(.appBody.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+                Text("Try a broader term or pan the map to a different area.")
+                    .font(.appCaption)
+                    .foregroundStyle(AppColors.textSecondary)
+            }
         }
         .padding(.vertical, AppSpacing.xs)
         .accessibilityElement(children: .combine)
     }
 
-    /// Coloured leading icon used by every row in the overlay. Mirrors
-    /// Apple Maps' "tinted circle + glyph" treatment but uses our
-    /// brand palette via `PlaceCategoryFamily` so the search surface
-    /// feels native to the app.
-    private func rowLeadingIcon(symbol: String, family: PlaceCategoryFamily) -> some View {
-        ZStack {
+    /// Leading icon badge used by every row in the overlay: category gradient
+    /// background with a white glyph, matching Add Activity and map sheets.
+    private func rowLeadingIcon(
+        symbol: String,
+        family: PlaceCategoryFamily,
+        badgeFill: Color? = nil
+    ) -> some View {
+        let badgeAccent = symbol.hasPrefix("mappin") || family == .generic
+            ? AppColors.appError
+            : family.color
+        return ZStack {
+            if let badgeFill {
+                Circle()
+                    .fill(badgeFill)
+            } else {
+                Circle()
+                    .fill(AppColors.iconBadgeGradient(accent: badgeAccent))
+            }
             Circle()
-                .fill(family.tint)
+                .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
             Image(systemName: symbol)
-                .font(.appCaption.weight(.semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(family.color)
+                .font(.sectionHeader.weight(.semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(AppColors.iconOnColoredSurface)
         }
-        .frame(width: 34, height: 34)
+        .frame(width: 36, height: 36)
         .accessibilityHidden(true)
     }
 
@@ -1176,10 +1194,9 @@ enum SearchRowIconHeuristic {
         for entry in entries where entry.matches.contains(where: { title.contains($0) }) {
             return (entry.symbol, entry.family)
         }
-        // Generic point-of-interest fallback. The neutral grey circle
-        // (rendered by `rowLeadingIcon` when family is `.generic`) is
-        // intentional — it tells the user "we can't tell what kind of
-        // place this is yet" without forcing a wrong colour.
+        // Generic point-of-interest fallback. Row badges render generic
+        // matches as a red `mappin` icon so unknown categories stay
+        // visually distinct without inventing a category color.
         return ("mappin", .generic)
     }
 

@@ -14,7 +14,7 @@
 //    • Tapping a row yields a `MapSearchPreview` that the parent
 //      overlay commits via the same code path as any other search
 //      result — drops a pin and opens the preview sheet on the map.
-//    • Category filter chips stay client-side: we re-fetch with the
+//    • Category filter capsules stay client-side: we re-fetch with the
 //      `topPicks(category:)` overload rather than filtering in-memory
 //      so the cap stays meaningful per category.
 //
@@ -51,7 +51,9 @@ struct SuggestedPlacesAllSheet: View {
                     .padding(.top, AppSpacing.sm)
                     .padding(.bottom, AppSpacing.xs)
             }
-            .background(AppColors.appBackground)
+            .background {
+                AppColors.appBackground.ignoresSafeArea()
+            }
             .navigationTitle("Suggested Places")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -60,9 +62,9 @@ struct SuggestedPlacesAllSheet: View {
                         onCancel()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.title3)
+                            .font(.appBody.weight(.semibold))
                             .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
                     .accessibilityLabel("Close suggested places")
                 }
@@ -84,14 +86,14 @@ struct SuggestedPlacesAllSheet: View {
 
     // MARK: - Filter strip
 
-    /// Compact horizontal filter row mirroring the empty-state pills
-    /// strip on the search overlay — neutral material capsule, family
+    /// Compact horizontal filter row mirroring the empty-state capsules
+    /// strip on the search overlay — app surface capsule, family
     /// glyph, primary text. We only expose the categories that
     /// `city_places.wayfind_category` actually distinguishes.
     private var filterStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                filterChip(
+            HStack(spacing: AppSpacing.sm) {
+                filterCapsule(
                     label: "All",
                     symbol: "square.grid.2x2.fill",
                     family: .generic,
@@ -100,7 +102,7 @@ struct SuggestedPlacesAllSheet: View {
                     selectedFilter = nil
                 }
                 ForEach(filterCategories, id: \.self) { cat in
-                    filterChip(
+                    filterCapsule(
                         label: cat.label,
                         symbol: cat.mapBadgeSymbol,
                         family: cat.family,
@@ -116,11 +118,11 @@ struct SuggestedPlacesAllSheet: View {
     private var filterCategories: [PlaceCategory] {
         // Mirrors what city_places.wayfind_category understands. Hotel
         // and transport collapse to `custom` server-side so we omit
-        // them from the chips to avoid empty result sets.
+        // them from the capsules to avoid empty result sets.
         [.attraction, .restaurant, .nature, .shopping, .nightlife]
     }
 
-    private func filterChip(
+    private func filterCapsule(
         label: String,
         symbol: String,
         family: PlaceCategoryFamily,
@@ -131,29 +133,23 @@ struct SuggestedPlacesAllSheet: View {
             HapticManager.selection()
             action()
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: AppSpacing.xs) {
                 Image(systemName: symbol)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.appCaption.weight(.semibold))
                     .foregroundStyle(family.color)
+                    .symbolRenderingMode(.hierarchical)
                 Text(label)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.primary)
+                    .font(.appBody.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
                     .lineLimit(1)
                     .fixedSize()
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 14)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(.thinMaterial)
-                    .overlay {
-                        Capsule(style: .continuous)
-                            .fill(Color.primary.opacity(isSelected ? 0.08 : 0.03))
-                    }
-            )
+            .padding(.vertical, AppSpacing.sm)
+            .padding(.horizontal, AppSpacing.md)
+            .background(isSelected ? AppColors.appPrimaryLight : AppColors.appSurface, in: Capsule(style: .continuous))
             .overlay {
                 Capsule(style: .continuous)
-                    .strokeBorder(Color.primary.opacity(isSelected ? 0.22 : 0.10), lineWidth: 0.5)
+                    .strokeBorder(isSelected ? AppColors.appPrimary : AppColors.appDivider, lineWidth: 0.5)
             }
         }
         .buttonStyle(.plain)
@@ -165,12 +161,12 @@ struct SuggestedPlacesAllSheet: View {
     @ViewBuilder
     private var content: some View {
         if loading && rows.isEmpty {
-            VStack(spacing: 12) {
+            VStack(spacing: AppSpacing.md) {
                 Spacer()
                 ProgressView()
                 Text("Loading suggestions…")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.appBody)
+                    .foregroundStyle(AppColors.textSecondary)
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -204,6 +200,7 @@ struct SuggestedPlacesAllSheet: View {
             .contentMargins(.top, Self.filterOverlayScrollTopMargin, for: .scrollContent)
             .contentMargins(.bottom, 0, for: .scrollContent)
             .scrollContentBackground(.hidden)
+            .background(AppColors.appBackground)
             .scrollDismissesKeyboard(.immediately)
         }
     }
@@ -236,28 +233,28 @@ struct SuggestedPlaceListRow: View {
     let preview: MapSearchPreview
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: AppSpacing.md) {
             SuggestedThumbnail(preview: preview, size: 56)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 Text(preview.name)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(.appBody.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
                     .lineLimit(2)
                 if let cat = preview.category {
                     Text(cat.label)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textSecondary)
                 }
                 if !preview.subtitle.isEmpty {
                     Text(preview.subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textTertiary)
                         .lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, AppSpacing.xs)
     }
 }
 
@@ -271,8 +268,8 @@ struct SuggestedThumbnail: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(family.color.opacity(0.18))
+            RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
+                .fill(AppColors.iconBadgeGradient(accent: badgeAccent))
 
             if let url = preview.thumbnailURL {
                 AsyncImage(url: url) { phase in
@@ -292,7 +289,7 @@ struct SuggestedThumbnail: View {
                     }
                 }
                 .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
             } else {
                 glyph
             }
@@ -305,14 +302,19 @@ struct SuggestedThumbnail: View {
         preview.category?.family ?? .generic
     }
 
+    private var badgeAccent: Color {
+        family == .generic ? AppColors.appError : family.color
+    }
+
     private var symbol: String {
-        preview.category?.mapBadgeSymbol ?? "mappin.circle.fill"
+        preview.category?.mapBadgeSymbol ?? "mappin"
     }
 
     private var glyph: some View {
         Image(systemName: symbol)
-            .font(.system(size: size * 0.42, weight: .semibold))
-            .foregroundStyle(family.color)
+            .font(.sectionHeader.weight(.semibold))
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(AppColors.iconOnColoredSurface)
     }
 }
 
@@ -369,7 +371,7 @@ struct SuggestedThumbnail: View {
         thumbnailURL: nil,
         category: .attraction
     )
-    HStack(spacing: 12) {
+    HStack(spacing: AppSpacing.md) {
         SuggestedThumbnail(preview: preview, size: 52)
         SuggestedThumbnail(preview: preview, size: 72)
     }

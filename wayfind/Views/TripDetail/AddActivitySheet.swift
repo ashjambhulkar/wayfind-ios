@@ -215,7 +215,7 @@ struct AddActivitySheet: View {
     }
 
     private var addActivitySearchChromeInset: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: AppSpacing.xs) {
             addActivitySearchChromeRow
 
             if trimmedQuery.isEmpty {
@@ -258,7 +258,7 @@ struct AddActivitySheet: View {
                 onCancel()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.title2.weight(.medium))
+                    .font(.appBody.weight(.semibold))
                     .foregroundStyle(AppColors.textPrimary)
                     .frame(width: 44, height: 44)
                     .background(AppColors.appSurface, in: Circle())
@@ -275,7 +275,7 @@ struct AddActivitySheet: View {
         .padding(.bottom, AppSpacing.sm)
     }
 
-    /// Same horizontal rhythm as `MapSearchOverlay` / `CategoryPillsRow`: pills sit in `safeAreaInset`
+    /// Same horizontal rhythm as `MapSearchOverlay` / category rows: capsules sit in `safeAreaInset`
     /// under `.searchable` so leading padding matches the search field instead of inset-grouped `List` margins.
     private var addActivityCategoryCapsulesRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -399,6 +399,10 @@ struct AddActivitySheet: View {
             }
         }
         .background(AppColors.appSurface, in: RoundedRectangle(cornerRadius: AppCornerRadius.xLarge, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppCornerRadius.xLarge, style: .continuous)
+                .strokeBorder(AppColors.appDivider, lineWidth: 1)
+        }
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.xLarge, style: .continuous))
     }
 
@@ -508,6 +512,7 @@ struct AddActivitySheet: View {
             AddActivityPlaceRow(
                 symbol: icon.symbol,
                 family: icon.family,
+                iconColor: addActivityPinBadgeAccent(symbol: icon.symbol),
                 title: preview.name,
                 subtitle: preview.subtitle.isEmpty ? (preview.category?.label ?? String(localized: "Place")) : preview.subtitle
             )
@@ -525,6 +530,7 @@ struct AddActivitySheet: View {
             AddActivityPlaceRow(
                 symbol: icon.symbol,
                 family: icon.family,
+                iconColor: addActivityPinBadgeAccent(symbol: icon.symbol),
                 title: suggestion.title,
                 subtitle: suggestion.subtitle
             )
@@ -542,6 +548,7 @@ struct AddActivitySheet: View {
             AddActivityPlaceRow(
                 symbol: icon.symbol,
                 family: icon.family,
+                iconColor: addActivityPinBadgeAccent(symbol: icon.symbol),
                 title: prediction.mainText,
                 subtitle: prediction.secondaryText
             )
@@ -558,6 +565,7 @@ struct AddActivitySheet: View {
             AddActivityPlaceRow(
                 symbol: place.categoryEnum.mapBadgeSymbol,
                 family: place.categoryEnum.family,
+                iconColor: addActivityPinBadgeAccent(symbol: place.categoryEnum.mapBadgeSymbol),
                 title: place.name,
                 subtitle: place.address ?? String(localized: "Idea")
             )
@@ -679,8 +687,10 @@ struct AddActivitySheet: View {
             if !preview.subtitle.isEmpty {
                 AddActivityDetailRow(
                     icon: "mappin.and.ellipse",
+                    iconAccent: AppColors.appError,
                     title: "Address",
-                    value: preview.subtitle
+                    value: preview.subtitle,
+                    emphasizesValue: true
                 )
                 .listRowBackground(AppColors.appSurface)
             }
@@ -1085,22 +1095,26 @@ private struct AddActivityCategoryShortcut: Identifiable {
 
 private struct AddActivityDetailRow: View {
     let icon: String
+    /// Gradient accent for the leading badge (pin vs brand primary).
+    var iconAccent: Color = AppColors.appPrimary
     let title: String
     let value: String
     var isActionable = false
+    /// When true, value uses `appPrimary` like link rows (readability); does not show chevron unless `isActionable`.
+    var emphasizesValue = false
     var action: (() -> Void)?
+
+    private var valueForeground: Color {
+        if isActionable || emphasizesValue { return AppColors.appPrimary }
+        return AppColors.textPrimary
+    }
 
     var body: some View {
         Button {
             action?()
         } label: {
             HStack(spacing: AppSpacing.md) {
-                Image(systemName: icon)
-                    .font(.appCaption.weight(.semibold))
-                    .foregroundStyle(AppColors.appPrimary)
-                    .frame(width: 30, height: 30)
-                    .background(AppColors.appPrimaryLight, in: Circle())
-                    .accessibilityHidden(true)
+                AddActivityScheduleIconBadge(symbol: icon, accent: iconAccent, size: 36)
 
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(title)
@@ -1117,38 +1131,72 @@ private struct AddActivityDetailRow: View {
                 if isActionable {
                     Image(systemName: "chevron.right")
                         .font(.appCaption.weight(.semibold))
-                        .foregroundStyle(AppColors.textTertiary)
                 }
             }
             .padding(.vertical, AppSpacing.xs)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!isActionable)
         .accessibilityElement(children: .combine)
     }
 }
 
 /// Opaque badge fill: same hue as `accent`, slightly muted (less neon than flat full saturation).
 private func addActivityRowBadgeGradient(accent: Color) -> LinearGradient {
-    let ui = UIColor(accent)
-    var hue: CGFloat = 0
-    var saturation: CGFloat = 0
-    var brightness: CGFloat = 0
-    var alpha: CGFloat = 0
+    AppColors.iconBadgeGradient(accent: accent)
+}
 
-    guard ui.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha), alpha > 0 else {
-        return LinearGradient(colors: [accent, accent], startPoint: .top, endPoint: .bottom)
+/// Red badge when the row shows a generic map pin (unknown POI type).
+private func addActivityPinBadgeAccent(symbol: String) -> Color? {
+    symbol.hasPrefix("mappin") ? AppColors.appError : nil
+}
+
+/// Leading SF Symbol on schedule sheet rows: gradient + `appDivider` stroke + white glyph (matches search `AddActivityPlaceRow`; UI consistency audit).
+private struct AddActivityScheduleIconBadge: View {
+    let symbol: String
+    var accent: Color = AppColors.appPrimary
+    var size: CGFloat = 36
+    /// When set, draws a continuous rounded rect; otherwise a circle.
+    var continuousCorner: CGFloat?
+
+    private var gradient: LinearGradient {
+        addActivityRowBadgeGradient(accent: accent)
     }
 
-    let mutedSaturationTop = min(max(saturation * 0.88, 0), 1)
-    let mutedSaturationBottom = min(max(saturation * 0.92, 0), 1)
-    let topBrightness = min(max(brightness * 1.05 * 0.94, 0.12), 1)
-    let bottomBrightness = min(max(brightness * 0.82 * 0.94, 0.1), 1)
-
-    let top = Color(UIColor(hue: hue, saturation: mutedSaturationTop, brightness: topBrightness, alpha: alpha))
-    let bottom = Color(UIColor(hue: hue, saturation: mutedSaturationBottom, brightness: bottomBrightness, alpha: alpha))
-    return LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom)
+    var body: some View {
+        Group {
+            if let corner = continuousCorner {
+                ZStack {
+                    RoundedRectangle(cornerRadius: corner, style: .continuous)
+                        .fill(gradient)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                                .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
+                        }
+                    Image(systemName: symbol)
+                        .font(.sectionHeader.weight(.semibold))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(AppColors.iconOnColoredSurface)
+                }
+                .frame(width: size, height: size)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(gradient)
+                        .overlay {
+                            Circle()
+                                .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
+                        }
+                    Image(systemName: symbol)
+                        .font(.sectionHeader.weight(.semibold))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(AppColors.iconOnColoredSurface)
+                }
+                .frame(width: size, height: size)
+            }
+        }
+        .accessibilityHidden(true)
+    }
 }
 
 private struct AddActivityPlaceRow: View {
@@ -1164,22 +1212,9 @@ private struct AddActivityPlaceRow: View {
         iconColor ?? family.color
     }
 
-    private var iconCircleGradient: LinearGradient {
-        addActivityRowBadgeGradient(accent: iconAccentBase)
-    }
-
     var body: some View {
         HStack(spacing: AppSpacing.md) {
-            ZStack {
-                Circle()
-                    .fill(iconCircleGradient)
-                Image(systemName: symbol)
-                    .font(.appBody.weight(.semibold))
-                    .symbolRenderingMode(.monochrome)
-                    .foregroundStyle(Color.white)
-            }
-            .frame(width: 36, height: 36)
-            .accessibilityHidden(true)
+            AddActivityScheduleIconBadge(symbol: symbol, accent: iconAccentBase, size: 36)
 
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 Text(title)
@@ -1208,17 +1243,18 @@ private struct AddActivityPlaceSummary: View {
     let symbol: String
     let family: PlaceCategoryFamily
 
+    private var badgeAccent: Color {
+        addActivityPinBadgeAccent(symbol: symbol) ?? family.color
+    }
+
     var body: some View {
         HStack(spacing: AppSpacing.md) {
-            ZStack {
-                RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                    .fill(family.tint)
-                Image(systemName: symbol)
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(family.color)
-            }
-            .frame(width: 44, height: 44)
-            .accessibilityHidden(true)
+            AddActivityScheduleIconBadge(
+                symbol: symbol,
+                accent: badgeAccent,
+                size: 44,
+                continuousCorner: AppCornerRadius.medium
+            )
 
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 Text(title)

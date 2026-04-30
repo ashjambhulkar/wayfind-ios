@@ -58,15 +58,16 @@ struct MapSearchPreviewSheet: View {
                             .padding(.horizontal, AppSpacing.lg)
                     }
 
-                    Spacer(minLength: 24)
+                    Spacer(minLength: AppSpacing.xl)
                 }
                 .padding(.top, AppSpacing.xl)
             }
             .scrollIndicators(.hidden)
-            .background(AppColors.appBackground)
+            .background {
+                AppColors.appBackground.ignoresSafeArea()
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
-            .toolbarBackground(.regularMaterial, for: .navigationBar)
         }
         .task {
             PlatformUsageTelemetry.mapSearch(.previewShown, origin: preview.origin)
@@ -88,15 +89,15 @@ struct MapSearchPreviewSheet: View {
 
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 Text(preview.name)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(.primary)
+                    .font(.sectionHeader.weight(.bold))
+                    .foregroundStyle(AppColors.textPrimary)
                     .lineLimit(2)
                     .minimumScaleFactor(0.86)
 
                 if !preview.subtitle.isEmpty {
                     Text(preview.subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textSecondary)
                         .lineLimit(2)
                 }
 
@@ -104,12 +105,7 @@ struct MapSearchPreviewSheet: View {
                     categoryBadge
 
                     if preview.isOwnedRow {
-                        Label("Wayfind suggestion", systemImage: "checkmark.seal.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppColors.appPrimary)
-                            .padding(.horizontal, AppSpacing.sm)
-                            .padding(.vertical, 6)
-                            .background(AppColors.appPrimaryLight, in: Capsule())
+                        ownedSuggestionBadge
                     }
                 }
                 .padding(.top, AppSpacing.xs)
@@ -117,10 +113,15 @@ struct MapSearchPreviewSheet: View {
 
             Spacer(minLength: 0)
 
-            MapChromeIconButton.placeDismiss {
+            MapChromeIconButton(
+                systemName: "xmark.circle.fill",
+                iconFont: .system(size: MapChromeIconMetrics.dismissGlyphPointSize, weight: .regular),
+                symbolRenderingMode: .hierarchical,
+                tint: AppColors.iconOnColoredSurface,
+                accessibilityLabel: String(localized: "Close preview")
+            ) {
                 onDismiss()
             }
-            .accessibilityLabel("Close preview")
         }
         .padding(.top, AppSpacing.xs)
     }
@@ -141,12 +142,18 @@ struct MapSearchPreviewSheet: View {
             .allowsHitTesting(false)
 
             if lookAroundScene == nil {
-                Label("Map preview", systemImage: "map.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
+                HStack(spacing: AppSpacing.xs) {
+                    Image(systemName: "map.fill")
+                        .font(.appCaption.weight(.semibold))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(AppColors.iconOnColoredSurface)
+                    Text("Map preview")
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(AppColors.iconOnColoredSurface)
+                }
                     .padding(.horizontal, AppSpacing.sm)
-                    .padding(.vertical, 6)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.vertical, AppSpacing.xs)
+                    .background(AppColors.iconBadgeGradient(accent: AppColors.appPrimary), in: Capsule())
                     .padding(AppSpacing.md)
                     .allowsHitTesting(false)
             }
@@ -155,7 +162,7 @@ struct MapSearchPreviewSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
         }
         .contentShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
         .onTapGesture {
@@ -202,9 +209,9 @@ struct MapSearchPreviewSheet: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            Image(systemName: preview.category?.mapBadgeSymbol ?? "mappin.circle.fill")
-                .font(.system(size: 64, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.22))
+            Image(systemName: previewIconSymbol)
+                .font(.screenTitle.weight(.semibold))
+                .foregroundStyle(AppColors.iconOnColoredSurface.opacity(0.22))
                 .offset(x: 86, y: -36)
         }
     }
@@ -217,11 +224,11 @@ struct MapSearchPreviewSheet: View {
             onAddToDay()
         } label: {
             Label("Add to itinerary", systemImage: "calendar.badge.plus")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.white)
+                .font(.appButton.weight(.semibold))
+                .foregroundStyle(AppColors.iconOnColoredSurface)
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
-                .background(AppColors.appPrimary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(AppColors.appPrimary, in: RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityHint("Choose a day and add this place to your trip")
@@ -263,14 +270,19 @@ struct MapSearchPreviewSheet: View {
         Button(action: action) {
             VStack(spacing: AppSpacing.xs) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(AppColors.appPrimary)
+                    .font(.sectionHeader.weight(.semibold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(AppColors.iconOnColoredSurface)
                     .frame(width: 48, height: 48)
-                    .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+                    .background(AppColors.iconBadgeGradient(accent: AppColors.appPrimary), in: Circle())
+                    .overlay {
+                        Circle()
+                            .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
+                    }
 
                 Text(title)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.primary)
+                    .font(.appCaption.weight(.medium))
+                    .foregroundStyle(AppColors.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
             }
@@ -282,22 +294,44 @@ struct MapSearchPreviewSheet: View {
     }
 
     private var categoryBadge: some View {
-        Label(categoryTitle, systemImage: preview.category?.mapBadgeSymbol ?? "mappin.circle.fill")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(placeTint)
-            .padding(.horizontal, AppSpacing.sm)
-            .padding(.vertical, 6)
-            .background(placeTint.opacity(0.14), in: Capsule())
+        HStack(spacing: AppSpacing.xs) {
+            Image(systemName: previewIconSymbol)
+                .font(.appCaption.weight(.semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(AppColors.iconOnColoredSurface)
+            Text(categoryTitle)
+                .font(.appCaption.weight(.semibold))
+                .foregroundStyle(AppColors.iconOnColoredSurface)
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xs)
+        .background(AppColors.iconBadgeGradient(accent: placeBadgeAccent), in: Capsule())
+    }
+
+    private var ownedSuggestionBadge: some View {
+        HStack(spacing: AppSpacing.xs) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.appCaption.weight(.semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(AppColors.iconOnColoredSurface)
+            Text("Wayfind suggestion")
+                .font(.appCaption.weight(.semibold))
+                .foregroundStyle(AppColors.iconOnColoredSurface)
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xs)
+        .background(AppColors.iconBadgeGradient(accent: AppColors.appPrimary), in: Capsule())
     }
 
     private var placeIcon: some View {
         ZStack {
             Circle()
-                .fill(placeTint.opacity(0.14))
+                .fill(AppColors.iconBadgeGradient(accent: placeBadgeAccent))
                 .frame(width: 52, height: 52)
-            Image(systemName: preview.category?.mapBadgeSymbol ?? "mappin.circle.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(placeTint)
+            Image(systemName: previewIconSymbol)
+                .font(.sectionHeader.weight(.semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(AppColors.iconOnColoredSurface)
         }
         .accessibilityHidden(true)
     }
@@ -342,28 +376,34 @@ struct MapSearchPreviewSheet: View {
             }
         }
         .padding(.vertical, AppSpacing.xs)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(AppColors.appSurface, in: RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                .strokeBorder(AppColors.appDivider, lineWidth: 1)
+        }
     }
 
     @ViewBuilder
     private func infoRow(icon: String, title: String, text: String, action: (() -> Void)?) -> some View {
         Button {
-            action?()
+            guard let action else { return }
+            action()
         } label: {
             HStack(spacing: AppSpacing.md) {
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(AppColors.appPrimary)
+                    .font(.appBody.weight(.semibold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(AppColors.iconOnColoredSurface)
                     .frame(width: 26, height: 26)
-                    .background(AppColors.appPrimaryLight, in: Circle())
+                    .background(AppColors.iconBadgeGradient(accent: infoRowBadgeAccent(for: icon)), in: Circle())
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textSecondary)
                     Text(text)
-                        .font(.subheadline)
-                        .foregroundStyle(action != nil ? AppColors.appPrimary : .primary)
+                        .font(.appBody)
+                        .foregroundStyle(action != nil ? AppColors.appPrimary : AppColors.textPrimary)
                         .lineLimit(title == "Address" ? 2 : 1)
                 }
 
@@ -371,27 +411,38 @@ struct MapSearchPreviewSheet: View {
 
                 if action != nil {
                     Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(AppColors.iconOnColoredSurface)
                 }
             }
             .padding(.horizontal, AppSpacing.md)
-            .padding(.vertical, 11)
+            .padding(.vertical, AppSpacing.md)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(action == nil)
         .accessibilityElement(children: .combine)
     }
 
     // MARK: - Derived display values
 
     private var placeTint: Color {
-        preview.category?.color ?? AppColors.appPrimary
+        preview.category?.color ?? AppColors.appError
+    }
+
+    private var placeBadgeAccent: Color {
+        preview.category == nil ? AppColors.appError : placeTint
+    }
+
+    private var previewIconSymbol: String {
+        preview.category?.mapBadgeSymbol ?? "mappin"
     }
 
     private var categoryTitle: String {
         preview.category?.label ?? "Place"
+    }
+
+    private func infoRowBadgeAccent(for icon: String) -> Color {
+        icon.hasPrefix("mappin") ? AppColors.appError : AppColors.appPrimary
     }
 
     private var hasInfoRows: Bool {

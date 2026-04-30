@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Horizontal day filter using capsule buttons that keep the selected day centered as the page changes.
-struct DayFilterChipsView: View {
+struct DayFilterCapsulesView: View {
     @Binding var selectedDay: Int?
     let dayCount: Int
     var controlSize: ControlSize = .regular
@@ -147,19 +147,19 @@ private struct DayFilterPopupButtonStyle: ButtonStyle {
 #if DEBUG
 #Preview("Day filter — light") {
     @Previewable @State var selected: Int? = 2
-    DayFilterChipsView(selectedDay: $selected, dayCount: 5)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 8)
-        .background(.regularMaterial)
+    DayFilterCapsulesView(selectedDay: $selected, dayCount: 5)
+        .padding(.vertical, AppSpacing.sm)
+        .padding(.horizontal, AppSpacing.sm)
+        .background(AppColors.appBackground)
         .preferredColorScheme(.light)
 }
 
 #Preview("Day filter — dark") {
     @Previewable @State var selected: Int? = 2
-    DayFilterChipsView(selectedDay: $selected, dayCount: 5)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 8)
-        .background(.regularMaterial)
+    DayFilterCapsulesView(selectedDay: $selected, dayCount: 5)
+        .padding(.vertical, AppSpacing.sm)
+        .padding(.horizontal, AppSpacing.sm)
+        .background(AppColors.appBackground)
         .preferredColorScheme(.dark)
 }
 #endif
