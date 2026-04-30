@@ -15,11 +15,9 @@
 //      a strict `X-Goog-FieldMask` (default).
 //    • Legacy Places API — `maps.googleapis.com/maps/api/place/autocomplete/json`.
 //
-//  Session tokens were removed in Phase B: they only matter when an
-//  Autocomplete request is followed by a Place Details request inside the same
-//  session. We dropped Place Details everywhere except the China fallback row,
-//  so emitting a session token is dead weight that can confuse Google's
-//  billing classification.
+//  Most callers still use Autocomplete-only flows. Destination picking is the
+//  exception: it follows Autocomplete with Place Details, so it passes a
+//  session token through both requests to keep Google billing session-based.
 //
 
 import Foundation
@@ -52,7 +50,7 @@ final class PlaceSearchService {
     private let minQueryLength = 2
     private let debounceMillis = 300
 
-    func search(query: String, types: String = "(cities)") {
+    func search(query: String, types: String = "(cities)", sessionToken: String? = nil) {
         searchTask?.cancel()
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= minQueryLength else {
@@ -92,12 +90,24 @@ final class PlaceSearchService {
                 }
                 let predictions: [PlaceAutocompleteResult]
                 if useNew {
-                    predictions = try await fetchAutocompleteNew(query: trimmed, types: types, apiKey: apiKey)
+                    predictions = try await fetchAutocompleteNew(
+                        query: trimmed,
+                        types: types,
+                        sessionToken: sessionToken,
+                        apiKey: apiKey
+                    )
                 } else {
-                    predictions = try await fetchAutocompleteLegacy(query: trimmed, types: types, apiKey: apiKey)
+                    predictions = try await fetchAutocompleteLegacy(
+                        query: trimmed,
+                        types: types,
+                        sessionToken: sessionToken,
+                        apiKey: apiKey
+                    )
                 }
+                guard !Task.isCancelled else { return }
                 results = predictions
             } catch {
+                guard !Task.isCancelled else { return }
                 await loadMockResults(query: trimmed)
             }
         }
@@ -125,7 +135,24 @@ final class PlaceSearchService {
         await _placeDetails(placeId: placeId)
     }
 
-    private func _placeDetails(placeId: String) async -> PlaceDetail? {
+    /// Destination creation follows Google Places' session pricing model:
+    /// autocomplete predictions and the selected Place Details lookup share
+    /// this token.
+    func getDestinationDetails(placeId: String, sessionToken: String?) async -> PlaceDetail? {
+        let useNew = await MainActor.run {
+            FeatureFlagsService.shared.stayAreaAutocompleteAPI == .new
+        }
+        if useNew {
+            return await _placeDetailsNew(placeId: placeId, sessionToken: sessionToken)
+        }
+        return await _placeDetails(placeId: placeId, sessionToken: sessionToken)
+    }
+
+    func makeAutocompleteSessionToken() -> String {
+        UUID().uuidString
+    }
+
+    private func _placeDetails(placeId: String, sessionToken: String? = nil) async -> PlaceDetail? {
         guard AppConfig.useRealBackend else {
             return PlaceDetail(placeId: placeId, name: "Mock Place", address: "123 Main St", lat: 48.8566, lng: 2.3522, types: ["point_of_interest"])
         }
@@ -142,6 +169,9 @@ final class PlaceSearchService {
             URLQueryItem(name: "fields", value: "name,formatted_address,geometry,types"),
             URLQueryItem(name: "key", value: apiKey),
         ]
+        if let sessionToken {
+            components.queryItems?.append(URLQueryItem(name: "sessiontoken", value: sessionToken))
+        }
 
         guard let url = components.url else { return nil }
 
@@ -163,6 +193,46 @@ final class PlaceSearchService {
         }
     }
 
+    private func _placeDetailsNew(placeId: String, sessionToken: String?) async -> PlaceDetail? {
+        guard AppConfig.useRealBackend else {
+            return PlaceDetail(placeId: placeId, name: "Mock Place", address: "123 Main St", lat: 48.8566, lng: 2.3522, types: ["locality"])
+        }
+        let apiKey = AppConfig.googlePlacesAPIKey
+        guard !apiKey.contains("YOUR_") else { return nil }
+
+        let signpost = PlatformUsageTelemetry.begin(.googlePlaceDetails)
+        var outcome: PlatformUsageTelemetry.Status = .error
+        defer { PlatformUsageTelemetry.end(.googlePlaceDetails, id: signpost, status: outcome) }
+
+        guard let encodedPlaceId = placeId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              var components = URLComponents(string: "https://places.googleapis.com/v1/places/\(encodedPlaceId)")
+        else { return nil }
+        if let sessionToken {
+            components.queryItems = [URLQueryItem(name: "sessionToken", value: sessionToken)]
+        }
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
+        request.setValue("id,displayName,formattedAddress,location,types", forHTTPHeaderField: "X-Goog-FieldMask")
+
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let response = try JSONDecoder().decode(PlaceDetailsNewResponse.self, from: data)
+            outcome = .ok
+            return PlaceDetail(
+                placeId: response.id,
+                name: response.displayName?.text ?? "",
+                address: response.formattedAddress ?? "",
+                lat: response.location.latitude,
+                lng: response.location.longitude,
+                types: response.types ?? []
+            )
+        } catch {
+            return nil
+        }
+    }
+
     func clearResults() {
         results = []
         searchTask?.cancel()
@@ -173,7 +243,7 @@ final class PlaceSearchService {
     /// `places.googleapis.com/v1/places:autocomplete` with a strict field mask
     /// so we never pull anything more than `placeId + text`. Same SKU pricing
     /// as Legacy but on Google's supported long-term endpoint.
-    private func fetchAutocompleteNew(query: String, types: String, apiKey: String) async throws -> [PlaceAutocompleteResult] {
+    private func fetchAutocompleteNew(query: String, types: String, sessionToken: String?, apiKey: String) async throws -> [PlaceAutocompleteResult] {
         let signpost = PlatformUsageTelemetry.begin(.googleAutocomplete)
         var outcome: PlatformUsageTelemetry.Status = .error
         defer { PlatformUsageTelemetry.end(.googleAutocomplete, id: signpost, status: outcome) }
@@ -189,7 +259,8 @@ final class PlaceSearchService {
 
         let body = AutocompleteNewRequest(
             input: query,
-            includedPrimaryTypes: mapLegacyTypesToNewIncludedTypes(types)
+            includedPrimaryTypes: mapLegacyTypesToNewIncludedTypes(types),
+            sessionToken: sessionToken
         )
         request.httpBody = try JSONEncoder().encode(body)
 
@@ -212,12 +283,12 @@ final class PlaceSearchService {
     }
 
     /// Translates the Legacy `types=` parameter into the New API's
-    /// `includedPrimaryTypes`. Returns nil for `(cities)` since the New API
-    /// doesn't expose a single equivalent and the empty include list yields
-    /// the broadest results (which is what Legacy's `(cities)` approximates).
+    /// `includedPrimaryTypes`. Google supports `(regions)` and `(cities)` as
+    /// collection filters in Autocomplete (New), matching legacy destination
+    /// picker behavior without pulling establishments into trip destinations.
     private func mapLegacyTypesToNewIncludedTypes(_ legacy: String) -> [String]? {
         switch legacy {
-        case "(cities)": return ["locality", "administrative_area_level_3"]
+        case "(cities)", "(regions)": return [legacy]
         case "geocode": return ["geocode"]
         case "establishment": return ["establishment"]
         case "address": return ["street_address"]
@@ -227,7 +298,7 @@ final class PlaceSearchService {
 
     // MARK: - Autocomplete (Legacy)
 
-    private func fetchAutocompleteLegacy(query: String, types: String, apiKey: String) async throws -> [PlaceAutocompleteResult] {
+    private func fetchAutocompleteLegacy(query: String, types: String, sessionToken: String?, apiKey: String) async throws -> [PlaceAutocompleteResult] {
         let signpost = PlatformUsageTelemetry.begin(.googleAutocomplete)
         var outcome: PlatformUsageTelemetry.Status = .error
         defer { PlatformUsageTelemetry.end(.googleAutocomplete, id: signpost, status: outcome) }
@@ -238,6 +309,9 @@ final class PlaceSearchService {
             URLQueryItem(name: "types", value: types),
             URLQueryItem(name: "key", value: apiKey),
         ]
+        if let sessionToken {
+            components.queryItems?.append(URLQueryItem(name: "sessiontoken", value: sessionToken))
+        }
         guard let url = components.url else { return [] }
         let (data, _) = try await URLSession.shared.data(from: url)
         let response = try JSONDecoder().decode(AutocompleteLegacyResponse.self, from: data)
@@ -307,6 +381,7 @@ private struct AutocompleteLegacyResponse: Decodable {
 private struct AutocompleteNewRequest: Encodable {
     let input: String
     let includedPrimaryTypes: [String]?
+    let sessionToken: String?
 }
 
 private struct AutocompleteNewResponse: Decodable {
@@ -358,6 +433,23 @@ private struct PlaceDetailsResponse: Decodable {
     struct Location: Decodable {
         let lat: Double
         let lng: Double
+    }
+}
+
+private struct PlaceDetailsNewResponse: Decodable {
+    let id: String
+    let displayName: DisplayName?
+    let formattedAddress: String?
+    let location: Location
+    let types: [String]?
+
+    struct DisplayName: Decodable {
+        let text: String?
+    }
+
+    struct Location: Decodable {
+        let latitude: Double
+        let longitude: Double
     }
 }
 

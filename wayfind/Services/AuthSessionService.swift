@@ -14,6 +14,7 @@ enum AuthSessionError: LocalizedError {
     case googleCancelled
     case missingPresenter
     case missingGoogleTokens
+    case deleteAccountFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -27,6 +28,8 @@ enum AuthSessionError: LocalizedError {
             return "Could not present sign-in. Try again."
         case .missingGoogleTokens:
             return "Google sign-in didn't complete. Try again."
+        case .deleteAccountFailed(let message):
+            return message
         }
     }
 }
@@ -326,6 +329,43 @@ final class AuthSessionService {
         GIDSignIn.sharedInstance.signOut()
         guard let client else { return }
         try await client.auth.signOut(scope: .global)
+    }
+
+    func deleteCurrentUserAccount() async throws {
+        guard let client else { throw AuthSessionError.notConfigured }
+        let session = try await client.auth.session
+        let url = URL(string: "\(AppConfig.supabaseURL)/functions/v1/delete-user")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.timeoutInterval = 90
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw AuthSessionError.deleteAccountFailed("Could not delete your account. Try again.")
+        }
+
+        switch http.statusCode {
+        case 200, 204:
+            GIDSignIn.sharedInstance.signOut()
+            return
+        case 401, 403:
+            throw AuthSessionError.deleteAccountFailed("Please sign in again before deleting your account.")
+        default:
+            let message = Self.extractErrorMessage(from: data)
+                ?? "Could not delete your account. Try again later."
+            throw AuthSessionError.deleteAccountFailed(message)
+        }
+    }
+
+    private static func extractErrorMessage(from data: Data) -> String? {
+        guard
+            let object = try? JSONSerialization.jsonObject(with: data),
+            let json = object as? [String: Any]
+        else { return nil }
+        return json["error"] as? String ?? json["detail"] as? String
     }
 }
 

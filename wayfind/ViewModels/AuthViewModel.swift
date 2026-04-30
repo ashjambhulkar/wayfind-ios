@@ -209,6 +209,19 @@ final class AuthViewModel {
         clearLocalSession()
     }
 
+    func deleteAccount() async throws {
+        errorMessage = nil
+        if let preSignOutCleanup {
+            await preSignOutCleanup()
+        }
+        guard AppConfig.useRealBackend else {
+            clearLocalSession()
+            return
+        }
+        try await AuthSessionService.shared.deleteCurrentUserAccount()
+        clearLocalSession()
+    }
+
     func prepareAppleSignIn() -> String {
         let nonce = UUID().uuidString
         currentNonce = nonce

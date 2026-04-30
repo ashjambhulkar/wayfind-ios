@@ -48,15 +48,6 @@ struct ProfileView: View {
         )
     }
 
-    private var homeAirportRowText: String {
-        let s = profileDetail?.preferredAirport?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return s.isEmpty ? "Choose airport" : s.uppercased()
-    }
-
-    private var homeAirportRowIsPlaceholder: Bool {
-        (profileDetail?.preferredAirport ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     private var preferredCurrencyRowText: String {
         let s = profileDetail?.preferredCurrency?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return s.isEmpty ? "Choose currency" : s.uppercased()
@@ -85,34 +76,9 @@ struct ProfileView: View {
                     VStack(spacing: 0) {
                         if AppConfig.useRealBackend {
                             NavigationLink {
-                                EditProfileView()
-                            } label: {
-                                HStack {
-                                    Text("Home airport")
-                                        .font(.cardTitle)
-                                        .foregroundStyle(AppColors.textPrimary)
-                                    Spacer()
-                                    Text(homeAirportRowText)
-                                        .font(.appBody)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(
-                                            homeAirportRowIsPlaceholder ? AppColors.textTertiary : AppColors.textSecondary
-                                        )
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(AppColors.textTertiary)
+                                EditProfileView {
+                                    Task { await reload() }
                                 }
-                                .padding(.horizontal, AppSpacing.lg)
-                                .padding(.vertical, AppSpacing.md)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-
-                            Divider()
-                                .background(AppColors.appDivider)
-
-                            NavigationLink {
-                                EditProfileView()
                             } label: {
                                 HStack {
                                     Text("Preferred currency")
@@ -281,7 +247,9 @@ struct ProfileView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 if AppConfig.useRealBackend {
                     NavigationLink {
-                        EditProfileView()
+                        EditProfileView {
+                            Task { await reload() }
+                        }
                     } label: {
                         Text("Edit")
                             .fontWeight(.semibold)

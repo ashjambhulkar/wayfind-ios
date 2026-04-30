@@ -9,6 +9,7 @@ import Foundation
 
 struct FlightDetails: Codable, Hashable {
     var airline: String
+    var carrierIATA: String? = nil
     var flightNumber: String
     var departureAirport: String
     var arrivalAirport: String
@@ -17,6 +18,11 @@ struct FlightDetails: Codable, Hashable {
     var terminal: String
     var gate: String
     var seat: String
+    var lookupVerified: Bool = false
+    var lookupStatus: String? = nil
+    var terminalDestination: String? = nil
+    var gateDestination: String? = nil
+    var baggageClaim: String? = nil
 }
 
 struct HotelDetails: Codable, Hashable {
@@ -123,6 +129,7 @@ private struct FlightTagged: Encodable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(BookingPayloadKind.flight, forKey: .type)
         try container.encode(details.airline, forKey: .airline)
+        try container.encodeIfPresent(details.carrierIATA, forKey: .carrierIATA)
         try container.encode(details.flightNumber, forKey: .flightNumber)
         try container.encode(details.departureAirport, forKey: .departureAirport)
         try container.encode(details.arrivalAirport, forKey: .arrivalAirport)
@@ -131,11 +138,17 @@ private struct FlightTagged: Encodable {
         try container.encode(details.terminal, forKey: .terminal)
         try container.encode(details.gate, forKey: .gate)
         try container.encode(details.seat, forKey: .seat)
+        try container.encode(details.lookupVerified, forKey: .lookupVerified)
+        try container.encodeIfPresent(details.lookupStatus, forKey: .lookupStatus)
+        try container.encodeIfPresent(details.terminalDestination, forKey: .terminalDestination)
+        try container.encodeIfPresent(details.gateDestination, forKey: .gateDestination)
+        try container.encodeIfPresent(details.baggageClaim, forKey: .baggageClaim)
     }
 
     enum CodingKeys: String, CodingKey {
         case type
         case airline
+        case carrierIATA
         case flightNumber
         case departureAirport
         case arrivalAirport
@@ -144,6 +157,11 @@ private struct FlightTagged: Encodable {
         case terminal
         case gate
         case seat
+        case lookupVerified
+        case lookupStatus
+        case terminalDestination
+        case gateDestination
+        case baggageClaim
     }
 }
 

@@ -184,7 +184,7 @@ BEGIN
   WHERE city_profile_id = p_city_profile_id
     AND is_active = true;
 
-  IF v_active_count >= 20 THEN
+  IF v_active_count >= 5 THEN
     RETURN NULL;
   END IF;
 
@@ -224,7 +224,7 @@ BEGIN
       WHERE cpi.city_profile_id = cp.id
         AND cpi.is_active = true
     ) pool ON true
-    WHERE coalesce(pool.active_count, 0) < 20
+    WHERE coalesce(pool.active_count, 0) < 5
     ORDER BY cp.created_at ASC
     LIMIT greatest(1, least(coalesce(p_limit, 25), 100))
   LOOP
@@ -442,7 +442,10 @@ BEGIN
   IF exists (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
     SELECT jobid INTO jid
     FROM cron.job
-    WHERE jobname = 'city-cover-images-every-15-minutes'
+    WHERE jobname IN (
+      'city-cover-images-every-15-minutes',
+      'city-cover-images-every-3-minutes'
+    )
     LIMIT 1;
 
     IF jid IS NOT NULL THEN
@@ -450,8 +453,8 @@ BEGIN
     END IF;
 
     PERFORM cron.schedule(
-      'city-cover-images-every-15-minutes',
-      '*/15 * * * *',
+      'city-cover-images-every-3-minutes',
+      '*/3 * * * *',
       $cron$
       SELECT net.http_post(
         url := rtrim(
@@ -464,9 +467,9 @@ BEGIN
           (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'worker_secret' LIMIT 1)
         ),
         body := jsonb_build_object(
-          'batch_size', 5,
-          'download_batch_size', 50,
-          'backfill_missing', true
+          'batch_size', 1,
+          'download_batch_size', 10,
+          'backfill_missing', false
         )
       );
       $cron$

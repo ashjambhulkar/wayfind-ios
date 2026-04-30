@@ -37,10 +37,10 @@ struct ExpenseCategoryGrid: View {
             VStack(spacing: AppSpacing.xs) {
                 ZStack {
                     Circle()
-                        .fill(category.accentColor.opacity(isSelected ? 0.25 : 0.12))
+                        .fill(category.accentColor)
                     Image(systemName: category.systemImage)
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(category.accentColor)
+                        .foregroundStyle(.white)
                 }
                 .frame(width: 48, height: 48)
                 Text(category.displayLabel)

@@ -305,6 +305,12 @@ final class AppleTravelTimesService {
                 cache[key] = leg
             }
         } catch {
+            ObservabilityService.breadcrumb(
+                "server_seed_failed",
+                category: "travel_times",
+                level: .warning,
+                context: ["city_profile_id": cityProfileId]
+            )
             #if DEBUG
             print("[AppleTravelTimes] server seed failed: \(error)")
             #endif
@@ -574,10 +580,28 @@ final class AppleTravelTimesService {
                 legs: payload
             )
         } catch ServiceError.rateLimited(let retry) {
+            ObservabilityService.breadcrumb(
+                "upload_rate_limited",
+                category: "travel_times",
+                level: .warning,
+                context: [
+                    "retry_ms": retry,
+                    "leg_count": payload.count,
+                ]
+            )
             #if DEBUG
             print("AppleTravelTimes upload rate-limited; retry in \(retry)ms")
             #endif
         } catch {
+            ObservabilityService.capture(
+                error: error,
+                domain: "travel_times",
+                reason: "upload_failed",
+                context: [
+                    "city_profile_id": cityProfileId,
+                    "leg_count": payload.count,
+                ]
+            )
             #if DEBUG
             print("AppleTravelTimes upload failed: \(error)")
             #endif

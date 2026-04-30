@@ -17,12 +17,19 @@ private struct TripNoteListRow: View {
     private var hasBody: Bool { !bodyText.isEmpty }
 
     var body: some View {
-        HStack(alignment: .center, spacing: AppSpacing.md) {
+        HStack(alignment: .top, spacing: AppSpacing.md) {
+            MapStyleIcon(
+                systemName: "note.text",
+                size: .small,
+                accent: AppColors.appPrimary,
+                accessibilityLabel: "Note"
+            )
+
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     if hasTitle {
                         Text(titleText)
-                            .font(.cardTitle.weight(.semibold))
+                            .font(.appBody.weight(.semibold))
                             .foregroundStyle(AppColors.textPrimary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
@@ -50,8 +57,14 @@ private struct TripNoteListRow: View {
                 .foregroundStyle(AppColors.textTertiary.opacity(0.55))
                 .accessibilityHidden(true)
         }
-        .padding(.vertical, AppSpacing.sm)
+        .padding(AppSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColors.appSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                .strokeBorder(AppColors.appDivider, lineWidth: 1)
+        }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilitySummary)
@@ -112,19 +125,23 @@ struct TripNotesView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                List {
-                    ForEach(displayNotes) { note in
-                        Button {
-                            HapticManager.selection()
-                            noteToEdit = note
-                        } label: {
-                            TripNoteListRow(note: note)
+                ScrollView {
+                    LazyVStack(spacing: AppSpacing.md) {
+                        notesHeader
+
+                        ForEach(displayNotes) { note in
+                            Button {
+                                HapticManager.selection()
+                                noteToEdit = note
+                            } label: {
+                                TripNoteListRow(note: note)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(AppSpacing.lg)
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
+                .scrollIndicators(.hidden)
             }
         }
         .background(AppColors.appBackground)
@@ -153,6 +170,37 @@ struct TripNotesView: View {
         }
         .task {
             await reload()
+        }
+    }
+
+    private var notesHeader: some View {
+        HStack(spacing: AppSpacing.md) {
+            MapStyleIcon(
+                systemName: "lightbulb.fill",
+                size: .small,
+                accent: AppColors.appPrimary,
+                backgroundStyle: .soft,
+                accessibilityLabel: "Trip notes"
+            )
+
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                Text("\(displayNotes.count) \(displayNotes.count == 1 ? "note" : "notes")")
+                    .font(.appBody.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+                Text("Ideas, links, reminders, and shared context for this trip")
+                    .font(.appSmall)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(AppSpacing.md)
+        .background(AppColors.appSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                .strokeBorder(AppColors.appDivider, lineWidth: 1)
         }
     }
 

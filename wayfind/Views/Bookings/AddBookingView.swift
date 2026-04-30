@@ -17,14 +17,19 @@ struct AddBookingView: View {
     @State private var confirmationNumber = ""
 
     @State private var flightAirline = ""
+    @State private var flightCarrierIATA = ""
     @State private var flightNumber = ""
     @State private var flightDepartureAirport = ""
     @State private var flightArrivalAirport = ""
     @State private var flightDepartureDate = Date()
-    @State private var flightArrivalDate = Date()
+    @State private var flightArrivalDate = Calendar.current.date(byAdding: .hour, value: 2, to: Date()) ?? Date()
     @State private var flightTerminal = ""
     @State private var flightGate = ""
     @State private var flightSeat = ""
+    @State private var flightLookupState: FlightLookupFormState = .lookupInput
+    @State private var verifiedFlightLookup: VerifiedFlightLookup?
+    @State private var flightLookupMessage: String?
+    @State private var isLookingUpFlight = false
 
     @State private var hotelName = ""
     @State private var hotelCheckIn = Date()
@@ -67,20 +72,34 @@ struct AddBookingView: View {
     @State private var costCurrency: String = "USD"
 
     var editingPlace: Place? = nil
-    var onSave: ((Place, BookingCost?) -> Void)? = nil
+    var onSave: ((Place, BookingCost?) async -> Bool)? = nil
     let targetDayId: UUID
+    /// Whether to draw a leading X close button. Callers presenting the
+    /// view as a sheet should pass `true` so the user has a clear dismiss
+    /// affordance; navigation pushes (which have a system back chevron)
+    /// can leave it `false` to avoid duplicating the action.
+    let showsCloseButton: Bool
+    @State private var isSaving = false
+    @State private var saveError: String?
+    /// Snapshot of the form taken once after prefill in edit mode. Used to
+    /// gate the Save button so it is only active when the user has actually
+    /// changed something. Stays `nil` for new bookings (Save is purely
+    /// driven by `canSave` validation in that case).
+    @State private var initialSnapshot: BookingFormSnapshot?
 
     private var isEditMode: Bool { editingPlace != nil }
 
     init(
         editingPlace: Place? = nil,
         initialType: BookingCategory = .flight,
-        onSave: ((Place, BookingCost?) -> Void)? = nil,
-        targetDayId: UUID
+        onSave: ((Place, BookingCost?) async -> Bool)? = nil,
+        targetDayId: UUID,
+        showsCloseButton: Bool = false
     ) {
         self.editingPlace = editingPlace
         self.onSave = onSave
         self.targetDayId = targetDayId
+        self.showsCloseButton = showsCloseButton
         if let typeStr = editingPlace?.bookingType, let category = BookingCategory(rawValue: typeStr) {
             _selectedType = State(initialValue: category)
         } else {
@@ -101,6 +120,11 @@ struct AddBookingView: View {
                     confirmationNumber: $confirmationNumber
                 )
                 .padding(.horizontal, AppSpacing.lg)
+
+                if let saveError {
+                    BookingSaveErrorBanner(message: saveError)
+                        .padding(.horizontal, AppSpacing.lg)
+                }
 
                 if selectedType == .flight {
                     FlightOptionalDetailsSection(
@@ -133,16 +157,44 @@ struct AddBookingView: View {
         .navigationTitle(isEditMode ? "Edit \(selectedType.label)" : "Add \(selectedType.label)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if showsCloseButton {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.appButton.weight(.semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                    }
+                    .accessibilityLabel("Close")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
-                Button(isEditMode ? "Save" : "Add") {
-                    save()
+                Button {
+                    if selectedType == .flight, shouldLookupFlight {
+                        Task { await lookupFlight() }
+                    } else {
+                        Task { await save() }
+                    }
+                } label: {
+                    if isSaving || isLookingUpFlight {
+                        ProgressView()
+                    } else {
+                        Text(toolbarActionTitle)
+                    }
                 }
                 .font(.appButton)
                 .foregroundStyle(AppColors.appPrimary)
+                .disabled(isSaving || isLookingUpFlight || !canPerformToolbarAction)
                 .accessibilityLabel(isEditMode ? "Save booking" : "Add \(selectedType.label)")
             }
         }
-        .onAppear { prefillFromEditingPlace() }
+        .onAppear {
+            prefillFromEditingPlace()
+            if isEditMode, initialSnapshot == nil {
+                initialSnapshot = currentSnapshot()
+            }
+        }
     }
 
     private func prefillFromEditingPlace() {
@@ -160,20 +212,39 @@ struct AddBookingView: View {
         guard let details = place.bookingDetails else { return }
         switch details {
         case .flight(let f):
-            flightAirline = f.airline ?? ""
-            flightNumber = f.flightNumber ?? ""
-            flightDepartureAirport = f.departureAirport ?? ""
-            flightArrivalAirport = f.arrivalAirport ?? ""
+            flightAirline = f.airline
+            flightCarrierIATA = f.carrierIATA ?? Self.inferredCarrierIATA(from: f.airline, flightNumber: f.flightNumber) ?? ""
+            flightNumber = f.flightNumber
+            flightDepartureAirport = f.departureAirport
+            flightArrivalAirport = f.arrivalAirport
             if let d = f.departureTime { flightDepartureDate = d }
             if let d = f.arrivalTime { flightArrivalDate = d }
-            flightTerminal = f.terminal ?? ""
-            flightGate = f.gate ?? ""
-            flightSeat = f.seat ?? ""
+            flightTerminal = f.terminal
+            flightGate = f.gate
+            flightSeat = f.seat
+            flightLookupState = f.lookupVerified ? .verifiedResult : .manualFallback
+            if f.lookupVerified {
+                verifiedFlightLookup = VerifiedFlightLookup(
+                    carrierIATA: f.carrierIATA ?? "",
+                    flightNumber: f.flightNumber,
+                    departureDate: "",
+                    originAirportIATA: f.departureAirport.nilIfEmpty,
+                    destinationAirportIATA: f.arrivalAirport.nilIfEmpty,
+                    scheduledDepartureUTC: f.departureTime ?? flightDepartureDate,
+                    scheduledArrivalUTC: f.arrivalTime ?? flightArrivalDate,
+                    terminalOrigin: f.terminal.nilIfEmpty,
+                    terminalDestination: f.terminalDestination,
+                    gateOrigin: f.gate.nilIfEmpty,
+                    gateDestination: f.gateDestination,
+                    baggageClaim: f.baggageClaim,
+                    provider: nil
+                )
+            }
         case .hotel(let h):
             hotelName = place.name
             if let d = h.checkInDate { hotelCheckIn = d }
             if let d = h.checkOutDate { hotelCheckOut = d }
-            hotelRoomType = h.roomType ?? ""
+            hotelRoomType = h.roomType
             hotelCheckInTime = h.checkInTime ?? ""
             hotelCheckOutTime = h.checkOutTime ?? ""
         case .restaurant(let r):
@@ -181,26 +252,26 @@ struct AddBookingView: View {
             if let d = r.reservationTime { restaurantReservationDate = d }
             restaurantPartySize = r.partySize ?? 2
         case .carRental(let c):
-            carCompany = c.company ?? ""
-            carPickupLocation = c.pickupLocation ?? ""
-            carDropoffLocation = c.dropoffLocation ?? ""
+            carCompany = c.company
+            carPickupLocation = c.pickupLocation
+            carDropoffLocation = c.dropoffLocation
             if let d = c.pickupTime { carPickupDate = d }
             if let d = c.dropoffTime { carDropoffDate = d }
-            carType = c.carType ?? ""
+            carType = c.carType
         case .activity(let a):
             activityName = place.name
-            activityProvider = a.provider ?? ""
+            activityProvider = a.provider
             activityDuration = a.duration ?? ""
-            activityTicketNumber = a.ticketNumber ?? ""
+            activityTicketNumber = a.ticketNumber
             if let d = place.startTime { activityDate = d }
         case .transport(let t):
-            transportOperator = t.operatorName ?? ""
-            transportServiceNumber = t.serviceNumber ?? ""
-            transportDepartureStation = t.departureStation ?? ""
-            transportArrivalStation = t.arrivalStation ?? ""
+            transportOperator = t.operatorName
+            transportServiceNumber = t.serviceNumber
+            transportDepartureStation = t.departureStation
+            transportArrivalStation = t.arrivalStation
             if let d = t.departureTime { transportDepartureDate = d }
             if let d = t.arrivalTime { transportArrivalDate = d }
-            transportSeat = t.seat ?? ""
+            transportSeat = t.seat
         }
     }
 
@@ -211,6 +282,7 @@ struct AddBookingView: View {
             case .flight:
                 FlightFormView(
                     airline: $flightAirline,
+                    carrierIATA: $flightCarrierIATA,
                     flightNumber: $flightNumber,
                     departureAirport: $flightDepartureAirport,
                     arrivalAirport: $flightArrivalAirport,
@@ -218,7 +290,15 @@ struct AddBookingView: View {
                     arrivalDate: $flightArrivalDate,
                     terminal: $flightTerminal,
                     gate: $flightGate,
-                    seat: $flightSeat
+                    seat: $flightSeat,
+                    lookupState: flightLookupState,
+                    verifiedFlight: verifiedFlightLookup,
+                    lookupMessage: flightLookupMessage,
+                    onUseManualEntry: {
+                        flightLookupState = .manualFallback
+                        flightLookupMessage = "We could not verify this flight. You can still save it, but live tracking will not start."
+                    },
+                    onResetLookup: resetFlightLookup
                 )
             case .hotel:
                 HotelFormView(
@@ -261,12 +341,191 @@ struct AddBookingView: View {
         .transition(.opacity)
     }
 
-    private func save() {
+    private var canSave: Bool {
+        switch selectedType {
+        case .flight:
+            switch flightLookupState {
+            case .verifiedResult:
+                return verifiedFlightLookup != nil
+            case .manualFallback:
+                return !flightAirline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && !flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && !flightDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && !flightArrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .lookupInput, .lookingUp:
+                return false
+            }
+        case .hotel:
+            return !hotelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .restaurant:
+            return !restaurantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .carRental:
+            return !carCompany.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .activity:
+            return !activityName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .transport:
+            return !transportOperator.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private var shouldLookupFlight: Bool {
+        flightLookupState == .lookupInput
+    }
+
+    private var canPerformToolbarAction: Bool {
+        if selectedType == .flight, shouldLookupFlight {
+            return canLookupFlight
+        }
+        guard canSave else { return false }
+        if isEditMode {
+            return hasChanges
+        }
+        return true
+    }
+
+    /// In edit mode we only want Save to light up after the user mutates
+    /// something. Compare the live form to the snapshot captured right
+    /// after prefill — any difference (text, dates, lookup state, cost)
+    /// counts as a change.
+    private var hasChanges: Bool {
+        guard let initialSnapshot else { return true }
+        return initialSnapshot != currentSnapshot()
+    }
+
+    private func currentSnapshot() -> BookingFormSnapshot {
+        BookingFormSnapshot(
+            selectedType: selectedType,
+            confirmationNumber: confirmationNumber,
+            costAmountText: costAmountText,
+            costCurrency: costCurrency,
+            flightAirline: flightAirline,
+            flightCarrierIATA: flightCarrierIATA,
+            flightNumber: flightNumber,
+            flightDepartureAirport: flightDepartureAirport,
+            flightArrivalAirport: flightArrivalAirport,
+            flightDepartureDate: flightDepartureDate,
+            flightArrivalDate: flightArrivalDate,
+            flightTerminal: flightTerminal,
+            flightGate: flightGate,
+            flightSeat: flightSeat,
+            flightLookupState: flightLookupState,
+            verifiedFlightLookup: verifiedFlightLookup,
+            hotelName: hotelName,
+            hotelCheckIn: hotelCheckIn,
+            hotelCheckOut: hotelCheckOut,
+            hotelRoomType: hotelRoomType,
+            hotelCheckInTime: hotelCheckInTime,
+            hotelCheckOutTime: hotelCheckOutTime,
+            restaurantName: restaurantName,
+            restaurantReservationDate: restaurantReservationDate,
+            restaurantPartySize: restaurantPartySize,
+            carCompany: carCompany,
+            carPickupLocation: carPickupLocation,
+            carDropoffLocation: carDropoffLocation,
+            carPickupDate: carPickupDate,
+            carDropoffDate: carDropoffDate,
+            carType: carType,
+            activityName: activityName,
+            activityLocation: activityLocation,
+            activityDate: activityDate,
+            activityDuration: activityDuration,
+            activityProvider: activityProvider,
+            activityTicketNumber: activityTicketNumber,
+            transportOperator: transportOperator,
+            transportServiceNumber: transportServiceNumber,
+            transportDepartureStation: transportDepartureStation,
+            transportArrivalStation: transportArrivalStation,
+            transportDepartureDate: transportDepartureDate,
+            transportArrivalDate: transportArrivalDate,
+            transportSeat: transportSeat
+        )
+    }
+
+    private var toolbarActionTitle: String {
+        if selectedType == .flight, shouldLookupFlight {
+            return "Find"
+        }
+        return isEditMode ? "Save" : "Add"
+    }
+
+    private var canLookupFlight: Bool {
+        normalizedCarrierIATA() != nil
+            && !normalizedFlightNumberDisplay().isEmpty
+            && flightLookupState != .lookingUp
+    }
+
+    private func lookupFlight() async {
+        guard let carrier = normalizedCarrierIATA(), canLookupFlight else {
+            flightLookupMessage = "Choose an airline and add the flight number first."
+            return
+        }
+        isLookingUpFlight = true
+        flightLookupState = .lookingUp
+        flightLookupMessage = nil
+
+        let result = await FlightLookupService.shared.lookup(FlightLookupRequest(
+            carrierIATA: carrier,
+            flightNumber: normalizedFlightNumberDisplay(),
+            departureDate: flightDepartureDate
+        ))
+
+        isLookingUpFlight = false
+        switch result {
+        case .found(let verified):
+            applyVerifiedFlight(verified)
+            flightLookupState = .verifiedResult
+            flightLookupMessage = nil
+            HapticManager.success()
+        case .notFound:
+            verifiedFlightLookup = nil
+            flightLookupState = .manualFallback
+            flightLookupMessage = "We could not verify this flight. You can still save it, but live tracking will not start."
+            HapticManager.warning()
+        case .failed:
+            verifiedFlightLookup = nil
+            flightLookupState = .manualFallback
+            flightLookupMessage = "Could not check right now. You can still save this manually, but live tracking will not start."
+            HapticManager.warning()
+        }
+    }
+
+    private func applyVerifiedFlight(_ verified: VerifiedFlightLookup) {
+        verifiedFlightLookup = verified
+        flightCarrierIATA = verified.carrierIATA
+        flightNumber = verified.flightNumber
+        flightDepartureAirport = verified.originAirportIATA ?? ""
+        flightArrivalAirport = verified.destinationAirportIATA ?? ""
+        flightDepartureDate = verified.scheduledDepartureUTC
+        flightArrivalDate = verified.scheduledArrivalUTC
+        flightTerminal = verified.terminalOrigin ?? ""
+        flightGate = verified.gateOrigin ?? ""
+    }
+
+    private func resetFlightLookup() {
+        verifiedFlightLookup = nil
+        flightLookupMessage = nil
+        flightLookupState = .lookupInput
+    }
+
+    private func save() async {
+        guard !isSaving else { return }
+        guard canSave else {
+            saveError = "Add the required booking details before saving."
+            return
+        }
         let place = makePlace()
-        HapticManager.success()
         let cost = parsedCost()
-        onSave?(place, cost)
-        dismiss()
+        isSaving = true
+        saveError = nil
+        let didSave = await onSave?(place, cost) ?? true
+        isSaving = false
+        if didSave {
+            HapticManager.success()
+            dismiss()
+        } else {
+            HapticManager.warning()
+            saveError = "Could not save booking. Please try again."
+        }
     }
 
     /// Parsed `(amount, currency)` pair, or `nil` when the user left the
@@ -287,29 +546,38 @@ struct AddBookingView: View {
 
         switch selectedType {
         case .flight:
+            let arrivalForSave = flightArrivalForSave()
+            let verified = verifiedFlightLookup
+            let isVerified = flightLookupState == .verifiedResult && verified != nil
             let details = FlightDetails(
                 airline: flightAirline,
-                flightNumber: flightNumber,
-                departureAirport: flightDepartureAirport,
-                arrivalAirport: flightArrivalAirport,
-                departureTime: flightDepartureDate,
-                arrivalTime: flightArrivalDate,
+                carrierIATA: verified?.carrierIATA ?? normalizedCarrierIATA(),
+                flightNumber: verified?.flightNumber ?? flightNumber,
+                departureAirport: verified?.originAirportIATA ?? flightDepartureAirport,
+                arrivalAirport: verified?.destinationAirportIATA ?? flightArrivalAirport,
+                departureTime: verified?.scheduledDepartureUTC ?? flightDepartureDate,
+                arrivalTime: arrivalForSave,
                 terminal: flightTerminal,
                 gate: flightGate,
-                seat: flightSeat
+                seat: flightSeat,
+                lookupVerified: isVerified,
+                lookupStatus: isVerified ? "verified" : "manual",
+                terminalDestination: verified?.terminalDestination,
+                gateDestination: verified?.gateDestination,
+                baggageClaim: verified?.baggageClaim
             )
             return Place(
                 id: placeId,
                 itineraryDayId: targetDayId,
                 name: flightDisplayName(),
-                address: flightDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                address: (verified?.originAirportIATA ?? flightDepartureAirport).trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 lat: nil,
                 lng: nil,
                 category: "transport",
                 notes: nil,
                 sortOrder: 0,
-                startTime: flightDepartureDate,
-                endTime: flightArrivalDate,
+                startTime: verified?.scheduledDepartureUTC ?? flightDepartureDate,
+                endTime: arrivalForSave,
                 isBooking: true,
                 bookingType: BookingCategory.flight.rawValue,
                 confirmationNumber: confirmation,
@@ -443,7 +711,7 @@ struct AddBookingView: View {
     }
 
     private func flightDisplayName() -> String {
-        let route = "\(flightAirline) \(flightNumber)"
+        let route = "\(normalizedCarrierIATA() ?? flightAirline) \(normalizedFlightNumberDisplay())"
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !route.isEmpty {
             return route
@@ -454,6 +722,44 @@ struct AddBookingView: View {
             return airports
         }
         return "Flight"
+    }
+
+    private func normalizedCarrierIATA() -> String? {
+        let picked = flightCarrierIATA.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if picked.count >= 2 && picked.count <= 3 { return picked }
+        return Self.inferredCarrierIATA(from: flightAirline, flightNumber: flightNumber)
+    }
+
+    private func flightArrivalForSave() -> Date {
+        if let verifiedFlightLookup {
+            return verifiedFlightLookup.scheduledArrivalUTC
+        }
+        if flightLookupState == .manualFallback {
+            return flightArrivalDate
+        }
+        return Calendar.current.date(byAdding: .hour, value: 2, to: flightDepartureDate) ?? flightDepartureDate
+    }
+
+    private func normalizedFlightNumberDisplay() -> String {
+        var raw = flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if let carrier = normalizedCarrierIATA(), raw.hasPrefix(carrier) {
+            raw.removeFirst(carrier.count)
+            raw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return raw
+    }
+
+    private static func inferredCarrierIATA(from airline: String, flightNumber: String) -> String? {
+        if let code = FlightAirlineCatalog.airline(matchingName: airline)?.iataCode {
+            return code
+        }
+        let normalizedFlight = flightNumber
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
+        let prefix = normalizedFlight.prefix { $0.isLetter }
+        guard prefix.count >= 2 && prefix.count <= 3 else { return nil }
+        return String(prefix)
     }
 
     private func transportDisplayName() -> String {
@@ -608,6 +914,20 @@ private struct BookingMapTextRow: View {
     }
 }
 
+private struct BookingSaveErrorBanner: View {
+    let message: String
+
+    var body: some View {
+        Label(message, systemImage: "exclamationmark.triangle.fill")
+            .font(.appSmall.weight(.semibold))
+            .foregroundStyle(AppColors.appError)
+            .padding(AppSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppColors.appError.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+    }
+}
+
 private struct BookingMapDivider: View {
     var body: some View {
         Divider()
@@ -627,6 +947,62 @@ private extension String {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
+}
+
+/// Snapshot of every editable field surfaced by `AddBookingView`. Captured
+/// once after prefill so we can answer "did the user change anything?" with
+/// a single Equatable comparison instead of dozens of bespoke checks.
+private struct BookingFormSnapshot: Equatable {
+    let selectedType: BookingCategory
+    let confirmationNumber: String
+    let costAmountText: String
+    let costCurrency: String
+
+    let flightAirline: String
+    let flightCarrierIATA: String
+    let flightNumber: String
+    let flightDepartureAirport: String
+    let flightArrivalAirport: String
+    let flightDepartureDate: Date
+    let flightArrivalDate: Date
+    let flightTerminal: String
+    let flightGate: String
+    let flightSeat: String
+    let flightLookupState: FlightLookupFormState
+    let verifiedFlightLookup: VerifiedFlightLookup?
+
+    let hotelName: String
+    let hotelCheckIn: Date
+    let hotelCheckOut: Date
+    let hotelRoomType: String
+    let hotelCheckInTime: String
+    let hotelCheckOutTime: String
+
+    let restaurantName: String
+    let restaurantReservationDate: Date
+    let restaurantPartySize: Int
+
+    let carCompany: String
+    let carPickupLocation: String
+    let carDropoffLocation: String
+    let carPickupDate: Date
+    let carDropoffDate: Date
+    let carType: String
+
+    let activityName: String
+    let activityLocation: String
+    let activityDate: Date
+    let activityDuration: String
+    let activityProvider: String
+    let activityTicketNumber: String
+
+    let transportOperator: String
+    let transportServiceNumber: String
+    let transportDepartureStation: String
+    let transportArrivalStation: String
+    let transportDepartureDate: Date
+    let transportArrivalDate: Date
+    let transportSeat: String
 }
 
 // =============================================================================

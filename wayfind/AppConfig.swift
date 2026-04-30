@@ -34,6 +34,26 @@ enum AppConfig {
         !supabaseURL.contains("YOUR_PROJECT")
     }
 
+    // MARK: - Observability
+
+    /// Public Sentry DSN for iOS crash/error reporting. Leave empty in
+    /// local builds until the Sentry project is provisioned.
+    static let sentryDSN: String = ""
+
+    static var isSentryConfigured: Bool {
+        !sentryDSN.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static var sentryEnvironment: String {
+        #if DEBUG
+        return "debug"
+        #else
+        return "production"
+        #endif
+    }
+
+    static let sentryTraceSampleRate: Double = 0.0
+
     /// Build-time toggle for the AI Stay Area picker autocomplete endpoint.
     /// `true` ⇒ Places API (New) — `places.googleapis.com/v1/places:autocomplete`
     /// with explicit `X-Goog-FieldMask`. `false` ⇒ Legacy `/place/autocomplete/json`.

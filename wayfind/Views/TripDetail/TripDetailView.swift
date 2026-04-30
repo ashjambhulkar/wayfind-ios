@@ -396,15 +396,18 @@ struct TripDetailView: View {
                     AddBookingView(
                         editingPlace: place,
                         onSave: { updatedPlace, cost in
-                            Task {
-                                await dataService.updatePlace(updatedPlace)
-                                await viewModel?.loadTripData()
-                                await refreshItineraryPhotoStacks()
-                                await trackBookingExpenseIfNeeded(place: updatedPlace, cost: cost)
+                            guard await dataService.updatePlace(updatedPlace) else {
+                                toastManager.show(ToastData(message: "Could not save booking", type: .error))
+                                return false
                             }
+                            await viewModel?.loadTripData()
+                            await refreshItineraryPhotoStacks()
+                            await trackBookingExpenseIfNeeded(place: updatedPlace, cost: cost)
                             toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: true))
+                            return true
                         },
-                        targetDayId: place.itineraryDayId
+                        targetDayId: place.itineraryDayId,
+                        showsCloseButton: true
                     )
                 }
             } else {
@@ -455,20 +458,26 @@ struct TripDetailView: View {
                 ))
             }
         }
-        .navigationDestination(isPresented: $showAddBooking) {
+        .sheet(isPresented: $showAddBooking) {
             if let vm = viewModel, let targetDayId = vm.scheduledDays.first(where: { $0.dayNumber == addPlaceTargetDay })?.id {
-                AddBookingView(
-                    onSave: { savedPlace, cost in
-                        Task {
+                NavigationStack {
+                    AddBookingView(
+                        onSave: { savedPlace, cost in
+                            guard await dataService.addPlace(savedPlace) else {
+                                toastManager.show(ToastData(message: "Could not save booking", type: .error))
+                                return false
+                            }
                             await vm.loadTripData()
                             await refreshItineraryPhotoStacks()
                             await trackBookingExpenseIfNeeded(place: savedPlace, cost: cost)
-                        }
-                        toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: false))
-                    },
-                    targetDayId: targetDayId
-                )
-                            }
+                            toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: false))
+                            return true
+                        },
+                        targetDayId: targetDayId,
+                        showsCloseButton: true
+                    )
+                }
+            }
         }
         .sheet(isPresented: $showAddPlace) {
             if let vm = viewModel {

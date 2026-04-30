@@ -29,31 +29,10 @@ struct TripNoteEditorView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                TextField("Title", text: $title)
-                    .font(.sectionHeader)
-                    .foregroundStyle(AppColors.textPrimary)
-                    .padding(AppSpacing.md)
-                    .background(AppColors.appSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                            .strokeBorder(AppColors.appDivider, lineWidth: 1)
-                    )
+            VStack(alignment: .leading, spacing: AppSpacing.xl) {
+                noteTitleSection
 
-                Text("Body")
-                    .font(.appCaption)
-                    .foregroundStyle(AppColors.textSecondary)
-                TextField("Write something…", text: $bodyText, axis: .vertical)
-                    .font(.appBody)
-                    .lineLimit(8...24)
-                    .padding(AppSpacing.md)
-                    .background(AppColors.appSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                            .strokeBorder(AppColors.appDivider, lineWidth: 1)
-                    )
+                noteBodySection
             }
             .padding(AppSpacing.lg)
         }
@@ -85,6 +64,58 @@ struct TripNoteEditorView: View {
         }
         .onDisappear {
             Task { await discardEmptyNoteIfNeeded() }
+        }
+    }
+
+    private var noteTitleSection: some View {
+        TripNoteMapSectionCard(title: "Title") {
+            HStack(spacing: AppSpacing.md) {
+                MapStyleIcon(
+                    systemName: "textformat",
+                    size: .small,
+                    accent: AppColors.appPrimary,
+                    accessibilityLabel: "Title"
+                )
+
+                TextField("Give this note a title", text: $title)
+                    .font(.appBody)
+                    .foregroundStyle(AppColors.textPrimary)
+                    .textInputAutocapitalization(.sentences)
+                    .frame(minHeight: TripNoteMapFormMetrics.rowMinHeight)
+            }
+            .padding(.horizontal, AppSpacing.md)
+        }
+    }
+
+    private var noteBodySection: some View {
+        TripNoteMapSectionCard(title: "Note") {
+            HStack(alignment: .top, spacing: AppSpacing.md) {
+                MapStyleIcon(
+                    systemName: "note.text",
+                    size: .small,
+                    accent: AppColors.appPrimary,
+                    accessibilityLabel: "Note body"
+                )
+                .padding(.top, AppSpacing.sm)
+
+                ZStack(alignment: .topLeading) {
+                    if bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Write ideas, links, reminders, or plans for this trip")
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textTertiary)
+                            .padding(.top, AppSpacing.sm)
+                            .allowsHitTesting(false)
+                    }
+
+                    TextField("", text: $bodyText, axis: .vertical)
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textPrimary)
+                        .lineLimit(8...24)
+                }
+            }
+            .padding(.horizontal, AppSpacing.md)
+            .padding(.vertical, AppSpacing.sm)
+            .frame(minHeight: TripNoteMapFormMetrics.bodyMinHeight, alignment: .top)
         }
     }
 
@@ -126,4 +157,35 @@ struct TripNoteEditorView: View {
 
 
 // =============================================================================
+
+private struct TripNoteMapSectionCard<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            FormSectionTitle(title)
+
+            VStack(spacing: 0) {
+                content
+            }
+            .background(AppColors.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            }
+        }
+    }
+}
+
+private enum TripNoteMapFormMetrics {
+    static let rowMinHeight: CGFloat = 56
+    static let bodyMinHeight: CGFloat = 220
+}
 

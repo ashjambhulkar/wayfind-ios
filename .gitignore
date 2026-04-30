@@ -92,3 +92,5 @@ coverage.xccovjson
 
 # Ruby / bundler (if used for fastlane, cocoapods)
 vendor/bundle
+
+.sentryclirc

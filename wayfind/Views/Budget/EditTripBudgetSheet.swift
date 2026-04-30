@@ -26,29 +26,51 @@ struct EditTripBudgetSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                    Text("Set a top-level cap so everyone on the trip can see how spend tracks against the plan.")
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
-
-                    MoneyField(
-                        label: "Total budget",
-                        placeholder: "0",
-                        amountText: $amountText,
-                        currency: $currency
-                    )
+                VStack(alignment: .leading, spacing: AppSpacing.xl) {
+                    BudgetMapSectionCard(title: "Trip Budget") {
+                        BudgetMapAmountRow(
+                            icon: "wallet.pass.fill",
+                            title: "Total Budget",
+                            caption: "Set a shared trip cap everyone can track",
+                            accent: AppColors.appPrimary,
+                            amountText: $amountText,
+                            currency: $currency
+                        )
+                    }
 
                     if trip.totalBudget != nil {
                         Button(role: .destructive) {
                             Task { await clear() }
                         } label: {
-                            Label("Clear cap", systemImage: "trash")
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                                .foregroundStyle(AppColors.appError)
+                            HStack(spacing: AppSpacing.md) {
+                                MapStyleIcon(
+                                    systemName: "trash.fill",
+                                    size: .small,
+                                    accent: AppColors.appError,
+                                    accessibilityLabel: "Clear budget"
+                                )
+
+                                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                                    Text("Clear Budget")
+                                        .font(.appBody)
+                                        .foregroundStyle(AppColors.appError)
+                                    Text("Remove the trip-level cap")
+                                        .font(.appSmall)
+                                        .foregroundStyle(AppColors.textSecondary)
+                                }
+
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, AppSpacing.md)
+                            .frame(minHeight: BudgetMapFormMetrics.rowMinHeight)
+                            .background(AppColors.appSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+                            }
                         }
-                        .buttonStyle(.bordered)
-                        .tint(AppColors.appError.opacity(0.2))
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(AppSpacing.lg)
@@ -104,6 +126,105 @@ struct EditTripBudgetSheet: View {
         NSDecimalRound(&output, &rounded, 2, .plain)
         return "\(output)"
     }
+}
+
+struct BudgetMapSectionCard<Content: View>: View {
+    let title: String?
+    let content: Content
+
+    init(title: String?, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            if let title {
+                FormSectionTitle(title)
+            }
+
+            VStack(spacing: 0) {
+                content
+            }
+            .background(AppColors.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            }
+        }
+    }
+}
+
+struct BudgetMapAmountRow: View {
+    let icon: String
+    let title: String
+    let caption: String
+    let accent: Color
+    @Binding var amountText: String
+    @Binding var currency: String
+
+    var body: some View {
+        HStack(spacing: AppSpacing.md) {
+            MapStyleIcon(
+                systemName: icon,
+                size: .small,
+                accent: accent,
+                accessibilityLabel: title
+            )
+
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                Text(title)
+                    .font(.appBody)
+                    .foregroundStyle(AppColors.textPrimary)
+                Text(caption)
+                    .font(.appSmall)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: AppSpacing.md)
+
+            TextField("0", text: $amountText)
+                .font(.appBody)
+                .foregroundStyle(AppColors.textPrimary)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .onChange(of: amountText) { _, newValue in
+                    amountText = MoneyField.sanitize(newValue)
+                }
+                .frame(minWidth: BudgetMapFormMetrics.amountFieldMinWidth)
+
+            Menu {
+                ForEach(MoneyField.commonCurrencies, id: \.self) { code in
+                    Button(code) { currency = code }
+                }
+            } label: {
+                HStack(spacing: AppSpacing.xs) {
+                    Text(currency.uppercased())
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.appSmall.weight(.semibold))
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+                .padding(.horizontal, AppSpacing.sm)
+                .padding(.vertical, AppSpacing.xs)
+                .background(AppColors.appBackground)
+                .clipShape(Capsule())
+            }
+            .accessibilityLabel("Currency: \(currency.uppercased())")
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .frame(minHeight: BudgetMapFormMetrics.tallRowMinHeight)
+        .contentShape(Rectangle())
+    }
+}
+
+enum BudgetMapFormMetrics {
+    static let rowMinHeight: CGFloat = 56
+    static let tallRowMinHeight: CGFloat = 64
+    static let amountFieldMinWidth: CGFloat = 72
 }
 
 

@@ -58,7 +58,7 @@ const UNSPLASH_HOURLY_BUDGET = Number(
 
 const SEARCH_ENDPOINT = 'search/photos';
 const DOWNLOAD_ENDPOINT = 'photos/download';
-const TARGET_POOL_SIZE = 20;
+const TARGET_POOL_SIZE = 5;
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -238,8 +238,7 @@ async function fetchUnsplashPhotos(
   city: CityProfile
 ): Promise<UnsplashResult[]> {
   const query = [
-    city.city_search_label || city.display_name,
-    city.country_code,
+    city.display_name,
     'travel city landmark skyline',
   ]
     .filter(Boolean)

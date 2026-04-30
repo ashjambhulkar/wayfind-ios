@@ -27,6 +27,7 @@ struct ExpenseReceiptsSection: View {
     /// the parent flushes after `addExpense`.
     let expenseId: UUID?
     let tripId: UUID
+    var accent: Color = AppColors.appPrimary
 
     /// Two-way binding for compose-mode staged receipts. Ignored when
     /// `expenseId != nil`.
@@ -41,19 +42,27 @@ struct ExpenseReceiptsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            HStack {
-                Text("Receipts")
-                    .font(.appCaption)
-                    .foregroundStyle(AppColors.textSecondary)
-                Spacer()
-                if isAtCap {
-                    Text("Max 5")
-                        .font(.caption2)
-                        .foregroundStyle(AppColors.textTertiary)
-                }
-            }
+            FormSectionTitle("Receipts")
 
-            chipRow
+            VStack(spacing: 0) {
+                if !displayItems.isEmpty {
+                    chipRow
+                        .padding(.horizontal, AppSpacing.md)
+                        .padding(.top, AppSpacing.md)
+
+                    Divider()
+                        .background(AppColors.appDivider)
+                        .padding(.leading, AppSpacing.xxxl + AppSpacing.md)
+                }
+
+                receiptActionRow
+            }
+            .background(AppColors.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            }
 
             if let error {
                 Text(error)
@@ -95,15 +104,12 @@ struct ExpenseReceiptsSection: View {
                 ForEach(displayItems) { item in
                     ReceiptChip(item: item, onDelete: { remove(item: item) })
                 }
-                if !isAtCap {
-                    addMenu
-                }
             }
             .padding(.vertical, 2)
         }
     }
 
-    private var addMenu: some View {
+    private var receiptActionRow: some View {
         Menu {
             PhotosPicker(
                 selection: $photoItems,
@@ -119,24 +125,46 @@ struct ExpenseReceiptsSection: View {
                 Label("File", systemImage: "doc.badge.plus")
             }
         } label: {
-            VStack(spacing: 4) {
-                Image(systemName: "plus")
-                    .font(.system(size: 18, weight: .medium))
-                Text("Receipt")
-                    .font(.caption2)
+            HStack(spacing: AppSpacing.md) {
+                MapStyleIcon(
+                    systemName: "doc.badge.plus",
+                    size: .small,
+                    accent: accent,
+                    accessibilityLabel: "Attach receipt"
+                )
+
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text(isAtCap ? "Receipt Limit Reached" : "Attach Receipt")
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textPrimary)
+                    Text(receiptCaption)
+                        .font(.appSmall)
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: AppSpacing.md)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.appSmall.weight(.semibold))
+                    .foregroundStyle(AppColors.textTertiary)
             }
-            .frame(width: 64, height: 64)
-            .foregroundStyle(AppColors.appPrimary)
-            .background(
-                AppColors.appSurface,
-                in: RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                    .strokeBorder(AppColors.appPrimary.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [4]))
-            )
+            .padding(.horizontal, AppSpacing.md)
+            .frame(minHeight: 64)
+            .contentShape(Rectangle())
             .accessibilityLabel("Add receipt")
         }
+        .disabled(isAtCap)
+    }
+
+    private var receiptCaption: String {
+        if isAtCap {
+            return "Maximum of 5 receipts attached"
+        }
+        if currentCount == 0 {
+            return "Add a photo or PDF for reimbursements"
+        }
+        return "\(currentCount) of \(ExpenseAttachmentService.softCap) attached"
     }
 
     // MARK: - Display unification

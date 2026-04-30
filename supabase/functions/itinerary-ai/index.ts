@@ -35,6 +35,12 @@ import {
   logItineraryAiStep,
 } from "../_shared/itinerary_ai_audit_log.ts";
 import {
+  captureException,
+  errorMessage,
+  initSentry,
+  safeLog,
+} from "../_shared/observability.ts";
+import {
   ALLOWED_EXPLORATION_SCOPES,
   computeAdaptivePickRange,
   V2B_DEFAULT_EXPLORATION_SCOPE,
@@ -45,6 +51,7 @@ import {
 import { openaiItineraryModel } from "../_shared/openai_itinerary_models.ts";
 
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+const FUNCTION_NAME = "itinerary-ai";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -701,9 +708,20 @@ async function sha256Hex(s: string): Promise<string> {
 }
 
 function logGoogleApiCall(api: string, key: string, status: string): void {
-  console.log(`[GoogleAPI] ${api} | key=${key} | ${status}`);
+  safeLog("info", FUNCTION_NAME, "google_api_call", {
+    api,
+    status,
+    lookup_scope: classifyUsageKey(key),
+  });
   // Fire-and-forget — never await, never block the caller.
   void recordPlacesUsageEvent(api, key, status);
+}
+
+function classifyUsageKey(key: string): string {
+  if (key.includes("|")) return "route";
+  if (/^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(key)) return "coordinate";
+  if (key.length >= 20 && /^[A-Za-z0-9_-]+$/.test(key)) return "place_id";
+  return "query";
 }
 
 const VALID_TRAVEL_MODES = new Set([
@@ -1245,6 +1263,8 @@ async function recomputeLegsForTrip(
 }
 
 serve(async (req: Request) => {
+  initSentry();
+
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -2868,14 +2888,30 @@ serve(async (req: Request) => {
       200,
     );
   } catch (e) {
-    console.error("[itinerary-ai]", e);
-    const msg = e instanceof Error ? e.message : "Internal error";
+    const msg = errorMessage(e) || "Internal error";
+    safeLog("error", FUNCTION_NAME, "handler_exception", {
+      trace_id: audit.trace_id,
+      user_id: audit.user_id,
+      trip_id: audit.trip_id,
+      action: audit.action,
+      error: msg,
+    });
     logItineraryAiStep(
       audit.trace_id,
       "journey_handler_exception",
       { message: msg },
       "error",
     );
+    await captureException(e, {
+      fn: FUNCTION_NAME,
+      reason: "handler_exception",
+      fields: {
+        trace_id: audit.trace_id,
+        user_id: audit.user_id,
+        trip_id: audit.trip_id,
+        action: audit.action,
+      },
+    });
     return jsonResponseWithAudit(audit, { error: msg }, 500, CORS_HEADERS);
   }
 });

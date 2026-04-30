@@ -103,6 +103,7 @@ struct WayfindApp: App {
                 // user id to RevenueCat. This task path covers it.
                 if case .signedIn = authViewModel.authState,
                    let session = await AuthSessionService.shared.currentSession() {
+                    ObservabilityService.setUser(id: session.user.id)
                     await EntitlementService.shared.bind(userId: session.user.id)
                 }
             }
@@ -127,6 +128,11 @@ struct WayfindApp: App {
             .onChange(of: authViewModel.authState) { _, newState in
                 switch newState {
                 case .signedIn:
+                    ObservabilityService.breadcrumb(
+                        "signed_in",
+                        category: "auth",
+                        context: ["restored": true]
+                    )
                     // Drain any invite token stashed before sign-in so
                     // the join sheet can fire on this same session.
                     if pendingInviteToken == nil, let stored = PendingInviteStorage.get() {
@@ -139,10 +145,13 @@ struct WayfindApp: App {
                     // wizard's "X of 3 free remaining" badge reads.
                     Task { @MainActor in
                         if let session = await AuthSessionService.shared.currentSession() {
+                            ObservabilityService.setUser(id: session.user.id)
                             await EntitlementService.shared.bind(userId: session.user.id)
                         }
                     }
                 case .signedOut:
+                    ObservabilityService.breadcrumb("signed_out", category: "auth")
+                    ObservabilityService.clearUser()
                     // Drop the RevenueCat appUserID back to anonymous
                     // so the next account on this shared device starts
                     // clean instead of inheriting the previous user's

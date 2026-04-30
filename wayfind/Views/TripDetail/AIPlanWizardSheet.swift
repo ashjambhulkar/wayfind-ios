@@ -325,19 +325,17 @@ struct AIPlanWizardSheet: View {
 
     private var configuratorHero: some View {
         VStack(spacing: AppSpacing.sm) {
-            ZStack {
-                Circle()
-                    .fill(AppColors.appPrimaryLight)
-                    .frame(width: 56, height: 56)
-                Image(systemName: "sparkles")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(AppColors.appPrimary)
-            }
+            MapStyleIcon(
+                systemName: "sparkles",
+                size: .large,
+                accent: AppColors.appPrimary,
+                accessibilityLabel: "AI planner"
+            )
             Text("Build your perfect day")
-                .font(.title3.weight(.semibold))
+                .font(.sectionHeader)
                 .foregroundStyle(AppColors.textPrimary)
             Text("Pick a day and area, tweak preferences, and we'll craft a personalised itinerary.")
-                .font(.subheadline)
+                .font(.appBody)
                 .foregroundStyle(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -364,13 +362,13 @@ struct AIPlanWizardSheet: View {
             if isPro {
                 HStack(spacing: 4) {
                     Image(systemName: "infinity")
-                        .font(.caption2.weight(.semibold))
+                        .font(.appSmall.weight(.semibold))
                     Text(label)
-                        .font(.caption.weight(.semibold))
+                        .font(.appCaption.weight(.semibold))
                 }
                 .foregroundStyle(AppColors.appPrimary)
                 .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, 4)
+                .padding(.vertical, AppSpacing.xs)
                 .background(AppColors.appPrimaryLight, in: Capsule())
             } else {
                 Button {
@@ -378,30 +376,35 @@ struct AIPlanWizardSheet: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "sparkles")
-                            .font(.caption2.weight(.semibold))
+                            .font(.appSmall.weight(.semibold))
                         Text(label)
-                            .font(.caption.weight(.semibold))
+                            .font(.appCaption.weight(.semibold))
                         Image(systemName: "chevron.right")
-                            .font(.caption2)
+                            .font(.appSmall)
                     }
                     .foregroundStyle(AppColors.appPrimary)
                     .padding(.horizontal, AppSpacing.sm)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, AppSpacing.xs)
                     .background(AppColors.appPrimaryLight, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Upgrade to Pro for unlimited AI day plans")
             }
         }
-        .padding(.top, 4)
+        .padding(.top, AppSpacing.xs)
     }
 
     private func inlineError(_ message: String) -> some View {
         HStack(alignment: .top, spacing: AppSpacing.sm) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(AppColors.appError)
+            MapStyleIcon(
+                systemName: "exclamationmark.circle.fill",
+                size: .small,
+                accent: AppColors.appError,
+                backgroundStyle: .soft,
+                accessibilityLabel: "Error"
+            )
             Text(message)
-                .font(.caption)
+                .font(.appCaption)
                 .foregroundStyle(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -449,32 +452,37 @@ struct AIPlanWizardSheet: View {
 
     private var previewHeader: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .top, spacing: AppSpacing.md) {
+                MapStyleIcon(
+                    systemName: "sparkles",
+                    accent: AppColors.appPrimary,
+                    accessibilityLabel: "AI plan preview"
+                )
                 VStack(alignment: .leading, spacing: 2) {
                     if let title = vm.previewStoryTitle, !title.isEmpty {
                         Text(title)
-                            .font(.title3.weight(.semibold))
+                            .font(.sectionHeader)
                             .foregroundStyle(AppColors.textPrimary)
                     } else {
                         Text("Your day plan")
-                            .font(.title3.weight(.semibold))
+                            .font(.sectionHeader)
                             .foregroundStyle(AppColors.textPrimary)
                     }
                     HStack(spacing: AppSpacing.xs) {
                         Image(systemName: "sparkles")
-                            .font(.caption2)
+                            .font(.appSmall)
                             .foregroundStyle(AppColors.appPrimary)
                         // Frames the result as a committed artifact + a
                         // priced one. Loss-aversion does the heavy work:
                         // users intuitively don't want to throw away
                         // something labeled as having cost a credit.
                         Text("AI-generated · \(vm.previewCards.count) \(vm.previewCards.count == 1 ? "stop" : "stops") · 1 credit used")
-                            .font(.caption.weight(.medium))
+                            .font(.appCaption.weight(.medium))
                             .foregroundStyle(AppColors.textSecondary)
                     }
                     if let day = vm.selectedDay {
                         Text(vm.dayLabel(for: day))
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundStyle(AppColors.textTertiary)
                     }
                 }
@@ -483,7 +491,7 @@ struct AIPlanWizardSheet: View {
                     vm.reset()
                 } label: {
                     Label("Edit", systemImage: "slider.horizontal.3")
-                        .font(.caption.weight(.semibold))
+                        .font(.appCaption.weight(.semibold))
                         .foregroundStyle(AppColors.appPrimary)
                 }
                 .buttonStyle(.plain)
@@ -495,10 +503,10 @@ struct AIPlanWizardSheet: View {
                     HStack(spacing: AppSpacing.xs) {
                         ForEach(vm.previewStoryArc.prefix(5), id: \.self) { arc in
                             Text(arc)
-                                .font(.caption2.weight(.medium))
+                                .font(.appSmall.weight(.medium))
                                 .foregroundStyle(AppColors.appPrimary)
                                 .padding(.horizontal, AppSpacing.sm)
-                                .padding(.vertical, 3)
+                                .padding(.vertical, AppSpacing.xs)
                                 .background(AppColors.appPrimaryLight)
                                 .clipShape(Capsule())
                         }
@@ -508,12 +516,12 @@ struct AIPlanWizardSheet: View {
 
             if let subtitle = vm.previewStorySubtitle, !subtitle.isEmpty {
                 Text(subtitle)
-                    .font(.subheadline)
+                    .font(.appBody)
                     .foregroundStyle(AppColors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if !vm.previewSummary.isEmpty {
                 Text(vm.previewSummary)
-                    .font(.subheadline)
+                    .font(.appBody)
                     .foregroundStyle(AppColors.textSecondary)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -536,14 +544,18 @@ struct AIPlanWizardSheet: View {
     /// switch to "Adjust Settings" to send them back to the configurator.
     private var emptyPreviewState: some View {
         VStack(spacing: AppSpacing.md) {
-            Image(systemName: "sparkles.slash")
-                .font(.system(size: 36))
-                .foregroundStyle(AppColors.textTertiary)
+            MapStyleIcon(
+                systemName: "sparkles.slash",
+                size: .large,
+                accent: AppColors.textTertiary,
+                backgroundStyle: .surface,
+                accessibilityLabel: "No AI suggestions"
+            )
             Text("No suggestions for this day")
-                .font(.headline)
+                .font(.cardTitle.weight(.semibold))
                 .foregroundStyle(AppColors.textPrimary)
             Text("Try widening the day window, picking a broader range, or removing some interests.")
-                .font(.subheadline)
+                .font(.appBody)
                 .foregroundStyle(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -600,11 +612,11 @@ private struct AIPlanWizardBottomBar: View {
                 Button(action: onGenerate) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.counterclockwise")
-                            .font(.caption.weight(.semibold))
+                            .font(.appCaption.weight(.semibold))
                         Text("Redo")
-                            .font(.caption.weight(.semibold))
+                            .font(.appCaption.weight(.semibold))
                         Text("· uses 1 credit")
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundStyle(AppColors.textTertiary)
                     }
                     .foregroundStyle(AppColors.appPrimary)
@@ -674,9 +686,9 @@ private struct AIPlanWizardBottomBar: View {
         Button(action: action) {
             HStack(spacing: AppSpacing.sm) {
                 Image(systemName: icon)
-                    .font(tall ? .body.weight(.semibold) : .subheadline.weight(.semibold))
+                    .font(.appBody.weight(.semibold))
                 Text(title)
-                    .font(tall ? .body.weight(.semibold) : .subheadline.weight(.semibold))
+                    .font(.appBody.weight(.semibold))
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
@@ -693,7 +705,7 @@ private struct AIPlanWizardBottomBar: View {
             HStack(spacing: AppSpacing.sm) {
                 Image(systemName: icon)
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.appBody.weight(.semibold))
             }
             .foregroundStyle(AppColors.appPrimary)
             .frame(maxWidth: .infinity)
@@ -707,7 +719,7 @@ private struct AIPlanWizardBottomBar: View {
         HStack(spacing: AppSpacing.sm) {
             ProgressView().tint(.white).scaleEffect(0.85)
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(.appBody.weight(.semibold))
         }
         .foregroundStyle(.white)
         .frame(maxWidth: .infinity)
@@ -734,7 +746,11 @@ private struct SettingsCard<Content: View>: View {
         .padding(.vertical, AppSpacing.md)
         .background(AppColors.appSurface)
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large))
-        .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: AppCornerRadius.large)
+                .strokeBorder(AppColors.appDivider.opacity(0.85), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 3)
     }
 }
 
@@ -754,12 +770,20 @@ private struct DayPickerRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Which day?")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(AppColors.textPrimary)
+            HStack(spacing: AppSpacing.sm) {
+                MapStyleIcon(
+                    systemName: "calendar",
+                    size: .small,
+                    accent: AppColors.appPrimary,
+                    accessibilityLabel: "Trip day"
+                )
+                Text("Which day?")
+                    .font(.appBody.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+            }
             if vm.scheduledDays.isEmpty {
                 Text("No days found for this trip.")
-                    .font(.caption)
+                    .font(.appCaption)
                     .foregroundStyle(AppColors.textTertiary)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -778,7 +802,7 @@ private struct DayPickerRow: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 1)
+                    .padding(.horizontal, AppSpacing.xs)
                 }
             }
         }
@@ -796,7 +820,7 @@ private struct DayChip: View {
     var body: some View {
         Button(action: action) {
             Text(label)
-                .font(.caption.weight(isSelected ? .semibold : .regular))
+                .font(.appCaption.weight(isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? .white : AppColors.textSecondary)
                 .padding(.horizontal, AppSpacing.md)
                 .padding(.vertical, AppSpacing.sm)
@@ -823,23 +847,25 @@ private struct StayAreaRow: View {
             Button(action: onTap) {
                 HStack(spacing: AppSpacing.md) {
                     HStack(spacing: AppSpacing.sm) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 14))
-                            .foregroundStyle(AppColors.appPrimary)
-                            .frame(width: 20)
+                        MapStyleIcon(
+                            systemName: "mappin.and.ellipse",
+                            size: .small,
+                            accent: AppColors.appPrimary,
+                            accessibilityLabel: "Stay area"
+                        )
                         Text("Stay area")
-                            .font(.subheadline.weight(.medium))
+                            .font(.appBody.weight(.semibold))
                             .foregroundStyle(AppColors.textPrimary)
                     }
                     .layoutPriority(1)
                     Spacer(minLength: AppSpacing.sm)
                     Text(displayLabel)
-                        .font(.subheadline)
+                        .font(.appBody)
                         .foregroundStyle(displayLabel == "Choose area" ? AppColors.textTertiary : AppColors.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.appSmall.weight(.semibold))
                         .foregroundStyle(AppColors.textTertiary)
                 }
                 .contentShape(Rectangle())
@@ -849,10 +875,10 @@ private struct StayAreaRow: View {
             if needsPlaceId {
                 HStack(alignment: .center, spacing: AppSpacing.xs) {
                     Image(systemName: "info.circle.fill")
-                        .font(.caption2)
+                        .font(.appSmall)
                         .foregroundStyle(AppColors.appWarning)
                     Text("Pick a neighborhood or lodging area to start.")
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundStyle(AppColors.textSecondary)
                 }
                 .padding(.horizontal, AppSpacing.sm)
@@ -878,12 +904,14 @@ private struct PacePickerRow: View {
     var body: some View {
         HStack {
             HStack(spacing: AppSpacing.sm) {
-                Image(systemName: "gauge.with.dots.needle.33percent")
-                    .font(.system(size: 14))
-                    .foregroundStyle(AppColors.appPrimary)
-                    .frame(width: 20)
+                MapStyleIcon(
+                    systemName: "gauge.with.dots.needle.33percent",
+                    size: .small,
+                    accent: AppColors.appPrimary,
+                    accessibilityLabel: "Pace"
+                )
                 Text("Pace")
-                    .font(.subheadline.weight(.medium))
+                    .font(.appBody.weight(.semibold))
                     .foregroundStyle(AppColors.textPrimary)
             }
             Spacer()
@@ -912,12 +940,14 @@ private struct TimeWindowRow: View {
         VStack(spacing: AppSpacing.sm) {
             HStack {
                 HStack(spacing: AppSpacing.sm) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 14))
-                        .foregroundStyle(AppColors.appPrimary)
-                        .frame(width: 20)
+                    MapStyleIcon(
+                        systemName: "clock",
+                        size: .small,
+                        accent: AppColors.appPrimary,
+                        accessibilityLabel: "Day window"
+                    )
                     Text("Day window")
-                        .font(.subheadline.weight(.medium))
+                        .font(.appBody.weight(.semibold))
                         .foregroundStyle(AppColors.textPrimary)
                 }
                 Spacer()
@@ -925,7 +955,7 @@ private struct TimeWindowRow: View {
             HStack(spacing: AppSpacing.xl) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Start")
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundStyle(AppColors.textTertiary)
                     DatePicker("Start", selection: $startDate, displayedComponents: .hourAndMinute)
                         .labelsHidden()
@@ -936,7 +966,7 @@ private struct TimeWindowRow: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("End")
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundStyle(AppColors.textTertiary)
                     DatePicker("End", selection: $endDate, displayedComponents: .hourAndMinute)
                         .labelsHidden()
@@ -979,12 +1009,14 @@ private struct ExplorationScopeRow: View {
     var body: some View {
         HStack {
             HStack(spacing: AppSpacing.sm) {
-                Image(systemName: "map")
-                    .font(.system(size: 14))
-                    .foregroundStyle(AppColors.appPrimary)
-                    .frame(width: 20)
+                MapStyleIcon(
+                    systemName: "map",
+                    size: .small,
+                    accent: AppColors.appPrimary,
+                    accessibilityLabel: "Range"
+                )
                 Text("Range")
-                    .font(.subheadline.weight(.medium))
+                    .font(.appBody.weight(.semibold))
                     .foregroundStyle(AppColors.textPrimary)
             }
             Spacer()
@@ -1008,12 +1040,14 @@ private struct MealsToggleRow: View {
     var body: some View {
         Toggle(isOn: $isOn) {
             HStack(spacing: AppSpacing.sm) {
-                Image(systemName: "fork.knife")
-                    .font(.system(size: 14))
-                    .foregroundStyle(AppColors.appPrimary)
-                    .frame(width: 20)
+                MapStyleIcon(
+                    systemName: "fork.knife",
+                    size: .small,
+                    accent: AppColors.appPrimary,
+                    accessibilityLabel: "Meals"
+                )
                 Text("Include meals")
-                    .font(.subheadline.weight(.medium))
+                    .font(.appBody.weight(.semibold))
                     .foregroundStyle(AppColors.textPrimary)
             }
         }
@@ -1031,9 +1065,17 @@ private struct InterestsRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Label("Interests (optional)", systemImage: "heart")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(AppColors.textPrimary)
+            HStack(spacing: AppSpacing.sm) {
+                MapStyleIcon(
+                    systemName: "heart",
+                    size: .small,
+                    accent: AppColors.appPrimary,
+                    accessibilityLabel: "Interests"
+                )
+                Text("Interests (optional)")
+                    .font(.appBody.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+            }
             FlowLayout(spacing: AppSpacing.sm) {
                 ForEach(available, id: \.self) { interest in
                     let isOn = selectedInterests.contains(interest)
@@ -1045,10 +1087,10 @@ private struct InterestsRow: View {
                         }
                     } label: {
                         Text(displayName(interest))
-                            .font(.caption.weight(isOn ? .semibold : .regular))
+                            .font(.appCaption.weight(isOn ? .semibold : .regular))
                             .foregroundStyle(isOn ? AppColors.appPrimary : AppColors.textSecondary)
                             .padding(.horizontal, AppSpacing.md)
-                            .padding(.vertical, AppSpacing.sm - 2)
+                            .padding(.vertical, AppSpacing.xs)
                             .background(isOn ? AppColors.appPrimaryLight : AppColors.appSurface)
                             .clipShape(Capsule())
                             .overlay(
@@ -1128,43 +1170,40 @@ private struct PreviewActivityCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: AppSpacing.md) {
-            ZStack {
-                Circle()
-                    .fill(category.family.tint)
-                    .frame(width: 40, height: 40)
-                Image(systemName: category.sfSymbol)
-                    .font(.system(size: 16))
-                    .foregroundStyle(category.color)
-            }
+            MapStyleIcon(
+                systemName: category.sfSymbol,
+                accent: category.color,
+                accessibilityLabel: category.label
+            )
 
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 HStack(spacing: AppSpacing.sm) {
                     if let phase = card.phaseLabel {
                         Text(phase.uppercased())
-                            .font(.caption2.weight(.semibold))
+                            .font(.appSmall.weight(.semibold))
                             .foregroundStyle(AppColors.textTertiary)
                             .kerning(0.5)
                     }
                     Spacer()
                     if let time = formatTime(card.startsAt) {
                         Text(time)
-                            .font(.caption.weight(.medium))
+                            .font(.appCaption.weight(.medium))
                             .foregroundStyle(AppColors.textSecondary)
                     }
                     if let dur = card.durationMinutes {
                         Text("· \(dur)min")
-                            .font(.caption)
+                            .font(.appCaption)
                             .foregroundStyle(AppColors.textTertiary)
                     }
                 }
 
                 Text(card.name)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.appBody.weight(.semibold))
                     .foregroundStyle(AppColors.textPrimary)
 
                 if let desc = card.momentLine ?? card.description, !desc.isEmpty {
                     Text(desc)
-                        .font(.caption)
+                        .font(.appCaption)
                         .foregroundStyle(AppColors.textSecondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1190,10 +1229,10 @@ private struct PreviewActivityCard: View {
                         ForEach(card.tips.prefix(2), id: \.self) { tip in
                             HStack(spacing: AppSpacing.xs) {
                                 Image(systemName: "lightbulb.min")
-                                    .font(.caption2)
+                                    .font(.appSmall)
                                     .foregroundStyle(AppColors.appWarning)
                                 Text(tip)
-                                    .font(.caption)
+                                    .font(.appCaption)
                                     .foregroundStyle(AppColors.textSecondary)
                             }
                         }
@@ -1206,16 +1245,16 @@ private struct PreviewActivityCard: View {
                         if let rating = card.rating {
                             HStack(spacing: 3) {
                                 Image(systemName: "star.fill")
-                                    .font(.caption2)
+                                    .font(.appSmall)
                                     .foregroundStyle(AppColors.appWarning)
                                 Text(String(format: "%.1f", rating))
-                                    .font(.caption)
+                                    .font(.appCaption)
                                     .foregroundStyle(AppColors.textSecondary)
                             }
                         }
                         if let price = card.priceLevel {
                             Text(String(repeating: "$", count: price))
-                                .font(.caption)
+                                .font(.appCaption)
                                 .foregroundStyle(AppColors.textTertiary)
                         }
                     }
@@ -1227,8 +1266,17 @@ private struct PreviewActivityCard: View {
         .background(
             // Subtle highlight when this card is the one focused on the
             // map. Keeps the visual link bidirectional.
-            isSelected ? AppColors.appPrimaryLight.opacity(0.5) : Color.clear
+            isSelected ? AppColors.appPrimaryLight.opacity(0.55) : AppColors.appSurface
         )
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppCornerRadius.large)
+                .strokeBorder(
+                    isSelected ? AppColors.appPrimary.opacity(0.35) : AppColors.appDivider.opacity(0.85),
+                    lineWidth: 0.5
+                )
+        )
+        .padding(.horizontal, AppSpacing.lg)
         .animation(.easeInOut(duration: 0.2), value: isSelected)
     }
 }
@@ -1239,18 +1287,32 @@ private struct TravelConnectorView: View {
     let minutes: Int?
 
     var body: some View {
-        HStack(spacing: AppSpacing.sm) {
-            Rectangle()
-                .fill(AppColors.appDivider)
-                .frame(width: 1, height: 20)
-                .padding(.leading, 59)
-            if let min = minutes, min > 0 {
-                Text("\(min) min")
-                    .font(.caption2)
-                    .foregroundStyle(AppColors.textTertiary)
+        HStack {
+            Spacer(minLength: 0)
+            HStack(spacing: AppSpacing.xs) {
+                Image(systemName: "figure.walk")
+                    .font(.appSmall.weight(.semibold))
+                Text(travelLabel)
+                    .font(.appSmall)
+            }
+            .foregroundStyle(AppColors.textTertiary)
+            .padding(.horizontal, AppSpacing.sm)
+            .padding(.vertical, AppSpacing.xs)
+            .background(AppColors.appSurface)
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(AppColors.appDivider.opacity(0.85), lineWidth: 0.5)
             }
             Spacer()
         }
-        .padding(.leading, AppSpacing.lg)
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private var travelLabel: String {
+        if let minutes, minutes > 0 {
+            return "\(minutes) min"
+        }
+        return "Travel"
     }
 }

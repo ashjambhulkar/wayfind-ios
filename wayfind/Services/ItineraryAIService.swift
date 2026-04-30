@@ -99,9 +99,22 @@ struct ItineraryAIService {
         let encoder = JSONEncoder()
         request.httpBody = try encoder.encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            ObservabilityService.capture(
+                error: error,
+                domain: "itinerary_ai",
+                reason: "network_request_failed",
+                context: ["function": Self.functionName]
+            )
+            throw error
+        }
 
         if let http = response as? HTTPURLResponse {
+            let traceId = http.value(forHTTPHeaderField: "X-Trace-Id")
             switch http.statusCode {
             case 200, 201:
                 break
@@ -128,6 +141,16 @@ struct ItineraryAIService {
                 throw ItineraryAIError.quotaExceeded
             default:
                 let msg = extractErrorMessage(from: data) ?? "Server error \(http.statusCode)"
+                ObservabilityService.captureMessage(
+                    "itinerary-ai returned an unexpected status",
+                    domain: "itinerary_ai",
+                    reason: "unexpected_http_status",
+                    context: [
+                        "function": Self.functionName,
+                        "http_status": http.statusCode,
+                        "trace_id": traceId ?? extractTraceId(from: data) ?? "",
+                    ]
+                )
                 throw ItineraryAIError.serverError(msg)
             }
         }
@@ -142,6 +165,13 @@ struct ItineraryAIService {
         return json["error"] as? String ?? json["detail"] as? String
     }
 
+    private func extractTraceId(from data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json["trace_id"] as? String
+    }
+
     private func decodeOrThrow<T: Decodable>(_ data: Data) throws -> T {
         let decoder = JSONDecoder()
         do {
@@ -154,6 +184,12 @@ struct ItineraryAIService {
         } catch let aiError as ItineraryAIError {
             throw aiError
         } catch {
+            ObservabilityService.capture(
+                error: error,
+                domain: "itinerary_ai",
+                reason: "decode_failed",
+                context: ["function": Self.functionName]
+            )
             let preview = String(data: data.prefix(300), encoding: .utf8) ?? "<binary>"
             throw ItineraryAIError.decodingError("\(error.localizedDescription) — \(preview)")
         }

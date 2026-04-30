@@ -100,6 +100,17 @@ final class DataService {
         return await mock!.fetchPlaces(for: dayId)
     }
 
+    func fetchBookings(for tripId: UUID) async -> [Place] {
+        if let real { return (try? await real.fetchBookings(for: tripId)) ?? [] }
+        let days = await mock!.fetchDays(for: tripId)
+        var bookings: [Place] = []
+        for day in days {
+            let places = await mock!.fetchPlaces(for: day.id)
+            bookings.append(contentsOf: places.filter(\.isBooking))
+        }
+        return bookings
+    }
+
     @discardableResult
     func addTrip(_ trip: Trip) async -> Trip {
         if let real {
@@ -114,9 +125,21 @@ final class DataService {
         else { await mock!.deleteTrip(id: id) }
     }
 
-    func addPlace(_ place: Place) async {
-        if let real { try? await real.addPlace(place) }
-        else { await mock!.addPlace(place) }
+    @discardableResult
+    func addPlace(_ place: Place) async -> Bool {
+        if let real {
+            do {
+                try await real.addPlace(place)
+                return true
+            } catch {
+                #if DEBUG
+                print("[DataService] addPlace failed: \(error)")
+                #endif
+                return false
+            }
+        }
+        await mock!.addPlace(place)
+        return true
     }
 
     func deletePlace(id: UUID) async {
@@ -124,9 +147,21 @@ final class DataService {
         else { await mock!.deletePlace(id: id) }
     }
 
-    func updatePlace(_ place: Place) async {
-        if let real { try? await real.updatePlace(place) }
-        else { await mock!.updatePlace(place) }
+    @discardableResult
+    func updatePlace(_ place: Place) async -> Bool {
+        if let real {
+            do {
+                try await real.updatePlace(place)
+                return true
+            } catch {
+                #if DEBUG
+                print("[DataService] updatePlace failed: \(error)")
+                #endif
+                return false
+            }
+        }
+        await mock!.updatePlace(place)
+        return true
     }
 
     func movePlace(placeId: UUID, toDayId: UUID) async {

@@ -1,5 +1,14 @@
 import SwiftUI
 
+private struct AddBookingRoute: Identifiable, Hashable {
+    let category: BookingCategory
+    let targetDayId: UUID
+
+    var id: String {
+        "\(category.rawValue)-\(targetDayId.uuidString)"
+    }
+}
+
 struct BookingsScreenView: View {
     @Environment(DataService.self) var dataService
     @Environment(ToastManager.self) private var toastManager
@@ -16,8 +25,7 @@ struct BookingsScreenView: View {
     @State private var bookingToEdit: Place?
     @State private var pendingUndo: Place?
     @State private var undoTask: Task<Void, Never>?
-    @State private var addBookingCategory: BookingCategory?
-    @State private var addBookingTargetDayId: UUID?
+    @State private var addBookingRoute: AddBookingRoute?
 
     private var groupedBookings: [(category: BookingCategory, places: [Place])] {
         BookingCategory.allCases.compactMap { category in
@@ -90,59 +98,56 @@ struct BookingsScreenView: View {
         .navigationTitle("Bookings")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    ForEach(BookingCategory.allCases) { category in
-                        Button {
-                            openAddBooking(for: category)
-                        } label: {
-                            Label {
-                                Text(category.label)
-                            } icon: {
-                                Image(systemName: category.sfSymbol)
-                                    .symbolRenderingMode(.palette)
-                                    .foregroundStyle(category.color)
-                            }
-                        }
+            ToolbarItemGroup(placement: .bottomBar) {
+                ForEach(BookingCategory.allCases) { category in
+                    Button {
+                        Task { await openAddBooking(for: category) }
+                    } label: {
+                        Label("Add \(category.label)", systemImage: category.sfSymbol)
                     }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(AppColors.appPrimary)
+                    .tint(AppColors.textPrimary)
                 }
-                .accessibilityLabel("Add a booking")
             }
         }
         .animation(AppSpring.smooth, value: pendingUndo != nil)
         .task {
             await loadBookings()
         }
-        .navigationDestination(item: $addBookingCategory) { category in
-            AddBookingView(
-                initialType: category,
-                onSave: { savedPlace, cost in
-                    Task {
+        .sheet(item: $addBookingRoute) { route in
+            NavigationStack {
+                AddBookingView(
+                    initialType: route.category,
+                    onSave: { savedPlace, cost in
+                        guard await dataService.addPlace(savedPlace) else {
+                            toastManager.show(ToastData(message: "Could not save booking", type: .error))
+                            return false
+                        }
                         await loadBookings()
                         await trackBookingExpenseIfNeeded(place: savedPlace, cost: cost)
-                    }
-                    toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: false))
-                },
-                targetDayId: addBookingTargetDayId ?? UUID()
-            )
+                        toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: false))
+                        return true
+                    },
+                    targetDayId: route.targetDayId,
+                    showsCloseButton: true
+                )
+            }
         }
         .sheet(item: $bookingToEdit) { place in
             NavigationStack {
                 AddBookingView(
                     editingPlace: place,
                     onSave: { updated, cost in
-                        Task {
-                            await dataService.updatePlace(updated)
-                            await loadBookings()
-                            await trackBookingExpenseIfNeeded(place: updated, cost: cost)
+                        guard await dataService.updatePlace(updated) else {
+                            toastManager.show(ToastData(message: "Could not save booking", type: .error))
+                            return false
                         }
+                        await loadBookings()
+                        await trackBookingExpenseIfNeeded(place: updated, cost: cost)
                         toastManager.show(makeBookingSavedToast(cost: cost, isUpdate: true))
+                        return true
                     },
-                    targetDayId: place.itineraryDayId
+                    targetDayId: place.itineraryDayId,
+                    showsCloseButton: true
                 )
             }
         }
@@ -247,21 +252,32 @@ struct BookingsScreenView: View {
     }
 
     private func loadBookings() async {
-        let days = await dataService.fetchDays(for: trip.id)
-        if addBookingTargetDayId == nil {
-            addBookingTargetDayId = days.filter { !$0.isWishlist }.sorted { $0.dayNumber < $1.dayNumber }.first?.id
-        }
-        var collected: [Place] = []
-        for day in days {
-            let places = await dataService.fetchPlaces(for: day.id)
-            collected.append(contentsOf: places.filter(\.isBooking))
-        }
-        allBookings = collected
+        let bookings = await dataService.fetchBookings(for: trip.id)
+        allBookings = bookings
     }
 
-    private func openAddBooking(for category: BookingCategory) {
+    @MainActor
+    private func openAddBooking(for category: BookingCategory) async {
+        guard let targetDayId = await resolvedAddBookingTargetDayId() else {
+            toastManager.show(ToastData(message: "Could not load trip days", type: .error))
+            return
+        }
         HapticManager.light()
-        addBookingCategory = category
+        addBookingRoute = AddBookingRoute(category: category, targetDayId: targetDayId)
+    }
+
+    private func resolvedAddBookingTargetDayId() async -> UUID? {
+        var days = await dataService.fetchDays(for: trip.id)
+        if days.filter({ !$0.isWishlist }).isEmpty {
+            await dataService.regenerateDays(for: trip.id, startDate: trip.startDate, endDate: trip.endDate)
+            days = await dataService.fetchDays(for: trip.id)
+        }
+
+        return days
+            .filter { !$0.isWishlist }
+            .sorted { $0.dayNumber < $1.dayNumber }
+            .first?
+            .id
     }
 
     private func deleteBooking(_ place: Place) {

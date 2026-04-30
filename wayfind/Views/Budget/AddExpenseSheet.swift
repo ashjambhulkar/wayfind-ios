@@ -36,6 +36,7 @@ struct AddExpenseSheet: View {
     @State private var splits: [ExpenseSplit] = []
     @State private var detent: PresentationDetent = .medium
     @State private var showSplitEditor = false
+    @State private var isNotesExpanded = false
     /// Wave 1.3 — receipts staged before the expense exists. After save
     /// they're flushed to `trip_expense_attachments` via the shared
     /// BackgroundUploader.
@@ -53,84 +54,22 @@ struct AddExpenseSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                    MoneyField(
-                        label: "Amount",
-                        placeholder: "0",
-                        amountText: $amountText,
-                        currency: $currency
-                    )
-                    .focused($amountFieldFocused)
+                VStack(alignment: .leading, spacing: AppSpacing.xl) {
+                    expenseDetailsSection
 
-                    FormField(
-                        label: "Description *",
-                        placeholder: "Dinner at Bar Tartine",
-                        text: $title
-                    )
-
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        Text("Category")
-                            .font(.appCaption)
-                            .foregroundStyle(AppColors.textSecondary)
-                        ExpenseCategoryGrid(selection: $category)
-                    }
+                    categorySection
 
                     ExpenseReceiptsSection(
                         expenseId: editingExpense?.id,
                         tripId: trip.id,
+                        accent: category.accentColor,
                         stagedReceipts: $stagedReceipts
                     )
 
                     if detent == .large {
-                        FormDateRow(label: "Date", selection: $date, components: [.date])
-
-                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                            Text("Notes")
-                                .font(.appCaption)
-                                .foregroundStyle(AppColors.textSecondary)
-                            TextEditor(text: $notes)
-                                .font(.appBody)
-                                .frame(minHeight: 80)
-                                .padding(AppSpacing.sm)
-                                .background(AppColors.appSurface)
-                                .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                                        .strokeBorder(AppColors.appDivider, lineWidth: 1)
-                                )
-                        }
-
-                        Button {
-                            recomputeSplitsFromCurrentAmount()
-                            showSplitEditor = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "person.2.circle")
-                                Text(splitSummary)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.appSmall)
-                                    .foregroundStyle(AppColors.textTertiary)
-                            }
-                            .padding(.horizontal, AppSpacing.md)
-                            .frame(height: 48)
-                            .background(AppColors.appSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
+                        expenseMoreDetailsSection
                     } else {
-                        Button {
-                            withAnimation(.snappy) { detent = .large }
-                        } label: {
-                            Label("More options", systemImage: "chevron.down")
-                                .font(.appCaption)
-                                .foregroundStyle(AppColors.appPrimary)
-                        }
-                        .buttonStyle(.plain)
+                        moreOptionsButton
                     }
                 }
                 .padding(AppSpacing.lg)
@@ -176,6 +115,174 @@ struct AddExpenseSheet: View {
         }
     }
 
+    private var expenseDetailsSection: some View {
+        ExpenseMapSectionCard(title: "Expense") {
+            HStack(spacing: AppSpacing.md) {
+                MapStyleIcon(
+                    systemName: "creditcard.fill",
+                    size: .small,
+                    accent: category.accentColor,
+                    accessibilityLabel: "Amount"
+                )
+
+                Text("Amount")
+                    .font(.appBody)
+                    .foregroundStyle(AppColors.textPrimary)
+
+                Spacer(minLength: AppSpacing.md)
+
+                TextField("0", text: $amountText)
+                    .font(.appBody)
+                    .foregroundStyle(AppColors.textPrimary)
+                    .keyboardType(.decimalPad)
+                    .focused($amountFieldFocused)
+                    .multilineTextAlignment(.trailing)
+                    .onChange(of: amountText) { _, newValue in
+                        amountText = MoneyField.sanitize(newValue)
+                    }
+                    .frame(minWidth: ExpenseMapFormMetrics.amountFieldMinWidth)
+
+                Menu {
+                    ForEach(MoneyField.commonCurrencies, id: \.self) { code in
+                        Button(code) { currency = code }
+                    }
+                } label: {
+                    HStack(spacing: AppSpacing.xs) {
+                        Text(currency.uppercased())
+                            .font(.appCaption.weight(.semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.appSmall.weight(.semibold))
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
+                    .padding(.horizontal, AppSpacing.sm)
+                    .padding(.vertical, AppSpacing.xs)
+                    .background(AppColors.appBackground)
+                    .clipShape(Capsule())
+                }
+                .accessibilityLabel("Currency: \(currency.uppercased())")
+            }
+            .padding(.horizontal, AppSpacing.md)
+            .frame(minHeight: ExpenseMapFormMetrics.rowMinHeight)
+
+            ExpenseMapDivider()
+
+            ExpenseMapTextRow(
+                icon: "text.alignleft",
+                title: "Description",
+                placeholder: "Dinner at Bar Tartine",
+                accent: category.accentColor,
+                text: $title
+            )
+        }
+    }
+
+    private var categorySection: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            FormSectionTitle("Category")
+
+            ExpenseCategoryGrid(selection: $category)
+                .padding(AppSpacing.md)
+                .background(AppColors.appSurface)
+                .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                        .strokeBorder(AppColors.appDivider, lineWidth: 1)
+                }
+        }
+    }
+
+    private var expenseMoreDetailsSection: some View {
+        ExpenseMapSectionCard(title: "Details") {
+            ExpenseMapDateRow(
+                icon: "calendar",
+                title: "Date",
+                accent: category.accentColor,
+                selection: $date
+            )
+
+            ExpenseMapDivider()
+
+            Button {
+                recomputeSplitsFromCurrentAmount()
+                showSplitEditor = true
+            } label: {
+                HStack(spacing: AppSpacing.md) {
+                    MapStyleIcon(
+                        systemName: "person.2.fill",
+                        size: .small,
+                        accent: category.accentColor,
+                        accessibilityLabel: "Split"
+                    )
+
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        Text("Split With")
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textPrimary)
+                        Text(splitSummary)
+                            .font(.appSmall)
+                            .foregroundStyle(AppColors.textSecondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: AppSpacing.md)
+
+                    Image(systemName: "chevron.right")
+                        .font(.appSmall.weight(.semibold))
+                        .foregroundStyle(AppColors.textTertiary)
+                }
+                .padding(.horizontal, AppSpacing.md)
+                .frame(minHeight: ExpenseMapFormMetrics.rowMinHeight)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            ExpenseMapDivider()
+
+            ExpenseMapNotesRow(
+                icon: "note.text",
+                title: "Notes",
+                accent: category.accentColor,
+                notes: $notes,
+                isExpanded: $isNotesExpanded
+            )
+        }
+    }
+
+    private var moreOptionsButton: some View {
+        Button {
+            withAnimation(AppSpring.snappy) { detent = .large }
+        } label: {
+            HStack(spacing: AppSpacing.md) {
+                MapStyleIcon(
+                    systemName: "ellipsis.circle.fill",
+                    size: .small,
+                    accent: category.accentColor,
+                    accessibilityLabel: "More options"
+                )
+
+                Text("More Options")
+                    .font(.appBody.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.down")
+                    .font(.appSmall.weight(.semibold))
+                    .foregroundStyle(AppColors.textTertiary)
+            }
+            .padding(.horizontal, AppSpacing.md)
+            .frame(minHeight: ExpenseMapFormMetrics.rowMinHeight)
+            .background(AppColors.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private func splitEditorUnavailableView(title: String, message: String) -> some View {
         NavigationStack {
@@ -207,6 +314,7 @@ struct AddExpenseSheet: View {
             category = editing.category
             date = editing.expenseDate
             notes = editing.notes ?? ""
+            isNotesExpanded = !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             splitType = editing.splitType
             splits = existingSplits
         } else {
@@ -369,5 +477,195 @@ struct AddExpenseSheet: View {
     }
 }
 
+private struct ExpenseMapSectionCard<Content: View>: View {
+    let title: String?
+    let content: Content
+
+    init(title: String?, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            if let title {
+                FormSectionTitle(title)
+            }
+
+            VStack(spacing: 0) {
+                content
+            }
+            .background(AppColors.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            }
+        }
+    }
+}
+
+private struct ExpenseMapTextRow: View {
+    let icon: String
+    let title: String
+    let placeholder: String
+    let accent: Color
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: AppSpacing.md) {
+            MapStyleIcon(
+                systemName: icon,
+                size: .small,
+                accent: accent,
+                accessibilityLabel: title
+            )
+
+            Text(title)
+                .font(.appBody)
+                .foregroundStyle(AppColors.textPrimary)
+
+            Spacer(minLength: AppSpacing.md)
+
+            TextField(placeholder, text: $text)
+                .font(.appBody)
+                .foregroundStyle(AppColors.textPrimary)
+                .multilineTextAlignment(.trailing)
+                .textInputAutocapitalization(.sentences)
+                .autocorrectionDisabled()
+                .frame(minWidth: ExpenseMapFormMetrics.trailingFieldMinWidth)
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .frame(minHeight: ExpenseMapFormMetrics.rowMinHeight)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ExpenseMapDateRow: View {
+    let icon: String
+    let title: String
+    let accent: Color
+    @Binding var selection: Date
+
+    var body: some View {
+        HStack(spacing: AppSpacing.md) {
+            MapStyleIcon(
+                systemName: icon,
+                size: .small,
+                accent: accent,
+                accessibilityLabel: title
+            )
+
+            DatePicker(title, selection: $selection, displayedComponents: [.date])
+                .font(.appBody)
+                .datePickerStyle(.compact)
+                .tint(AppColors.appPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .frame(minHeight: ExpenseMapFormMetrics.rowMinHeight)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ExpenseMapNotesRow: View {
+    let icon: String
+    let title: String
+    let accent: Color
+    @Binding var notes: String
+    @Binding var isExpanded: Bool
+
+    private var hasNotes: Bool {
+        !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(AppSpring.snappy) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: AppSpacing.md) {
+                    MapStyleIcon(
+                        systemName: icon,
+                        size: .small,
+                        accent: accent,
+                        accessibilityLabel: title
+                    )
+
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        Text(hasNotes ? "Edit Notes" : "Add Notes")
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textPrimary)
+                        Text(hasNotes ? notes : "Optional trip context, payment details, or reminders")
+                            .font(.appSmall)
+                            .foregroundStyle(AppColors.textSecondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: AppSpacing.md)
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.appSmall.weight(.semibold))
+                        .foregroundStyle(AppColors.textTertiary)
+                }
+                .padding(.horizontal, AppSpacing.md)
+                .frame(minHeight: ExpenseMapFormMetrics.rowMinHeight)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                HStack(alignment: .top, spacing: AppSpacing.md) {
+                    Color.clear
+                        .frame(width: MapStyleIconSize.small.length)
+
+                    ZStack(alignment: .topLeading) {
+                        if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("Add a note, e.g. paid in cash or reimbursed later")
+                                .font(.appBody)
+                                .foregroundStyle(AppColors.textTertiary)
+                                .padding(.top, AppSpacing.sm)
+                                .padding(.leading, AppSpacing.xs)
+                                .allowsHitTesting(false)
+                        }
+
+                        TextEditor(text: $notes)
+                            .font(.appBody)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: ExpenseMapFormMetrics.notesMinHeight)
+                    }
+                    .padding(.horizontal, AppSpacing.sm)
+                    .padding(.vertical, AppSpacing.xs)
+                    .background(AppColors.appBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
+                            .strokeBorder(AppColors.appDivider, lineWidth: 1)
+                    }
+                }
+                .padding(.horizontal, AppSpacing.md)
+                .padding(.bottom, AppSpacing.md)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+}
+
+private struct ExpenseMapDivider: View {
+    var body: some View {
+        Divider()
+            .background(AppColors.appDivider)
+            .padding(.leading, AppSpacing.xxxl + AppSpacing.md)
+    }
+}
+
+private enum ExpenseMapFormMetrics {
+    static let rowMinHeight: CGFloat = 56
+    static let amountFieldMinWidth: CGFloat = 72
+    static let trailingFieldMinWidth: CGFloat = 140
+    static let notesMinHeight: CGFloat = 96
+}
 
 // =============================================================================

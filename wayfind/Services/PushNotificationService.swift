@@ -80,9 +80,15 @@ final class PushNotificationService {
             lastRegisteredToken = token
         } catch {
             // Don't surface this to the user — push registration is a
-            // background concern. Log to console so engineering can spot
-            // a misconfigured server during testing.
+            // background concern. Capture only the failure class, never
+            // the FCM token itself.
             print("[PushNotificationService] registerFCMToken failed:", error)
+            ObservabilityService.capture(
+                error: error,
+                domain: "push",
+                reason: "fcm_token_upsert_failed",
+                context: ["platform": "ios"]
+            )
         }
     }
 
@@ -112,6 +118,12 @@ final class PushNotificationService {
                 .execute()
         } catch {
             print("[PushNotificationService] clearTokenForCurrentDevice failed:", error)
+            ObservabilityService.capture(
+                error: error,
+                domain: "push",
+                reason: "fcm_token_delete_failed",
+                context: ["platform": "ios"]
+            )
         }
     }
 
@@ -132,6 +144,14 @@ final class PushNotificationService {
         dataService: DataService
     ) {
         guard let tripId = Self.extractTripId(from: userInfo) else { return }
+        ObservabilityService.breadcrumb(
+            "notification_tap",
+            category: "notifications",
+            context: [
+                "has_coordinator": coordinator != nil,
+                "trip_id": tripId,
+            ]
+        )
         if let coordinator {
             Task { @MainActor in
                 let trips = await dataService.fetchTrips()

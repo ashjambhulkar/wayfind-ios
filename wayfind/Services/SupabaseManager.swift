@@ -1528,19 +1528,110 @@ final class SupabaseManager {
 
     func fetchPlaces(for dayId: UUID) async throws -> [Place] {
         let (client, _) = try await requireClientAndUserId()
-        let rows: [TripActivityRow] = try await client
+        let tripId = try await requireTripIdForDay(client: client, dayId: dayId)
+        let calendar = Calendar.current
+        let dayRow: TripDayRow = try await client
+            .from("trip_days")
+            .select("id, trip_id, day_number, date, timezone")
+            .eq("id", value: dayId.uuidString)
+            .single()
+            .execute()
+            .value
+
+        async let activitiesTask: [TripActivityRow] = client
             .from("trip_activities")
             .select()
             .eq("day_id", value: dayId.uuidString)
             .order("sort_order", ascending: true)
             .execute()
             .value
-        return rows.map { Self.mapActivityRow($0, dayId: dayId) }
+
+        async let bookingsTask: [TripBookingRow] = client
+            .from("trip_bookings")
+            .select()
+            .eq("trip_id", value: tripId.uuidString)
+            .order("sort_order", ascending: true)
+            .execute()
+            .value
+
+        let (activityRows, bookingRows) = try await (activitiesTask, bookingsTask)
+        let canonicalBookingIds = Set(bookingRows.map(\.id))
+        var places = activityRows
+            .filter { row in
+                guard let bookingId = row.booking_id else { return true }
+                return !canonicalBookingIds.contains(bookingId)
+            }
+            .map { Self.mapActivityRow($0, dayId: dayId) }
+
+        let daysByDateKey = [dayRow.date: dayId]
+        places.append(contentsOf: bookingRows.compactMap { booking -> Place? in
+            guard Self.resolveDayId(
+                for: booking,
+                daysByDateKey: daysByDateKey,
+                fallbackDayId: nil,
+                calendar: calendar
+            ) == dayId else { return nil }
+            return Self.mapBookingRow(booking, dayId: dayId)
+        })
+
+        return places.sorted { lhs, rhs in
+            if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    func fetchBookings(for tripId: UUID) async throws -> [Place] {
+        let (client, _) = try await requireClientAndUserId()
+        let tripIdString = tripId.uuidString.lowercased()
+
+        async let daysTask: [TripDayRow] = client
+            .from("trip_days")
+            .select("id, trip_id, day_number, date, timezone")
+            .eq("trip_id", value: tripIdString)
+            .order("day_number", ascending: true)
+            .execute()
+            .value
+
+        async let bookingsTask: [TripBookingRow] = client
+            .from("trip_bookings")
+            .select()
+            .eq("trip_id", value: tripIdString)
+            .order("starts_at", ascending: true)
+            .execute()
+            .value
+
+        let (dayRows, bookingRows) = try await (daysTask, bookingsTask)
+        let days = dayRows.map { Self.mapDayRow($0, tripId: tripId) }
+            .sorted { $0.dayNumber < $1.dayNumber }
+        let calendar = Calendar.current
+        let daysByDateKey: [String: UUID] = Dictionary(
+            days.compactMap { day -> (String, UUID)? in
+                guard let date = day.date else { return nil }
+                return (SupabaseModelMapping.calendarDateOnlyString(from: date, calendar: calendar), day.id)
+            },
+            uniquingKeysWith: { existing, _ in existing }
+        )
+        let fallbackDayId = days.first(where: { !$0.isWishlist })?.id ?? days.first?.id
+
+        return bookingRows.compactMap { row in
+            guard let dayId = Self.resolveDayId(
+                for: row,
+                daysByDateKey: daysByDateKey,
+                fallbackDayId: fallbackDayId,
+                calendar: calendar
+            ) else { return nil }
+            return Self.mapBookingRow(row, dayId: dayId)
+        }
     }
 
     func addPlace(_ place: Place) async throws {
         let (client, userId) = try await requireClientAndUserId()
         let tripId = try await requireTripIdForDay(client: client, dayId: place.itineraryDayId)
+        if place.isBooking {
+            let row = try Self.buildBookingInsert(place: place, tripId: tripId, userId: userId)
+            try await client.from("trip_bookings").insert(row).execute()
+            return
+        }
         let row = Self.buildActivityInsert(place: place, tripId: tripId, userId: userId)
         try await client.from("trip_activities").insert(row).execute()
     }
@@ -1549,6 +1640,15 @@ final class SupabaseManager {
         let (client, userId) = try await requireClientAndUserId()
         let tripId = try await requireTripIdForDay(client: client, dayId: place.itineraryDayId)
         let nowIso = ISO8601DateFormatter().string(from: Date())
+        if place.isBooking {
+            let payload = try Self.buildBookingUpdate(place: place, tripId: tripId, userId: userId, updatedAt: nowIso)
+            try await client
+                .from("trip_bookings")
+                .update(payload)
+                .eq("id", value: place.id.uuidString)
+                .execute()
+            return
+        }
         let payload = Self.buildActivityUpdate(place: place, tripId: tripId, userId: userId, updatedAt: nowIso)
         try await client
             .from("trip_activities")
@@ -1559,6 +1659,17 @@ final class SupabaseManager {
 
     func deletePlace(id: UUID) async throws {
         let (client, _) = try await requireClientAndUserId()
+        do {
+            try await client
+                .from("trip_bookings")
+                .delete()
+                .eq("id", value: id.uuidString)
+                .execute()
+        } catch {
+            #if DEBUG
+            print("[bookings] delete fallback to activity: \(error)")
+            #endif
+        }
         try await client
             .from("trip_activities")
             .delete()
@@ -2077,9 +2188,19 @@ final class SupabaseManager {
     private struct BookingJSONDetails: Decodable, Sendable {
         let party_size: Int?
         let airline: String?
+        let carrier_iata: String?
+        let carrierIATA: String?
         let flight_number: String?
+        let origin_airport_iata: String?
+        let destination_airport_iata: String?
+        let lookup_verified: Bool?
+        let lookup_status: String?
         let terminal: String?
+        let terminal_destination: String?
         let seat: String?
+        let gate: String?
+        let gate_destination: String?
+        let baggage_claim: String?
         let room_type: String?
         let car_type: String?
     }
@@ -2145,6 +2266,73 @@ final class SupabaseManager {
         let longitude: Double?
         let address: String?
         let place_id: String?
+        let sort_order: Int
+        let updated_at: String
+    }
+
+    private struct TripBookingDetailsPayload: Encodable, Sendable {
+        let airline: String?
+        let carrier_iata: String?
+        let flight_number: String?
+        let origin_airport_iata: String?
+        let destination_airport_iata: String?
+        let lookup_verified: Bool?
+        let lookup_status: String?
+        let terminal: String?
+        let terminal_destination: String?
+        let gate: String?
+        let gate_destination: String?
+        let seat: String?
+        let baggage_claim: String?
+        let room_type: String?
+        let party_size: Int?
+        let car_type: String?
+        let duration: String?
+        let ticket_number: String?
+        let service_number: String?
+    }
+
+    private struct TripBookingInsert: Encodable, Sendable {
+        let id: UUID
+        let trip_id: UUID
+        let user_id: UUID
+        let kind: String
+        let title: String
+        let confirmation_code: String?
+        let provider: String?
+        let starts_at: String?
+        let ends_at: String?
+        let start_location: String?
+        let end_location: String?
+        let start_lat: Double?
+        let start_lng: Double?
+        let end_lat: Double?
+        let end_lng: Double?
+        let details_json: TripBookingDetailsPayload
+        let amount: DecimalCodec?
+        let currency: String
+        let source: String
+        let sort_order: Int
+    }
+
+    private struct TripBookingUpdate: Encodable, Sendable {
+        let trip_id: UUID
+        let user_id: UUID
+        let kind: String
+        let title: String
+        let confirmation_code: String?
+        let provider: String?
+        let starts_at: String?
+        let ends_at: String?
+        let start_location: String?
+        let end_location: String?
+        let start_lat: Double?
+        let start_lng: Double?
+        let end_lat: Double?
+        let end_lng: Double?
+        let details_json: TripBookingDetailsPayload
+        let amount: DecimalCodec?
+        let currency: String
         let sort_order: Int
         let updated_at: String
     }
@@ -2294,14 +2482,20 @@ final class SupabaseManager {
         case .flight:
             return .flight(FlightDetails(
                 airline: json?.airline ?? row.provider ?? "",
+                carrierIATA: json?.carrier_iata ?? json?.carrierIATA,
                 flightNumber: json?.flight_number ?? "",
-                departureAirport: row.start_location ?? "",
-                arrivalAirport: row.end_location ?? "",
+                departureAirport: json?.origin_airport_iata ?? row.start_location ?? "",
+                arrivalAirport: json?.destination_airport_iata ?? row.end_location ?? "",
                 departureTime: start,
                 arrivalTime: end,
                 terminal: json?.terminal ?? "",
-                gate: "",
-                seat: json?.seat ?? ""
+                gate: json?.gate ?? "",
+                seat: json?.seat ?? "",
+                lookupVerified: json?.lookup_verified ?? false,
+                lookupStatus: json?.lookup_status,
+                terminalDestination: json?.terminal_destination,
+                gateDestination: json?.gate_destination,
+                baggageClaim: json?.baggage_claim
             ))
         case .hotel:
             let nights: Int? = {
@@ -2453,6 +2647,338 @@ final class SupabaseManager {
             sort_order: place.sortOrder,
             updated_at: updatedAt
         )
+    }
+
+    private static func buildBookingInsert(place: Place, tripId: UUID, userId: UUID) throws -> TripBookingInsert {
+        let payload = try bookingPayload(for: place)
+        return TripBookingInsert(
+            id: place.id,
+            trip_id: tripId,
+            user_id: userId,
+            kind: payload.kind,
+            title: place.name,
+            confirmation_code: trimmedOrNil(place.confirmationNumber),
+            provider: payload.provider,
+            starts_at: startsAtISO(for: place),
+            ends_at: endsAtISO(for: place),
+            start_location: payload.startLocation,
+            end_location: payload.endLocation,
+            start_lat: place.lat,
+            start_lng: place.lng,
+            end_lat: nil,
+            end_lng: nil,
+            details_json: payload.details,
+            amount: place.bookingAmount.map(DecimalCodec.init),
+            currency: normalizedCurrency(place.bookingCurrencyCode),
+            source: "manual",
+            sort_order: place.sortOrder
+        )
+    }
+
+    private static func buildBookingUpdate(
+        place: Place,
+        tripId: UUID,
+        userId: UUID,
+        updatedAt: String
+    ) throws -> TripBookingUpdate {
+        let payload = try bookingPayload(for: place)
+        return TripBookingUpdate(
+            trip_id: tripId,
+            user_id: userId,
+            kind: payload.kind,
+            title: place.name,
+            confirmation_code: trimmedOrNil(place.confirmationNumber),
+            provider: payload.provider,
+            starts_at: startsAtISO(for: place),
+            ends_at: endsAtISO(for: place),
+            start_location: payload.startLocation,
+            end_location: payload.endLocation,
+            start_lat: place.lat,
+            start_lng: place.lng,
+            end_lat: nil,
+            end_lng: nil,
+            details_json: payload.details,
+            amount: place.bookingAmount.map(DecimalCodec.init),
+            currency: normalizedCurrency(place.bookingCurrencyCode),
+            sort_order: place.sortOrder,
+            updated_at: updatedAt
+        )
+    }
+
+    private struct BookingPayload {
+        let kind: String
+        let provider: String?
+        let startLocation: String?
+        let endLocation: String?
+        let details: TripBookingDetailsPayload
+    }
+
+    private static func bookingPayload(for place: Place) throws -> BookingPayload {
+        guard let details = place.bookingDetails else {
+            return BookingPayload(
+                kind: bookingKind(for: place.bookingCategoryEnum),
+                provider: nil,
+                startLocation: trimmedOrNil(place.address),
+                endLocation: nil,
+                details: emptyBookingDetails()
+            )
+        }
+
+        switch details {
+        case .flight(let flight):
+            let carrier = normalizedCarrierIATA(
+                flight.carrierIATA,
+                airline: flight.airline,
+                flightNumber: flight.flightNumber
+            )
+            let flightNumber = normalizedFlightNumber(flight.flightNumber, carrierIATA: carrier)
+            return BookingPayload(
+                kind: "flight",
+                provider: trimmedOrNil(flight.airline),
+                startLocation: trimmedOrNil(flight.departureAirport),
+                endLocation: trimmedOrNil(flight.arrivalAirport),
+                details: TripBookingDetailsPayload(
+                    airline: trimmedOrNil(flight.airline),
+                    carrier_iata: carrier,
+                    flight_number: flightNumber,
+                    origin_airport_iata: trimmedOrNil(flight.departureAirport),
+                    destination_airport_iata: trimmedOrNil(flight.arrivalAirport),
+                    lookup_verified: flight.lookupVerified,
+                    lookup_status: flight.lookupStatus ?? (flight.lookupVerified ? "verified" : "manual"),
+                    terminal: trimmedOrNil(flight.terminal),
+                    terminal_destination: trimmedOrNil(flight.terminalDestination),
+                    gate: trimmedOrNil(flight.gate),
+                    gate_destination: trimmedOrNil(flight.gateDestination),
+                    seat: trimmedOrNil(flight.seat),
+                    baggage_claim: trimmedOrNil(flight.baggageClaim),
+                    room_type: nil,
+                    party_size: nil,
+                    car_type: nil,
+                    duration: nil,
+                    ticket_number: nil,
+                    service_number: nil
+                )
+            )
+        case .hotel(let hotel):
+            return BookingPayload(
+                kind: "lodging",
+                provider: place.name,
+                startLocation: nil,
+                endLocation: nil,
+                details: TripBookingDetailsPayload(
+                    airline: nil,
+                    carrier_iata: nil,
+                    flight_number: nil,
+                    origin_airport_iata: nil,
+                    destination_airport_iata: nil,
+                    lookup_verified: nil,
+                    lookup_status: nil,
+                    terminal: nil,
+                    terminal_destination: nil,
+                    gate: nil,
+                    gate_destination: nil,
+                    seat: nil,
+                    baggage_claim: nil,
+                    room_type: trimmedOrNil(hotel.roomType),
+                    party_size: nil,
+                    car_type: nil,
+                    duration: nil,
+                    ticket_number: nil,
+                    service_number: nil
+                )
+            )
+        case .restaurant(let restaurant):
+            return BookingPayload(
+                kind: "restaurant",
+                provider: place.name,
+                startLocation: nil,
+                endLocation: nil,
+                details: TripBookingDetailsPayload(
+                    airline: nil,
+                    carrier_iata: nil,
+                    flight_number: nil,
+                    origin_airport_iata: nil,
+                    destination_airport_iata: nil,
+                    lookup_verified: nil,
+                    lookup_status: nil,
+                    terminal: nil,
+                    terminal_destination: nil,
+                    gate: nil,
+                    gate_destination: nil,
+                    seat: nil,
+                    baggage_claim: nil,
+                    room_type: nil,
+                    party_size: restaurant.partySize,
+                    car_type: nil,
+                    duration: nil,
+                    ticket_number: nil,
+                    service_number: nil
+                )
+            )
+        case .carRental(let car):
+            return BookingPayload(
+                kind: "car",
+                provider: trimmedOrNil(car.company),
+                startLocation: trimmedOrNil(car.pickupLocation),
+                endLocation: trimmedOrNil(car.dropoffLocation),
+                details: TripBookingDetailsPayload(
+                    airline: nil,
+                    carrier_iata: nil,
+                    flight_number: nil,
+                    origin_airport_iata: nil,
+                    destination_airport_iata: nil,
+                    lookup_verified: nil,
+                    lookup_status: nil,
+                    terminal: nil,
+                    terminal_destination: nil,
+                    gate: nil,
+                    gate_destination: nil,
+                    seat: nil,
+                    baggage_claim: nil,
+                    room_type: nil,
+                    party_size: nil,
+                    car_type: trimmedOrNil(car.carType),
+                    duration: nil,
+                    ticket_number: nil,
+                    service_number: nil
+                )
+            )
+        case .activity(let activity):
+            return BookingPayload(
+                kind: "tour",
+                provider: trimmedOrNil(activity.provider),
+                startLocation: trimmedOrNil(place.address),
+                endLocation: nil,
+                details: TripBookingDetailsPayload(
+                    airline: nil,
+                    carrier_iata: nil,
+                    flight_number: nil,
+                    origin_airport_iata: nil,
+                    destination_airport_iata: nil,
+                    lookup_verified: nil,
+                    lookup_status: nil,
+                    terminal: nil,
+                    terminal_destination: nil,
+                    gate: nil,
+                    gate_destination: nil,
+                    seat: nil,
+                    baggage_claim: nil,
+                    room_type: nil,
+                    party_size: nil,
+                    car_type: nil,
+                    duration: activity.duration,
+                    ticket_number: trimmedOrNil(activity.ticketNumber),
+                    service_number: nil
+                )
+            )
+        case .transport(let transport):
+            return BookingPayload(
+                kind: "train",
+                provider: trimmedOrNil(transport.operatorName),
+                startLocation: trimmedOrNil(transport.departureStation),
+                endLocation: trimmedOrNil(transport.arrivalStation),
+                details: TripBookingDetailsPayload(
+                    airline: nil,
+                    carrier_iata: nil,
+                    flight_number: nil,
+                    origin_airport_iata: nil,
+                    destination_airport_iata: nil,
+                    lookup_verified: nil,
+                    lookup_status: nil,
+                    terminal: nil,
+                    terminal_destination: nil,
+                    gate: nil,
+                    gate_destination: nil,
+                    seat: trimmedOrNil(transport.seat),
+                    baggage_claim: nil,
+                    room_type: nil,
+                    party_size: nil,
+                    car_type: nil,
+                    duration: nil,
+                    ticket_number: nil,
+                    service_number: trimmedOrNil(transport.serviceNumber)
+                )
+            )
+        }
+    }
+
+    private static func bookingKind(for category: BookingCategory?) -> String {
+        switch category {
+        case .flight: return "flight"
+        case .hotel: return "lodging"
+        case .restaurant: return "restaurant"
+        case .carRental: return "car"
+        case .activity: return "tour"
+        case .transport: return "train"
+        case nil: return "tour"
+        }
+    }
+
+    private static func emptyBookingDetails() -> TripBookingDetailsPayload {
+        TripBookingDetailsPayload(
+            airline: nil,
+            carrier_iata: nil,
+            flight_number: nil,
+            origin_airport_iata: nil,
+            destination_airport_iata: nil,
+            lookup_verified: nil,
+            lookup_status: nil,
+            terminal: nil,
+            terminal_destination: nil,
+            gate: nil,
+            gate_destination: nil,
+            seat: nil,
+            baggage_claim: nil,
+            room_type: nil,
+            party_size: nil,
+            car_type: nil,
+            duration: nil,
+            ticket_number: nil,
+            service_number: nil
+        )
+    }
+
+    private static func endsAtISO(for place: Place) -> String? {
+        guard let end = place.endTime else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: end)
+    }
+
+    private static func normalizedCurrency(_ currency: String?) -> String {
+        let code = currency?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        return code.isEmpty ? "USD" : code
+    }
+
+    private static func trimmedOrNil(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalizedCarrierIATA(_ code: String?, airline: String, flightNumber: String) -> String? {
+        let picked = code?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        if picked.count >= 2 && picked.count <= 3 { return picked }
+        if let catalogCode = FlightAirlineCatalog.airline(matchingName: airline)?.iataCode {
+            return catalogCode
+        }
+        let compactFlight = flightNumber
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
+        let prefix = compactFlight.prefix { $0.isLetter }
+        guard prefix.count >= 2 && prefix.count <= 3 else { return nil }
+        return String(prefix)
+    }
+
+    private static func normalizedFlightNumber(_ value: String, carrierIATA: String?) -> String? {
+        var normalized = value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
+        if let carrierIATA, normalized.hasPrefix(carrierIATA) {
+            normalized.removeFirst(carrierIATA.count)
+        }
+        return normalized.isEmpty ? nil : normalized
     }
 }
 

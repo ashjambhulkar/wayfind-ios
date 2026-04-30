@@ -24,6 +24,12 @@
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  captureException,
+  errorMessage,
+  initSentry,
+  safeLog,
+} from "../_shared/observability.ts";
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -34,6 +40,7 @@ const CORS: Record<string, string> = {
 
 const RAPIDAPI_HOST = "aerodatabox.p.rapidapi.com";
 const PUSH_SCHEMA_VERSION = 1;
+const FUNCTION_NAME = "poll-flight-status";
 
 // Per-batch cap. We poll up to N rows per cron tick; keeps Edge Function
 // cold-start and outbound concurrency predictable. With a 5-minute cron
@@ -89,7 +96,10 @@ interface AeroDataBoxLeg {
 }
 
 function logEvent(event: string, payload: Record<string, unknown>): void {
-  console.log(JSON.stringify({ event, ...payload, ts: new Date().toISOString() }));
+  const level = event.includes("error") || event.includes("exception") || event.includes("failed")
+    ? "warn"
+    : "info";
+  safeLog(level, FUNCTION_NAME, event, payload);
 }
 
 function json(body: unknown, status = 200): Response {
@@ -160,7 +170,13 @@ async function fetchAeroDataBox(
     if (!Array.isArray(list) || list.length === 0) return null;
     return list[0];
   } catch (err) {
-    logEvent("provider_exception", { flight, error: String(err) });
+    logEvent("provider_exception", { flight, error: errorMessage(err) });
+    await captureException(err, {
+      fn: FUNCTION_NAME,
+      reason: "provider_exception",
+      level: "warning",
+      fields: { flight, departureDateUTC },
+    });
     return null;
   } finally {
     clearTimeout(timer);
@@ -311,7 +327,13 @@ async function sendPush(
       logEvent("push_sent", { user_id: row.user_id, flight_id: flightId, summary: update.changeSummary });
     }
   } catch (err) {
-    logEvent("push_exception", { error: String(err) });
+    logEvent("push_exception", { error: errorMessage(err) });
+    await captureException(err, {
+      fn: FUNCTION_NAME,
+      reason: "push_exception",
+      level: "warning",
+      fields: { flight_id: flightId },
+    });
   }
 }
 
@@ -351,6 +373,8 @@ async function callsToday(client: SupabaseClient): Promise<number> {
 
 // ───────────────────────── Handler ─────────────────────────
 serve(async (req) => {
+  initSentry();
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { status: 200, headers: CORS });
   }
@@ -388,7 +412,15 @@ serve(async (req) => {
     .lte("next_poll_at", now.toISOString())
     .order("next_poll_at", { ascending: true })
     .limit(Math.min(MAX_ROWS_PER_INVOCATION, remaining));
-  if (error) return json({ error: error.message }, 500);
+  if (error) {
+    logEvent("select_error", { error: error.message });
+    await captureException(error, {
+      fn: FUNCTION_NAME,
+      reason: "select_failed",
+      fields: { remaining },
+    });
+    return json({ error: error.message }, 500);
+  }
   if (!rows || rows.length === 0) return json({ processed: 0 });
 
   let processed = 0;
@@ -450,6 +482,14 @@ serve(async (req) => {
       .eq("id", row.id);
     if (updErr) {
       logEvent("update_error", { id: row.id, error: updErr.message });
+      await captureException(updErr, {
+        fn: FUNCTION_NAME,
+        reason: "update_failed",
+        fields: {
+          flight_id: row.id,
+          provider,
+        },
+      });
       continue;
     }
 

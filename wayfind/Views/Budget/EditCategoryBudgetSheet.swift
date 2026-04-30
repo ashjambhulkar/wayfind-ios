@@ -29,32 +29,64 @@ struct EditCategoryBudgetSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                VStack(alignment: .leading, spacing: AppSpacing.xl) {
                     VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        Text("Category")
-                            .font(.appCaption)
-                            .foregroundStyle(AppColors.textSecondary)
+                        FormSectionTitle("Category")
+
                         ExpenseCategoryGrid(selection: $category)
+                            .padding(AppSpacing.md)
+                            .background(AppColors.appSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+                            }
                     }
 
-                    MoneyField(
-                        label: "Cap",
-                        placeholder: "0",
-                        amountText: $amountText,
-                        currency: $currency
-                    )
+                    BudgetMapSectionCard(title: "Category Cap") {
+                        BudgetMapAmountRow(
+                            icon: category.systemImage,
+                            title: "\(category.displayLabel) Cap",
+                            caption: "Plan spend for this category",
+                            accent: category.accentColor,
+                            amountText: $amountText,
+                            currency: $currency
+                        )
+                    }
 
                     if existing != nil {
                         Button(role: .destructive) {
                             Task { await deleteCap() }
                         } label: {
-                            Label("Remove cap", systemImage: "trash")
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                                .foregroundStyle(AppColors.appError)
+                            HStack(spacing: AppSpacing.md) {
+                                MapStyleIcon(
+                                    systemName: "trash.fill",
+                                    size: .small,
+                                    accent: AppColors.appError,
+                                    accessibilityLabel: "Remove cap"
+                                )
+
+                                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                                    Text("Remove Cap")
+                                        .font(.appBody)
+                                        .foregroundStyle(AppColors.appError)
+                                    Text("Clear the \(category.displayLabel.lowercased()) budget")
+                                        .font(.appSmall)
+                                        .foregroundStyle(AppColors.textSecondary)
+                                }
+
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, AppSpacing.md)
+                            .frame(minHeight: BudgetMapFormMetrics.rowMinHeight)
+                            .background(AppColors.appSurface)
+                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+                            }
                         }
-                        .buttonStyle(.bordered)
-                        .tint(AppColors.appError.opacity(0.2))
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(AppSpacing.lg)

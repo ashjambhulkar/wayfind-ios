@@ -57,6 +57,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         }
         #endif
 
+        ObservabilityService.configure()
+
         // 2. UN delegate (already set by NotificationManager.init) — but
         // we re-assert here in case the AppDelegate is invoked before
         // the Observable is first read by SwiftUI.
@@ -74,6 +76,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // `AppRootTabView` can navigate to the trip.
         if let userInfo = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
             coldStartTripId = PushNotificationService.extractTripId(from: userInfo)
+            ObservabilityService.breadcrumb(
+                "cold_start_notification",
+                category: "notifications",
+                context: ["has_trip_id": coldStartTripId != nil]
+            )
         }
 
         // 5. RevenueCat (Wave 4.2). Configured *before* the SwiftUI
@@ -144,6 +151,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // failure. The user will simply not receive push notifications
         // until the next launch / re-register attempt.
         print("[AppDelegate] APNs registration failed:", error.localizedDescription)
+        ObservabilityService.capture(
+            error: error,
+            domain: "push",
+            reason: "apns_registration_failed",
+            context: ["platform": "ios"]
+        )
     }
 }
 

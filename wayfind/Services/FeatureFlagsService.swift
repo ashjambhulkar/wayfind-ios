@@ -232,6 +232,12 @@ final class FeatureFlagsService {
         } catch {
             // Best-effort. Keep the existing cached values; defaults
             // already fill the gap when nothing is loaded.
+            ObservabilityService.breadcrumb(
+                "refresh_failed",
+                category: "feature_flags",
+                level: .warning,
+                context: ["has_cached_values": !values.isEmpty]
+            )
             #if DEBUG
             print("[FeatureFlagsService] refresh failed: \(error)")
             #endif
