@@ -39,6 +39,10 @@ final class TripDetailViewModel {
         placesByDayId[day.id] ?? []
     }
 
+    func allScheduledPlaces() -> [Place] {
+        scheduledDays.flatMap { places(for: $0) }
+    }
+
     func placesCount(for day: ItineraryDay) -> Int {
         places(for: day).count
     }

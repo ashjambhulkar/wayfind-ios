@@ -472,36 +472,25 @@ struct TripDetailView: View {
         }
         .sheet(isPresented: $showAddPlace) {
             if let vm = viewModel {
-                AddPlaceView(
+                AddActivitySheet(
+                    trip: vm.trip,
                     selectedDayNumber: addPlaceTargetDay,
                     days: vm.scheduledDays,
+                    scheduledPlaces: vm.allScheduledPlaces(),
                     wishlistPlaces: vm.wishlistPlaces
-                ) { placeName, dayNumber in
-                    guard let targetDay = vm.scheduledDays.first(where: { $0.dayNumber == dayNumber }) else { return }
-                    let existingCount = vm.places(for: targetDay).count
-                    let newPlace = Place(
-                        id: UUID(),
-                        itineraryDayId: targetDay.id,
-                        name: placeName,
-                        address: nil,
-                        lat: nil,
-                        lng: nil,
-                        category: PlaceCategory.attraction.rawValue,
-                        notes: nil,
-                        sortOrder: existingCount,
-                        startTime: nil,
-                        endTime: nil,
-                        isBooking: false,
-                        bookingType: nil,
-                        confirmationNumber: nil,
-                        bookingDetails: nil
-                    )
-                    Task {
-                        await dataService.addPlace(newPlace)
-                        await vm.loadTripData()
-                        await refreshItineraryPhotoStacks()
+                ) { savedPlace in
+                    await vm.loadTripData()
+                    await refreshItineraryPhotoStacks()
+                    await MainActor.run {
+                        HapticManager.success()
+                        toastManager.show(ToastData(
+                            message: "Added \(savedPlace.name) to your itinerary",
+                            type: .success,
+                            duration: 3
+                        ))
+                        showAddPlace = false
                     }
-                    HapticManager.success()
+                } onCancel: {
                     showAddPlace = false
                 }
             }
@@ -1273,7 +1262,7 @@ struct TripDetailView: View {
             viewModel.places(for: candidate).isEmpty && viewModel.ongoingBookings(for: candidate).isEmpty
         }
         return firstQuietEmptyDay?.id == day.id
-            ? "Add places or let AI plan this day"
+            ? "Add an activity or plan this day with AI"
             : "No plans yet"
     }
 
@@ -1637,7 +1626,7 @@ struct TripDetailHubBottomBar: ToolbarContent {
                 .foregroundStyle(AppColors.appPrimary)
         }
         .tint(AppColors.appPrimary)
-        .accessibilityLabel(String(localized: "AI"))
+        .accessibilityLabel(String(localized: "Plan with AI"))
         .accessibilityHint(String(localized: "Opens the day planner for this trip."))
     }
 }

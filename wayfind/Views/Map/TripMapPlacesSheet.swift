@@ -1,6 +1,5 @@
 import MapKit
 import SwiftUI
-import UIKit
 
 // MARK: - Sheet layout (detent ↔︎ coarse state)
 
@@ -95,13 +94,12 @@ struct TripMapPlacesExpandedSheet: View {
     /// spring). Transient detent crossings during an interactive drag are
     /// cancelled by the next change before they ever commit.
     private static let layoutCommitDebounceMs: UInt64 = 180
-    /// Top scroll inset for the overlaid search row + day capsules. The rows
-    /// scroll underneath this chrome instead of the chrome living in a solid
-    /// header band.
-    private static let searchAndDayChromeScrollTopMargin: CGFloat = 0
+    /// Top scroll inset for the overlaid search row + day capsules so list rows
+    /// begin below the floating controls instead of sitting underneath them.
+    private static let searchAndDayChromeScrollTopMargin: CGFloat = AppSpacing.xxxl + AppSpacing.xxxl + AppSpacing.xl
     /// Top scroll inset for submitted search results, where only the search row
     /// is overlaid.
-    private static let searchChromeScrollTopMargin: CGFloat = 0
+    private static let searchChromeScrollTopMargin: CGFloat = AppSpacing.xxxl + AppSpacing.xl
 
     private var showsMapSearchResultsList: Bool {
         !mapSearchResults.isEmpty
@@ -297,7 +295,7 @@ struct TripMapPlacesExpandedSheet: View {
     }
 
     private var searchBarChromeRow: some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: AppSpacing.sm) {
             mapsStyleSearchPillButton
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -311,7 +309,7 @@ struct TripMapPlacesExpandedSheet: View {
             }
         }
         .padding(.horizontal, AppSpacing.md)
-        .padding(.top, 2)
+        .padding(.top, AppSpacing.xs)
         .padding(.bottom, AppSpacing.sm)
     }
 
@@ -338,8 +336,8 @@ struct TripMapPlacesExpandedSheet: View {
             placesSheetLayout = .half
         }
         .padding(.horizontal, AppSpacing.sm)
-        .padding(.top, 4)
-        .padding(.bottom, 4)
+        .padding(.top, AppSpacing.xs)
+        .padding(.bottom, AppSpacing.xs)
     }
 
     private func mapSubmittedSearchRowSymbolAndFamily(for preview: MapSearchPreview) -> (
@@ -357,11 +355,11 @@ struct TripMapPlacesExpandedSheet: View {
         let icon = mapSubmittedSearchRowSymbolAndFamily(for: preview)
         ZStack {
             Circle()
-                .fill(icon.family == .generic ? Color(uiColor: .systemGray5) : icon.family.tint)
+                .fill(icon.family.tint)
             Image(systemName: icon.symbol)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.appCaption.weight(.semibold))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(icon.family == .generic ? .secondary : icon.family.color)
+                .foregroundStyle(icon.family.color)
         }
         .frame(width: 34, height: 34)
         .accessibilityHidden(true)
@@ -379,30 +377,25 @@ struct TripMapPlacesExpandedSheet: View {
                         HStack(alignment: .center, spacing: AppSpacing.md) {
                             mapSubmittedSearchRowLeadingIcon(preview: preview)
 
-                            VStack(alignment: .leading, spacing: 3) {
+                            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                                 Text(preview.name)
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(.primary)
+                                    .font(.appBody.weight(.semibold))
+                                    .foregroundStyle(AppColors.textPrimary)
                                     .lineLimit(2)
                                 if !preview.subtitle.isEmpty {
                                     Text(preview.subtitle)
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
+                                        .font(.appCaption)
+                                        .foregroundStyle(AppColors.textSecondary)
                                         .lineLimit(1)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                                .accessibilityHidden(true)
                         }
-                        .padding(.vertical, 3)
+                        .padding(.vertical, AppSpacing.xs)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 4, leading: AppSpacing.lg, bottom: 4, trailing: AppSpacing.lg))
+                    .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.lg, bottom: AppSpacing.sm, trailing: AppSpacing.lg))
                     .listRowBackground(AppColors.appSurface)
                 }
             }
@@ -434,36 +427,35 @@ struct TripMapPlacesExpandedSheet: View {
             placesSheetLayout = .full
             isInlineMapSearchActive = true
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: AppSpacing.sm) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Color.primary.opacity(0.82))
+                    .font(.appBody.weight(.medium))
+                    .foregroundStyle(AppColors.textSecondary)
 
                 Group {
                     if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text(String(localized: "Search places"))
-                            .foregroundStyle(Color(UIColor.placeholderText))
+                            .foregroundStyle(AppColors.textTertiary)
                     } else {
                         Text(searchText)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(AppColors.textPrimary)
                             .lineLimit(1)
                     }
                 }
-                .font(.body)
+                .font(.appBody)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color.primary.opacity(0.68))
+                    .font(.appCaption.weight(.medium))
+                    .foregroundStyle(AppColors.textSecondary)
                     .accessibilityHidden(true)
             }
-            .padding(.leading, 14)
-            .padding(.trailing, 12)
-            .padding(.vertical, 11)
-            .background(.ultraThinMaterial, in: Capsule())
+            .padding(.horizontal, AppSpacing.md)
+            .padding(.vertical, AppSpacing.md)
+            .background(AppColors.appSurface, in: Capsule(style: .continuous))
             .overlay {
-                Capsule()
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                Capsule(style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
             }
         }
         .buttonStyle(.plain)
@@ -484,7 +476,7 @@ struct TripMapPlacesExpandedSheet: View {
         let topPad: CGFloat = isInlineMapSearchActive ? 4 : 8
         let bottomPad: CGFloat = isInlineMapSearchActive ? 0 : 4
         return Capsule()
-            .fill(Color.secondary.opacity(0.45))
+            .fill(AppColors.textTertiary.opacity(0.45))
             .frame(width: 52, height: 5)
             .frame(maxWidth: .infinity)
             .padding(.top, topPad)
@@ -527,9 +519,9 @@ private struct TripMapPlacesDayListContent: View {
                             dayTab(dayNum: dayNum, label: "Day \(dayNum)")
                         }
                     }
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, AppSpacing.sm)
                 }
-                .frame(height: 42)
+                .frame(height: 44)
                 .background(.regularMaterial)
 
                 Divider()
@@ -555,28 +547,28 @@ private struct TripMapPlacesDayListContent: View {
 
         return Button {
             HapticManager.selection()
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
+            withAnimation(AppSpring.snappy) {
                 selectedDayFilter = dayNum == 0 ? nil : dayNum
             }
         } label: {
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                HStack(spacing: dayNum == 0 ? 0 : 5) {
+                HStack(spacing: dayNum == 0 ? 0 : AppSpacing.xs) {
                     if dayNum != 0 {
                         Circle().fill(accentColor).frame(width: 6, height: 6)
                     }
                     Text(label)
-                        .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? accentColor : Color(UIColor.secondaryLabel))
+                        .font(.appCaption.weight(isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? accentColor : AppColors.textSecondary)
                         .fixedSize()
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, AppSpacing.md)
                 Spacer(minLength: 0)
                 Rectangle()
                     .fill(isSelected ? accentColor : Color.clear)
                     .frame(height: 2)
             }
-            .frame(height: 42)
+            .frame(height: 44)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -591,7 +583,7 @@ private struct TripMapPlacesDayListContent: View {
                 Section {
                     ForEach(places) { place in
                         placeRow(place)
-                            .listRowInsets(EdgeInsets(top: 10, leading: AppSpacing.lg, bottom: 10, trailing: AppSpacing.lg))
+                            .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.lg, bottom: AppSpacing.sm, trailing: AppSpacing.lg))
                             .listRowBackground(AppColors.appSurface)
                     }
                 }
@@ -601,7 +593,7 @@ private struct TripMapPlacesDayListContent: View {
         .contentMargins(.top, topContentMargin, for: .scrollContent)
         .contentMargins(.bottom, 0, for: .scrollContent)
         .listSectionSpacing(.compact)
-        .listRowSpacing(6)
+        .listRowSpacing(AppSpacing.sm)
         .scrollContentBackground(.hidden)
         .background(.clear)
         .scrollDismissesKeyboard(.interactively)
@@ -615,7 +607,7 @@ private struct TripMapPlacesDayListContent: View {
             HStack(alignment: .center, spacing: AppSpacing.md) {
                 let iconColor: Color = place.isBooking
                     ? (place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
-                    : categoryColor(for: place)
+                    : place.categoryEnum.color
                 let iconName: String = place.isBooking
                     ? (place.bookingCategoryEnum?.sfSymbol ?? "ticket.fill")
                     : place.categoryEnum.sfSymbol
@@ -625,66 +617,49 @@ private struct TripMapPlacesDayListContent: View {
                         .fill(iconColor.opacity(0.14))
                         .frame(width: 44, height: 44)
                     Image(systemName: iconName)
-                        .font(.system(size: 18, weight: .medium))
+                        .font(.appBody.weight(.medium))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(iconColor)
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(place.name)
-                        .font(.body)
-                        .foregroundStyle(.primary)
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
                         .lineLimit(2)
                     if let addr = place.address, !addr.isEmpty {
                         Text(addr)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.textSecondary)
                             .lineLimit(1)
                     } else {
                         Text(place.isBooking ? "Booking" : place.categoryEnum.label)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.textSecondary)
                             .lineLimit(1)
                     }
                 }
-
-                Spacer(minLength: AppSpacing.sm)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, AppSpacing.xs)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(place.name)
     }
 
-    private func categoryColor(for place: Place) -> Color {
-        switch place.categoryEnum {
-        case .attraction: return .blue
-        case .restaurant: return AppColors.appPrimary
-        case .hotel: return .purple
-        case .transport: return .teal
-        case .shopping: return .pink
-        case .nightlife: return .indigo
-        case .nature: return .green
-        case .custom: return .secondary
-        }
-    }
-
     private var emptyDayState: some View {
         VStack(spacing: AppSpacing.md) {
             Image(systemName: "mappin.and.ellipse")
-                .font(.system(size: 36))
+                .font(.screenTitle)
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AppColors.textSecondary)
             Text(String(localized: "No activities yet"))
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.primary)
+                .font(.sectionHeader)
+                .foregroundStyle(AppColors.textPrimary)
             Text(String(localized: "Activities you add to your itinerary with a location will appear here."))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.appBody)
+                .foregroundStyle(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, AppSpacing.lg)
         }
@@ -773,7 +748,7 @@ private extension TripMapPlacesSheet_Previews {
         .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.visible)
         .presentationBackgroundInteraction(.enabled)
-        .presentationBackground(.regularMaterial)
+        .presentationBackground(AppColors.appBackground)
     }
 }
 
@@ -880,6 +855,7 @@ private struct TripMapPlacesExpandedSheetPreviewHost: View {
                     )
                 )
                 .presentationDragIndicator(.hidden)
+                .interactiveDismissDisabled(true)
                 .sheet(isPresented: $showSuggestedPlacesBrowser) {
                     TripMapPlacesSheet_Previews.suggestedPlacesBrowserSheetPreview(isPresented: $showSuggestedPlacesBrowser)
                 }

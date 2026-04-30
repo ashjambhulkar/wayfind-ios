@@ -86,6 +86,8 @@ struct MapSearchOverlay: View {
     /// Embedded in the places sheet: opens the full suggested-places browser while search is idle (`!isSearching`).
     var onOpenSuggestedPlacesSheet: (() -> Void)?
 
+    private let usesPreviewSuggestedPlaces: Bool
+
     // MARK: - Local state
 
     @State private var query: String
@@ -138,9 +140,10 @@ struct MapSearchOverlay: View {
         query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Focused or any typed text: hide the suggested-places shortcut (system search supplies Cancel / dismiss).
+    /// Presented, focused, or any typed text: hide the suggested-places shortcut (system search supplies Cancel / dismiss).
     private var embeddedSearchHidesSuggestedShortcut: Bool {
         guard embedsInParentSheet else { return false }
+        if embeddedSearchPresentationExpanded { return true }
         if !trimmedEmbeddedSearchQuery.isEmpty { return true }
         if #available(iOS 18, *) {
             return embeddedSearchFieldFocused
@@ -170,7 +173,8 @@ struct MapSearchOverlay: View {
         onPickCategory: @escaping (CategoryPill, [MapSearchPreview]) -> Void,
         onSubmitSearch: @escaping (_ query: String, _ results: [MapSearchPreview]) -> Void,
         onCancel: @escaping () -> Void,
-        onOpenSuggestedPlacesSheet: (() -> Void)? = nil
+        onOpenSuggestedPlacesSheet: (() -> Void)? = nil,
+        previewSuggestedPlaces: [MapSearchPreview] = []
     ) {
         self.country = country
         self.initialQuery = initialQuery
@@ -188,7 +192,9 @@ struct MapSearchOverlay: View {
         self.onSubmitSearch = onSubmitSearch
         self.onCancel = onCancel
         self.onOpenSuggestedPlacesSheet = onOpenSuggestedPlacesSheet
+        self.usesPreviewSuggestedPlaces = !previewSuggestedPlaces.isEmpty
         _query = State(initialValue: initialQuery)
+        _suggestedPlaces = State(initialValue: previewSuggestedPlaces)
         // Embedded: start with the search field expanded so the first frame matches full-screen search chrome
         // (async work below only defers first responder, not the visible search bar).
         _embeddedSearchPresentationExpanded = State(initialValue: embedsInParentSheet)
@@ -242,7 +248,7 @@ struct MapSearchOverlay: View {
             .presentationDetents([.large])
             .presentationContentInteraction(.scrolls)
             .presentationDragIndicator(.visible)
-            .presentationBackground(.regularMaterial)
+            .presentationBackground(AppColors.appBackground)
         }
         .tint(AppColors.appPrimary)
     }
@@ -274,7 +280,7 @@ struct MapSearchOverlay: View {
                         }
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
                     .accessibilityLabel(String(localized: "Close"))
                 }
@@ -341,10 +347,10 @@ struct MapSearchOverlay: View {
                         openSuggested()
                     } label: {
                         Image(systemName: "sparkles")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.primary)
+                            .font(.appBody.weight(.semibold))
+                            .foregroundStyle(AppColors.textPrimary)
                             .frame(width: 36, height: 36)
-                            .background(Color(UIColor.tertiarySystemFill), in: Circle())
+                            .background(AppColors.appSurface, in: Circle())
                     }
                     .buttonStyle(.plain)
                     .frame(width: 44, height: 44)
@@ -357,6 +363,8 @@ struct MapSearchOverlay: View {
             }
             if showsCategoryPills {
                 categoryPillsInsetEmbeddedUnderSearch
+            } else if embedsInParentSheet {
+                embeddedTypedSearchTopInset
             }
         }
     }
@@ -417,6 +425,16 @@ struct MapSearchOverlay: View {
         .background(searchSurfaceBackground)
     }
 
+    /// Empty search already reserves the area under the drawer search field with
+    /// category pills. Typed search needs only a compact clear inset so rows stay
+    /// below the search chrome without creating an Apple Maps-unlike blank gap.
+    private var embeddedTypedSearchTopInset: some View {
+        Color.clear
+            .frame(height: AppSpacing.lg)
+            .frame(maxWidth: .infinity)
+            .background(searchSurfaceBackground)
+    }
+
     // MARK: - Results list
 
     @ViewBuilder
@@ -445,24 +463,24 @@ struct MapSearchOverlay: View {
             // so the surface never goes silently blank.
             Section {
                 if loadingSuggested && suggestedPlaces.isEmpty {
-                    HStack(spacing: 10) {
+                    HStack(spacing: AppSpacing.sm) {
                         ProgressView().controlSize(.small)
                         Text("Loading suggestions…")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, AppSpacing.xs)
                     .listRowBackground(AppColors.appSurface)
                 } else if cityProfileId == nil {
                     Text("Suggestions appear here once your destination loads.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textSecondary)
                         .listRowBackground(AppColors.appSurface)
                 } else if suggestedPlaces.isEmpty {
                     Text("No curated places yet for this city.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textSecondary)
                         .listRowBackground(AppColors.appSurface)
                 } else {
                     ForEach(suggestedPlaces.prefix(4)) { preview in
@@ -474,8 +492,8 @@ struct MapSearchOverlay: View {
             if suggestedPlaces.isEmpty && !loadingSuggested && cityProfileId == nil {
                 Section {
                     Text("Type a place, neighborhood, or category like \"coffee\".")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textSecondary)
                         .listRowBackground(Color.clear)
                 }
             }
@@ -491,10 +509,10 @@ struct MapSearchOverlay: View {
     /// Custom header row instead of a `Section` header because inset-grouped
     /// lists apply extra leading padding to section headers.
     private var suggestedPlacesHeaderRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
             Text("Suggested Places")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.primary)
+                .font(.cardTitle.weight(.semibold))
+                .foregroundStyle(AppColors.textPrimary)
                 .textCase(nil)
             Spacer(minLength: 0)
             if suggestedPlaces.count > 4 {
@@ -504,9 +522,9 @@ struct MapSearchOverlay: View {
                 } label: {
                     HStack(spacing: 2) {
                         Text("See all")
-                            .font(.footnote.weight(.semibold))
+                            .font(.appCaption.weight(.semibold))
                         Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.semibold))
+                            .font(.appSmall.weight(.semibold))
                     }
                     .foregroundStyle(AppColors.appPrimary)
                     .textCase(nil)
@@ -524,22 +542,22 @@ struct MapSearchOverlay: View {
         Button {
             commitInlineSuggestedPick(preview)
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: AppSpacing.md) {
                 SuggestedThumbnail(preview: preview)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(preview.name)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
                         .lineLimit(1)
                     if let cat = preview.category {
                         Text(cat.label)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.textSecondary)
                             .lineLimit(1)
                     } else if !preview.subtitle.isEmpty {
                         Text(preview.subtitle)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.textSecondary)
                             .lineLimit(1)
                     }
                 }
@@ -557,8 +575,7 @@ struct MapSearchOverlay: View {
         // that's the category-pill flow. For free-typing we show:
         //   1. A "Search Nearby" pseudo-row that runs the typed query
         //      as a viewport-biased map search (Apple Maps parity).
-        //   2. owned-row matches (with the "Saved in this city"
-        //      caption so the user knows the data is already enriched),
+        //   2. owned-row matches from the city's enriched place catalog,
         //   3. Provider suggestions (Apple MapKit OR Google Places
         //      Autocomplete depending on `provider`).
         //
@@ -567,15 +584,15 @@ struct MapSearchOverlay: View {
         List {
             if let outOfRegionWarning {
                 Section {
-                    HStack(alignment: .top, spacing: 10) {
+                    HStack(alignment: .top, spacing: AppSpacing.sm) {
                         Image(systemName: "mappin.slash")
                             .foregroundStyle(AppColors.appPrimary)
                         Text(outOfRegionWarning)
-                            .font(.footnote)
-                            .foregroundStyle(.primary)
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.textPrimary)
                         Spacer(minLength: 0)
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, AppSpacing.xs)
                     .listRowBackground(AppColors.appPrimaryLight)
                     .accessibilityElement(children: .combine)
                 }
@@ -610,7 +627,9 @@ struct MapSearchOverlay: View {
                 Section {
                     HStack {
                         ProgressView()
-                        Text("Searching…").foregroundStyle(.secondary)
+                        Text("Searching…")
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
                     .listRowBackground(Color.clear)
                 }
@@ -656,14 +675,14 @@ struct MapSearchOverlay: View {
                     symbol: "magnifyingglass",
                     family: .generic
                 )
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(query.trimmingCharacters(in: .whitespacesAndNewlines))
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
                         .lineLimit(1)
                     Text("Search nearby in this map area")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textSecondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -672,11 +691,11 @@ struct MapSearchOverlay: View {
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(AppColors.appPrimary)
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, AppSpacing.xs)
             .accessibilityElement(children: .combine)
         }
         .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 8, leading: AppSpacing.lg, bottom: 8, trailing: AppSpacing.lg))
+        .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.lg, bottom: AppSpacing.sm, trailing: AppSpacing.lg))
         .listRowBackground(AppColors.appSurface)
         .accessibilityLabel("Search nearby for \(query)")
         .accessibilityHint("Finds matching places in the visible map area")
@@ -684,15 +703,15 @@ struct MapSearchOverlay: View {
 
     @ViewBuilder
     private var emptyStateRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
             Label("No places found nearby", systemImage: "mappin.slash")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
+                .font(.appBody.weight(.semibold))
+                .foregroundStyle(AppColors.textPrimary)
             Text("Try a broader term or pan the map to a different area.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(.appCaption)
+                .foregroundStyle(AppColors.textSecondary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, AppSpacing.xs)
         .accessibilityElement(children: .combine)
     }
 
@@ -703,11 +722,11 @@ struct MapSearchOverlay: View {
     private func rowLeadingIcon(symbol: String, family: PlaceCategoryFamily) -> some View {
         ZStack {
             Circle()
-                .fill(family == .generic ? Color(uiColor: .systemGray5) : family.tint)
+                .fill(family.tint)
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.appCaption.weight(.semibold))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(family == .generic ? .secondary : family.color)
+                .foregroundStyle(family.color)
         }
         .frame(width: 34, height: 34)
         .accessibilityHidden(true)
@@ -720,25 +739,25 @@ struct MapSearchOverlay: View {
         } label: {
             HStack(spacing: AppSpacing.md) {
                 rowLeadingIcon(symbol: icon.symbol, family: icon.family)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(prediction.mainText)
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(.primary)
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
                         .lineLimit(1)
                     if !prediction.secondaryText.isEmpty {
                         Text(prediction.secondaryText)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.textSecondary)
                             .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 3)
+            .padding(.vertical, AppSpacing.xs)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 4, leading: AppSpacing.lg, bottom: 4, trailing: AppSpacing.lg))
+        .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.lg, bottom: AppSpacing.sm, trailing: AppSpacing.lg))
         .listRowBackground(AppColors.appSurface)
     }
 
@@ -757,30 +776,27 @@ struct MapSearchOverlay: View {
         } label: {
             HStack(spacing: AppSpacing.md) {
                 rowLeadingIcon(symbol: icon.symbol, family: icon.family)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(preview.name)
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(.primary)
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
                         .lineLimit(1)
                     if !preview.subtitle.isEmpty {
                         Text(preview.subtitle)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.textSecondary)
                             .lineLimit(1)
                     }
-                    Label("Wayfind suggestion", systemImage: "checkmark.seal.fill")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(AppColors.appPrimary)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 3)
+            .padding(.vertical, AppSpacing.xs)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 4, leading: AppSpacing.lg, bottom: 4, trailing: AppSpacing.lg))
+        .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.lg, bottom: AppSpacing.sm, trailing: AppSpacing.lg))
         .listRowBackground(AppColors.appSurface)
-        .accessibilityLabel("\(preview.name). Wayfind suggestion.")
+        .accessibilityLabel(preview.subtitle.isEmpty ? preview.name : "\(preview.name), \(preview.subtitle)")
     }
 
     private func appleRowButton(_ suggestion: AppleMapSuggestion) -> some View {
@@ -794,25 +810,25 @@ struct MapSearchOverlay: View {
         } label: {
             HStack(spacing: AppSpacing.md) {
                 rowLeadingIcon(symbol: icon.symbol, family: icon.family)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(suggestion.title)
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(.primary)
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
                         .lineLimit(1)
                     if !suggestion.subtitle.isEmpty {
                         Text(suggestion.subtitle)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.textSecondary)
                             .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 3)
+            .padding(.vertical, AppSpacing.xs)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .listRowInsets(EdgeInsets(top: 4, leading: AppSpacing.lg, bottom: 4, trailing: AppSpacing.lg))
+        .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.lg, bottom: AppSpacing.sm, trailing: AppSpacing.lg))
         .listRowBackground(AppColors.appSurface)
     }
 
@@ -987,6 +1003,7 @@ struct MapSearchOverlay: View {
     /// city changes (driven by `.task(id: cityProfileId)`).
     private func loadSuggestedIfNeeded() async {
         guard let cityProfileId else {
+            guard !usesPreviewSuggestedPlaces else { return }
             suggestedPlaces = []
             suggestedLoadedFor = nil
             return
@@ -1082,24 +1099,24 @@ private struct CategoryPillsRow: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: AppSpacing.sm) {
                 ForEach(CategoryPill.all) { pill in
                     Button {
                         onTap(pill)
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(spacing: AppSpacing.xs) {
                             Image(systemName: pill.symbol)
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.appCaption.weight(.semibold))
                                 .foregroundStyle(pill.family.color)
                                 .symbolRenderingMode(.hierarchical)
                             Text(pill.label)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
+                                .font(.appBody.weight(.semibold))
+                                .foregroundStyle(AppColors.textPrimary)
                                 .lineLimit(1)
                                 .fixedSize()
                         }
-                        .padding(.vertical, 9)
-                        .padding(.horizontal, 14)
+                        .padding(.vertical, AppSpacing.sm)
+                        .padding(.horizontal, AppSpacing.md)
                         .mapSearchCategoryGlassPill()
                     }
                     .buttonStyle(.plain)
@@ -1116,10 +1133,10 @@ private extension View {
     @ViewBuilder
     func mapSearchCategoryGlassPill() -> some View {
         self
-            .background(.thinMaterial, in: Capsule())
+            .background(AppColors.appSurface, in: Capsule(style: .continuous))
             .overlay {
-                Capsule()
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                Capsule(style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
             }
     }
 }
@@ -1264,6 +1281,71 @@ enum SearchRowIconHeuristic {
 // =============================================================================
 
 #if DEBUG
+enum MapSearchOverlayPreviewData {
+    static let suggestedPlaces: [MapSearchPreview] = [
+        MapSearchPreview(
+            id: "preview-eiffel-tower",
+            origin: .cityPlaces,
+            name: "Eiffel Tower",
+            subtitle: "Champ de Mars, 75007 Paris",
+            coordinate: .init(latitude: 48.8584, longitude: 2.2945),
+            googlePlaceId: "ChIJLU7jZClu5kcR4PcOOO6p3I0",
+            phone: nil,
+            website: URL(string: "https://www.toureiffel.paris"),
+            thumbnailURL: nil,
+            category: .attraction
+        ),
+        MapSearchPreview(
+            id: "preview-louvre",
+            origin: .cityPlaces,
+            name: "Louvre Museum",
+            subtitle: "Rue de Rivoli, 75001 Paris",
+            coordinate: .init(latitude: 48.8606, longitude: 2.3376),
+            googlePlaceId: "ChIJD7fiBh9u5kcRYJSMaMOCCwQ",
+            phone: nil,
+            website: URL(string: "https://www.louvre.fr"),
+            thumbnailURL: nil,
+            category: .attraction
+        ),
+        MapSearchPreview(
+            id: "preview-cafe-flore",
+            origin: .cityPlaces,
+            name: "Café de Flore",
+            subtitle: "172 Boulevard Saint-Germain, Paris",
+            coordinate: .init(latitude: 48.8542, longitude: 2.3324),
+            googlePlaceId: "ChIJW6Yh0uZv5kcRwG3x0YJpL4Y",
+            phone: nil,
+            website: URL(string: "https://cafedeflore.fr"),
+            thumbnailURL: nil,
+            category: .restaurant
+        ),
+        MapSearchPreview(
+            id: "preview-luxembourg-gardens",
+            origin: .cityPlaces,
+            name: "Luxembourg Gardens",
+            subtitle: "75006 Paris",
+            coordinate: .init(latitude: 48.8462, longitude: 2.3372),
+            googlePlaceId: "ChIJX9kDUKtx5kcRQbWFYqIAE9M",
+            phone: nil,
+            website: nil,
+            thumbnailURL: nil,
+            category: .nature
+        ),
+        MapSearchPreview(
+            id: "preview-le-marais",
+            origin: .cityPlaces,
+            name: "Le Marais",
+            subtitle: "Historic district with shops and cafes",
+            coordinate: .init(latitude: 48.8575, longitude: 2.3580),
+            googlePlaceId: nil,
+            phone: nil,
+            website: nil,
+            thumbnailURL: nil,
+            category: .shopping
+        ),
+    ]
+}
+
 #Preview("Search overlay — empty state") {
     MapSearchOverlay(
         country: "FR",
@@ -1279,7 +1361,8 @@ enum SearchRowIconHeuristic {
         onPickSuggestedBrowserResult: { _ in },
         onPickCategory: { _, _ in },
         onSubmitSearch: { _, _ in },
-        onCancel: {}
+        onCancel: {},
+        previewSuggestedPlaces: MapSearchOverlayPreviewData.suggestedPlaces
     )
 }
 
@@ -1321,12 +1404,13 @@ enum SearchRowIconHeuristic {
                 onPickSuggestedBrowserResult: { _ in },
                 onPickCategory: { _, _ in },
                 onSubmitSearch: { _, _ in },
-                onCancel: {}
+                onCancel: {},
+                previewSuggestedPlaces: MapSearchOverlayPreviewData.suggestedPlaces
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
-            .presentationBackground(.regularMaterial)
+            .presentationBackground(AppColors.appBackground)
         }
 }
 #endif

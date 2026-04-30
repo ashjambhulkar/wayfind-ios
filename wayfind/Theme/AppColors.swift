@@ -32,8 +32,8 @@ private extension Color {
 }
 
 enum AppColors {
-    static let appBackground = Color(light: Color(hex: 0xFDF8F0), dark: Color(hex: 0x0F0F0F))
-    static let appSurface = Color(light: Color(hex: 0xFFFFFF), dark: Color(hex: 0x1A1A1A))
+    static let appBackground = Color(light: Color(hex: 0xFDF8F0), dark: Color(hex: 0x1C1C1E))
+    static let appSurface = Color(light: Color(hex: 0xFFFFFF), dark: Color(hex: 0x2C2C2E))
     static let appPrimary = Color(light: Color(hex: 0xC26F4B), dark: Color(hex: 0xD4845F))
     static let appPrimaryLight = Color(light: Color(hex: 0xF4E8E0), dark: Color(hex: 0x2A1F1A))
     static let appSecondary = Color(light: Color(hex: 0x2C3E50), dark: Color(hex: 0xE2E8F0))
@@ -44,7 +44,7 @@ enum AppColors {
     static let appSuccess = Color(light: Color(hex: 0x059669), dark: Color(hex: 0x059669))
     static let appWarning = Color(light: Color(hex: 0xD97706), dark: Color(hex: 0xD97706))
     static let appError = Color(light: Color(hex: 0xDC2626), dark: Color(hex: 0xDC2626))
-    static let appDivider = Color(light: Color(hex: 0xF3EDE4), dark: Color(hex: 0x2A2A2A))
+    static let appDivider = Color(light: Color(hex: 0xF3EDE4), dark: Color(hex: 0x3A3A3C))
 
     static let day1 = Color(light: Color(hex: 0x4A90D9), dark: Color(hex: 0x4A90D9))
     static let day2 = Color(light: Color(hex: 0xD4845F), dark: Color(hex: 0xD4845F))

@@ -730,7 +730,7 @@ struct TripMapView: View {
             .presentationContentInteraction(.scrolls)
             // Keep the map pannable/zoomable and avoid the dimmed backdrop while the sheet is up.
             .presentationBackgroundInteraction(.enabled)
-            .presentationBackground(.regularMaterial)
+            .presentationBackground(AppColors.appBackground)
             .presentationDragIndicator(.hidden)
             .interactiveDismissDisabled(true)
             .tint(AppColors.appPrimary)
@@ -941,7 +941,7 @@ struct TripMapView: View {
             .presentationDetents([.height(220), .medium])
             .presentationDragIndicator(.visible)
             .presentationBackgroundInteraction(.enabled)
-            .presentationBackground(.regularMaterial)
+            .presentationBackground(AppColors.appBackground)
     }
 
     private var suggestedPlacesBrowserSheet: some View {
@@ -962,7 +962,7 @@ struct TripMapView: View {
         .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.visible)
         .presentationBackgroundInteraction(.enabled)
-        .presentationBackground(.regularMaterial)
+        .presentationBackground(AppColors.appBackground)
     }
 
     private func searchPreviewSheet(for preview: MapSearchPreview) -> some View {
@@ -988,7 +988,7 @@ struct TripMapView: View {
         )
         .presentationDragIndicator(.visible)
         .presentationBackgroundInteraction(.enabled(upThrough: PlacesSheetLayout.halfOpenDetent))
-        .presentationBackground(.regularMaterial)
+        .presentationBackground(AppColors.appBackground)
     }
 
     @ViewBuilder
@@ -1018,7 +1018,7 @@ struct TripMapView: View {
             )
             .presentationDetents([.height(420), .large])
             .presentationDragIndicator(.visible)
-            .presentationBackground(.regularMaterial)
+            .presentationBackground(AppColors.appBackground)
         }
     }
 
@@ -1897,57 +1897,15 @@ struct TripMapView: View {
         startTime: Date?,
         notes: String?
     ) {
-        let existingCount = places.filter { $0.itineraryDayId == dayId }.count
-        let place = Place(
-            id: UUID(),
-            itineraryDayId: dayId,
-            name: preview.name,
-            address: preview.subtitle.isEmpty ? nil : preview.subtitle,
-            lat: preview.coordinate.latitude,
-            lng: preview.coordinate.longitude,
-            category: (preview.category ?? .attraction).rawValue,
-            notes: notes,
-            sortOrder: existingCount,
-            startTime: startTime,
-            endTime: nil,
-            isBooking: false,
-            bookingType: nil,
-            confirmationNumber: nil,
-            bookingDetails: nil,
-            googlePlaceId: preview.googlePlaceId
-        )
-
         Task {
-            await dataService.addPlace(place)
-
-            // Bridge gating — only Apple-origin previews without a
-            // pre-bound place_id need the bridge.
-            if preview.origin == .apple && (preview.googlePlaceId == nil || preview.googlePlaceId?.isEmpty == true) {
-                Task.detached(priority: .utility) {
-                    do {
-                        let bridge = await PlaceIdBridgeService()
-                        let resolution = try await bridge.resolve(
-                            name: preview.name,
-                            lat: preview.coordinate.latitude,
-                            lng: preview.coordinate.longitude,
-                            cityProfileId: await MainActor.run { resolvedCityProfileId }
-                        )
-                        if case .single(let candidate) = resolution {
-                            var updated = place
-                            updated.googlePlaceId = candidate.placeId
-                            await dataService.updatePlace(updated)
-                            await MainActor.run {
-                                PlatformUsageTelemetry.mapSearch(.bridgeResolved, origin: .apple)
-                            }
-                        }
-                    } catch {
-                        // Best-effort: a missing place_id just means the
-                        // detail sheet renders without enrichment.
-                    }
-                }
-            } else {
-                PlatformUsageTelemetry.mapSearch(.bridgeSkippedOwnedRow, origin: preview.origin)
-            }
+            _ = await ActivityPlaceSaver(dataService: dataService).save(
+                preview: preview,
+                dayId: dayId,
+                existingPlacesForDay: places.filter { $0.itineraryDayId == dayId },
+                startTime: startTime,
+                notes: notes,
+                cityProfileId: resolvedCityProfileId
+            )
 
             await loadMapData()
 
