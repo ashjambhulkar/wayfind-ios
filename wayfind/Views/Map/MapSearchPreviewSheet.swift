@@ -32,7 +32,6 @@ struct MapSearchPreviewSheet: View {
     @State private var fetchedLookAround = false
     @State private var showLookAround = false
     @State private var selectedDayId: UUID?
-    @State private var includeTime = false
     @State private var startTime = Date()
     @State private var notes = ""
 
@@ -56,24 +55,25 @@ struct MapSearchPreviewSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                    placeSummary
-                        .padding(.horizontal, AppSpacing.lg)
-
-                    scheduleAndNotesCard
-                        .padding(.horizontal, AppSpacing.lg)
-
+                VStack(alignment: .leading, spacing: AppSpacing.xl) {
                     visualPreviewCard
                         .padding(.horizontal, AppSpacing.lg)
 
-                    if hasInfoRows {
-                        infoCard
-                            .padding(.horizontal, AppSpacing.lg)
-                    }
+                    placeSummary
+                        .padding(.horizontal, AppSpacing.lg)
+
+                    detailsSection
+                        .padding(.horizontal, AppSpacing.lg)
+
+                    scheduleSection
+                        .padding(.horizontal, AppSpacing.lg)
+
+                    notesCard
+                        .padding(.horizontal, AppSpacing.lg)
 
                     Spacer(minLength: AppSpacing.xl)
                 }
-                .padding(.top, AppSpacing.xl)
+                .padding(.top, AppSpacing.md)
             }
             .scrollIndicators(.hidden)
             .background {
@@ -81,13 +81,15 @@ struct MapSearchPreviewSheet: View {
             }
             .navigationTitle("Place Details")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(AppColors.appBackground, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
+                    Button {
                         onDismiss()
+                    } label: {
+                        Image(systemName: "xmark")
                     }
+                    .accessibilityLabel(String(localized: "Close"))
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
@@ -115,77 +117,81 @@ struct MapSearchPreviewSheet: View {
     // MARK: - Header
 
     private var placeSummary: some View {
-        HStack(alignment: .top, spacing: AppSpacing.md) {
-            placeIcon
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            Text(preview.name)
+                .font(.screenTitle.weight(.bold))
+                .foregroundStyle(AppColors.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.86)
 
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                Text(preview.name)
-                    .font(.sectionHeader.weight(.bold))
-                    .foregroundStyle(AppColors.textPrimary)
+            if !preview.subtitle.isEmpty {
+                Text(preview.subtitle)
+                    .font(.appBody)
+                    .foregroundStyle(AppColors.textSecondary)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.86)
-
-                if !preview.subtitle.isEmpty {
-                    Text(preview.subtitle)
-                        .font(.appBody)
-                        .foregroundStyle(AppColors.textSecondary)
-                        .lineLimit(2)
-                }
-
             }
-
         }
         .padding(.top, AppSpacing.xs)
     }
 
-    private var scheduleAndNotesCard: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                Text("Schedule")
-                    .font(.appCaption.weight(.semibold))
-                    .foregroundStyle(AppColors.textSecondary)
-                    .textCase(.uppercase)
+    private var scheduleSection: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            sectionTitle("Schedule")
 
-                Picker("Day", selection: Binding(
-                    get: { selectedDayId ?? scheduledDays.first?.id ?? UUID() },
-                    set: { selectedDayId = $0 }
-                )) {
-                    ForEach(scheduledDays, id: \.id) { day in
-                        Text(dayLabel(day)).tag(day.id)
+            VStack(spacing: 0) {
+                HStack(spacing: AppSpacing.md) {
+                    Text("Day")
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textPrimary)
+
+                    Spacer(minLength: AppSpacing.md)
+
+                    Picker("Day", selection: Binding(
+                        get: { selectedDayId ?? scheduledDays.first?.id ?? UUID() },
+                        set: { selectedDayId = $0 }
+                    )) {
+                        ForEach(scheduledDays, id: \.id) { day in
+                            Text(dayLabel(day)).tag(day.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .tint(AppColors.appPrimary)
+                }
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.vertical, AppSpacing.md)
+
+                cardDivider(leading: AppSpacing.lg)
+
+                DatePicker(selection: $startTime, displayedComponents: .hourAndMinute) {
+                    HStack(spacing: AppSpacing.md) {
+                        Text("Start time")
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textPrimary)
                     }
                 }
-                .pickerStyle(.menu)
-
-                Toggle(isOn: $includeTime.animation(AppSpring.smooth)) {
-                    Label("Set start time", systemImage: "clock")
-                }
-
-                if includeTime {
-                    DatePicker("Start time", selection: $startTime, displayedComponents: .hourAndMinute)
-                }
+                .tint(AppColors.appPrimary)
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.vertical, AppSpacing.md)
             }
-            .padding(AppSpacing.md)
-
-            Divider()
-                .overlay(AppColors.appDivider)
-
-            VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                Text("Notes")
-                    .font(.appCaption.weight(.semibold))
-                    .foregroundStyle(AppColors.textSecondary)
-                    .textCase(.uppercase)
-
-                TextField("Notes (optional)", text: $notes, axis: .vertical)
-                    .lineLimit(2...5)
-            }
-            .padding(AppSpacing.md)
+            .sectionCardStyle()
         }
-        .font(.appBody)
-        .foregroundStyle(AppColors.textPrimary)
-        .background(AppColors.appSurface, in: RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
+    }
+
+    private var notesCard: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            sectionTitle("Notes")
+
+            TextField("Notes (optional)", text: $notes, axis: .vertical)
+                .lineLimit(3...6)
+                .padding(AppSpacing.lg)
+                .font(.appBody)
+                .foregroundStyle(AppColors.textPrimary)
+                .background(AppColors.appSurface, in: RoundedRectangle(cornerRadius: AppCornerRadius.xLarge, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AppCornerRadius.xLarge, style: .continuous)
+                        .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
+                }
         }
     }
 
@@ -279,110 +285,51 @@ struct MapSearchPreviewSheet: View {
         }
     }
 
-    private var placeIcon: some View {
-        ZStack {
-            Circle()
-                .fill(AppColors.iconBadgeGradient(accent: placeBadgeAccent))
-                .frame(width: 52, height: 52)
-            Image(systemName: previewIconSymbol)
-                .font(.sectionHeader.weight(.semibold))
-                .symbolRenderingMode(.monochrome)
-                .foregroundStyle(AppColors.iconOnColoredSurface)
-        }
-        .accessibilityHidden(true)
-    }
+    // MARK: - Details
 
-    // MARK: - Info card
+    private var detailsSection: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            sectionTitle("Details")
 
-    private var infoCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            let hasAddress = !preview.subtitle.isEmpty
-            let hasPhone = preview.phone?.isEmpty == false
-            let hasWebsite = preview.website != nil
-            if !preview.subtitle.isEmpty {
-                infoRow(
-                    icon: "mappin.and.ellipse",
-                    title: "Address",
-                    text: preview.subtitle,
-                    action: nil
-                )
-            }
-
-            if let phone = preview.phone, !phone.isEmpty {
-                if hasAddress {
-                    Divider().padding(.leading, 50)
+            VStack(spacing: 0) {
+                ForEach(Array(detailRows.enumerated()), id: \.offset) { index, row in
+                    if index > 0 {
+                        cardDivider(leading: AppSpacing.lg + detailIconSize + AppSpacing.md)
+                    }
+                    infoRow(row)
                 }
-                infoRow(
-                    icon: "phone.fill",
-                    title: "Phone",
-                    text: phone,
-                    action: phone.callURL.map { url in { openURL(url) } }
-                )
             }
-
-            if let website = preview.website {
-                if hasAddress || hasPhone {
-                    Divider().padding(.leading, 50)
-                }
-                infoRow(
-                    icon: "safari.fill",
-                    title: "Website",
-                    text: website.host ?? website.absoluteString,
-                    action: { openURL(website) }
-                )
-            }
-
-            if hasAddress || hasPhone || hasWebsite {
-                Divider().padding(.leading, 50)
-            }
-            infoRow(
-                icon: "map.fill",
-                title: "Open in Maps",
-                text: "Apple Maps",
-                action: openInAppleMaps
-            )
-        }
-        .padding(.vertical, AppSpacing.xs)
-        .background(AppColors.appSurface, in: RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            .sectionCardStyle()
         }
     }
 
-    @ViewBuilder
-    private func infoRow(icon: String, title: String, text: String, action: (() -> Void)?) -> some View {
+    private func infoRow(_ row: DetailRow) -> some View {
         Button {
-            guard let action else { return }
+            guard let action = row.action else { return }
             action()
         } label: {
             HStack(spacing: AppSpacing.md) {
-                Image(systemName: icon)
-                    .font(.appBody.weight(.semibold))
-                    .symbolRenderingMode(.monochrome)
-                    .foregroundStyle(AppColors.iconOnColoredSurface)
-                    .frame(width: 26, height: 26)
-                    .background(AppColors.iconBadgeGradient(accent: infoRowBadgeAccent(for: icon)), in: Circle())
+                sectionRowIcon(row.icon, accent: row.accent)
 
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text(title)
+                    Text(row.title)
                         .font(.appCaption)
                         .foregroundStyle(AppColors.textSecondary)
-                    Text(text)
+                    Text(row.text)
                         .font(.appBody)
-                        .foregroundStyle(action != nil ? AppColors.appPrimary : AppColors.textPrimary)
-                        .lineLimit(title == "Address" ? 2 : 1)
+                        .foregroundStyle(row.action == nil ? AppColors.textPrimary : AppColors.appPrimary)
+                        .lineLimit(row.title == "Address" ? 2 : 1)
                 }
 
                 Spacer(minLength: 0)
 
-                if action != nil {
+                if row.action != nil {
                     Image(systemName: "chevron.right")
                         .font(.appCaption.weight(.semibold))
-                        .foregroundStyle(AppColors.iconOnColoredSurface)
+                        .foregroundStyle(AppColors.textPrimary)
                 }
             }
-            .padding(.horizontal, AppSpacing.md)
+            .padding(.horizontal, AppSpacing.lg)
             .padding(.vertical, AppSpacing.md)
             .contentShape(Rectangle())
         }
@@ -400,27 +347,87 @@ struct MapSearchPreviewSheet: View {
         preview.category == nil ? AppColors.appError : placeTint
     }
 
+    private var detailIconSize: CGFloat { 48 }
+
     private var previewIconSymbol: String {
         preview.category?.mapBadgeSymbol ?? "mappin"
     }
 
-    private func infoRowBadgeAccent(for icon: String) -> Color {
-        icon.hasPrefix("mappin") ? AppColors.appError : AppColors.appPrimary
-    }
+    private var detailRows: [DetailRow] {
+        var rows: [DetailRow] = []
+        if !preview.subtitle.isEmpty {
+            rows.append(DetailRow(
+                icon: "mappin.and.ellipse",
+                title: "Address",
+                text: preview.subtitle,
+                accent: AppColors.appError,
+                action: nil
+            ))
+        }
 
-    private var hasInfoRows: Bool {
-        !preview.subtitle.isEmpty || preview.phone?.isEmpty == false || preview.website != nil
+        if let phone = preview.phone, !phone.isEmpty {
+            rows.append(DetailRow(
+                icon: "phone.fill",
+                title: "Phone",
+                text: phone,
+                accent: AppColors.appPrimary,
+                action: phone.callURL.map { url in { openURL(url) } }
+            ))
+        }
+
+        if let website = preview.website {
+            rows.append(DetailRow(
+                icon: "safari.fill",
+                title: "Website",
+                text: website.host ?? website.absoluteString,
+                accent: AppColors.appPrimary,
+                action: { openURL(website) }
+            ))
+        }
+
+        rows.append(DetailRow(
+            icon: "map.fill",
+            title: "Open in Maps",
+            text: "Apple Maps",
+            accent: AppColors.appPrimary,
+            action: openInAppleMaps
+        ))
+
+        return rows
     }
 
     private func savePreview() {
         guard let dayId = selectedDayId ?? scheduledDays.first?.id else { return }
         let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        onAdd(dayId, includeTime ? startTime : nil, trimmedNotes.isEmpty ? nil : trimmedNotes)
+        onAdd(dayId, startTime, trimmedNotes.isEmpty ? nil : trimmedNotes)
     }
 
     private func dayLabel(_ day: ItineraryDay) -> String {
         guard let date = day.date else { return "Day \(day.dayNumber)" }
         return "Day \(day.dayNumber) · \(date.shortFormatted)"
+    }
+
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.sectionHeader.weight(.bold))
+            .foregroundStyle(AppColors.textSecondary)
+            .padding(.leading, AppSpacing.xs)
+    }
+
+    private func cardDivider(leading: CGFloat) -> some View {
+        Divider()
+            .overlay(AppColors.appDivider)
+            .padding(.leading, leading)
+    }
+
+    private func sectionRowIcon(_ systemName: String, accent: Color = AppColors.appPrimary) -> some View {
+        Image(systemName: systemName)
+            .font(.sectionHeader.weight(.bold))
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(AppColors.iconOnColoredSurface)
+            .frame(width: 36, height: 36)
+            .background(AppColors.iconBadgeGradient(accent: accent), in: Circle())
+            .accessibilityHidden(true)
     }
 
     private func openInAppleMaps() {
@@ -496,6 +503,25 @@ private struct LookAroundFullScreenWrapper: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: MKLookAroundViewController, context: Context) {
         uiViewController.scene = scene
+    }
+}
+
+private struct DetailRow {
+    let icon: String
+    let title: String
+    let text: String
+    let accent: Color
+    let action: (() -> Void)?
+}
+
+private extension View {
+    func sectionCardStyle() -> some View {
+        self
+            .background(AppColors.appSurface, in: RoundedRectangle(cornerRadius: AppCornerRadius.xLarge, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.xLarge, style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
+            }
     }
 }
 

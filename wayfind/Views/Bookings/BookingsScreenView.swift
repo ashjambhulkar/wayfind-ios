@@ -16,7 +16,7 @@ struct BookingsScreenView: View {
     @State private var bookingToEdit: Place?
     @State private var pendingUndo: Place?
     @State private var undoTask: Task<Void, Never>?
-    @State private var showAddBooking = false
+    @State private var addBookingCategory: BookingCategory?
     @State private var addBookingTargetDayId: UUID?
 
     private var groupedBookings: [(category: BookingCategory, places: [Place])] {
@@ -33,9 +33,7 @@ struct BookingsScreenView: View {
                     EmptyStateView(
                         sfSymbol: "airplane",
                         title: "No bookings yet",
-                        subtitle: "Add flights, hotels, and reservations to keep everything in one place.",
-                        buttonTitle: "+ Add a Booking",
-                        buttonAction: { showAddBooking = true }
+                        subtitle: "Use the Add menu to create a flight, hotel, restaurant, car rental, activity, or transport booking."
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -93,9 +91,20 @@ struct BookingsScreenView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    HapticManager.light()
-                    showAddBooking = true
+                Menu {
+                    ForEach(BookingCategory.allCases) { category in
+                        Button {
+                            openAddBooking(for: category)
+                        } label: {
+                            Label {
+                                Text(category.label)
+                            } icon: {
+                                Image(systemName: category.sfSymbol)
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(category.color)
+                            }
+                        }
+                    }
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 17, weight: .semibold))
@@ -108,8 +117,9 @@ struct BookingsScreenView: View {
         .task {
             await loadBookings()
         }
-        .navigationDestination(isPresented: $showAddBooking) {
+        .navigationDestination(item: $addBookingCategory) { category in
             AddBookingView(
+                initialType: category,
                 onSave: { savedPlace, cost in
                     Task {
                         await loadBookings()
@@ -247,6 +257,11 @@ struct BookingsScreenView: View {
             collected.append(contentsOf: places.filter(\.isBooking))
         }
         allBookings = collected
+    }
+
+    private func openAddBooking(for category: BookingCategory) {
+        HapticManager.light()
+        addBookingCategory = category
     }
 
     private func deleteBooking(_ place: Place) {

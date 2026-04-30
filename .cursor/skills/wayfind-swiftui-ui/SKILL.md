@@ -29,6 +29,15 @@ When the **apple-docs** MCP server is enabled (see `.cursor/mcp.json`), use it f
 - **Safe areas**: respect home indicator. **`KeyWindowSafeArea.bottomInset`** is for overlays when environment insets are wrong; it is not needed for the **system** tab bar, which the OS lays out.
 - **Hit targets**: keep tappable areas ≥ 44pt; use **`contentShape`** when labels are small.
 
+## Apple Maps-style visual direction
+
+- Treat map, search, route, booking, and place-detail UI as one family: layered native sheets, grouped surfaces, compact readable rows, and restrained SF Symbol iconography.
+- Prefer native bottom sheets with `.presentationDetents`, `.presentationDragIndicator`, grouped `List` / `Section` content, and `AppColors.appBackground` behind raised `AppColors.appSurface` cards.
+- Standard rows should use a leading `MapStyleIcon`, title text, subdued secondary metadata, and an optional trailing chevron/status. Keep row tap targets at least 44pt.
+- Use `MapStyleIcon` for place, booking, route, search, and metadata icons unless the screen has an existing specialized control such as `MapChromeIconButton`.
+- Keep icons visually consistent: SF Symbols, semibold weight, rounded/circular tinted containers, and app color tokens. Do not invent one-off icon boxes in individual screens.
+- Keep spacing consistent with `AppSpacing`; cards/sections should use `AppCornerRadius` and `AppColors.appDivider` for subtle borders.
+
 ## Layout checklist (before shipping UI)
 
 1. **Proposed size**: What does `GeometryReader` / `ZStack` / parent **`frame(maxHeight:)`** pass to children? Avoid infinite vertical proposals on non‑flexible UIKit hosts.

@@ -7,13 +7,15 @@
 
 import SwiftUI
 
-enum BookingCategory: String, CaseIterable, Codable {
+enum BookingCategory: String, CaseIterable, Codable, Identifiable {
     case flight
     case hotel
     case restaurant
     case carRental
     case activity
     case transport
+
+    var id: String { rawValue }
 
     /// Sourced from `PlaceCategoryFamily` so all transport-y bookings share a
     /// hue, all stays share a hue, etc. — see `PlaceTypeRegistry.swift`.
