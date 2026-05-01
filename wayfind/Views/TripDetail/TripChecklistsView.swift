@@ -112,7 +112,6 @@ struct TripChecklistsView: View {
                     } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(AppColors.appPrimary)
                     }
                     .accessibilityLabel(String(localized: "Add new item"))
                 }

@@ -530,7 +530,46 @@ struct TripMapView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .tint(AppColors.appPrimary)
+            .tint(.primary)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        HapticManager.light()
+                        centerOnUserLocation()
+                    } label: {
+                        Image(systemName: "location.fill")
+                    }
+                    .accessibilityLabel("Current location")
+
+                    Button {
+                        HapticManager.light()
+                        showMapModesSheet = true
+                    } label: {
+                        Image(systemName: mapMode == .hybrid ? "globe.americas.fill" : "map")
+                    }
+                    .accessibilityLabel("Map style")
+
+                    Menu {
+                        ForEach(TripTransportMode.allCases) { mode in
+                            Button {
+                                HapticManager.selection()
+                                transportMode = mode
+                                polylineCacheVersion &+= 1
+                            } label: {
+                                Label(
+                                    mode.displayName,
+                                    systemImage: transportMode == mode ? "checkmark" : mode.sfSymbol
+                                )
+                            }
+                        }
+                    } label: {
+                        Image(systemName: transportMode.sfSymbol)
+                    }
+                    .accessibilityLabel("Transport mode")
+                    .accessibilityValue(transportMode.displayName)
+                    .accessibilityHint("Changes how routes between stops are drawn")
+                }
+            }
     }
 
     private var mapSearchableView: some View {
@@ -630,13 +669,15 @@ struct TripMapView: View {
             }
     }
 
-    /// One native sheet for the whole map tab: always presented when `sharedState` exists.
-    /// Interactive dismiss is disabled; collapsing uses the docked detent instead.
+    /// One native sheet for the whole map tab. The host flips
+    /// `showPlacesSheet` off before leaving Map so the sheet does not flash
+    /// over the itinerary during the pop transition.
     private var placesSheetPresentationBinding: Binding<Bool> {
         Binding(
-            get: { sharedState != nil },
+            get: { sharedState?.showPlacesSheet == true },
             set: { allowDismiss in
                 guard allowDismiss == false, sharedState != nil else { return }
+                sharedState?.showPlacesSheet = false
                 sharedState?.placesSheetLayout = .docked
             }
         )
@@ -645,9 +686,8 @@ struct TripMapView: View {
     @ViewBuilder
     private var mapSheetsView: some View {
         if sharedState != nil {
-            // Tab context (iOS 26+): the places sheet is always presented
-            // (`placesSheetPresentationBinding.get` unconditionally returns
-            // true). Root-level secondary sheets — place detail, map style,
+            // Tab context (iOS 26+): the places sheet is presented while
+            // the map module is active. Root-level secondary sheets — place detail, map style,
             // add place — MUST nest inside the places sheet, otherwise iOS
             // has to dismiss the places sheet to present them and never
             // auto-re-presents it (the `isPresented` binding never
@@ -987,9 +1027,6 @@ struct TripMapView: View {
                         fitMapForCurrentMode()
                     }
                 }
-                .overlay(alignment: .topTrailing) {
-                    mapControlStack
-                }
 
             searchThisAreaOverlay
                 .padding(.bottom, AppSpacing.sm)
@@ -1143,85 +1180,6 @@ struct TripMapView: View {
             }
         )
         .accessibilityLabel("Map of places for \(trip.title)")
-    }
-
-    /// Apple Maps–style vertical glass pill (one capsule, hairline dividers, light icons).
-    private var mapControlStack: some View {
-        VStack(spacing: 0) {
-            Button {
-                HapticManager.light()
-                centerOnUserLocation()
-            } label: {
-                mapPillIcon("location.fill")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Current location")
-
-            mapPillDivider
-
-            Button {
-                HapticManager.light()
-                showMapModesSheet = true
-            } label: {
-                mapPillIcon(mapMode == .hybrid ? "globe.americas.fill" : "map")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Map style")
-
-            mapPillDivider
-
-            Menu {
-                ForEach(TripTransportMode.allCases) { mode in
-                    Button {
-                        HapticManager.selection()
-                        transportMode = mode
-                        polylineCacheVersion &+= 1
-                    } label: {
-                        Label(
-                            mode.displayName,
-                            systemImage: transportMode == mode ? "checkmark" : mode.sfSymbol
-                        )
-                    }
-                }
-            } label: {
-                mapPillIcon(transportMode.sfSymbol)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Transport mode")
-            .accessibilityValue(transportMode.displayName)
-            .accessibilityHint("Changes how routes between stops are drawn")
-        }
-        .frame(width: 42)
-        .environment(\.colorScheme, .dark)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-        }
-        .clipShape(Capsule())
-        .overlay {
-            Capsule()
-                .strokeBorder(Color.white.opacity(0.28), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
-        .padding(.top, KeyWindowSafeArea.topInset)
-        .offset(y: -54)
-        .padding(.trailing, AppSpacing.md)
-    }
-
-    private var mapPillDivider: some View {
-        Rectangle()
-            .fill(Color.white.opacity(0.28))
-            .frame(height: 0.33)
-            .padding(.horizontal, 8)
-    }
-
-    private func mapPillIcon(_ systemName: String) -> some View {
-        Image(systemName: systemName)
-            .font(.system(size: 16, weight: .medium))
-            .symbolRenderingMode(.hierarchical)
-            .foregroundStyle(.white)
-            .frame(width: 42, height: 42)
-            .contentShape(Rectangle())
     }
 
     // MARK: - Search result selected from autocomplete

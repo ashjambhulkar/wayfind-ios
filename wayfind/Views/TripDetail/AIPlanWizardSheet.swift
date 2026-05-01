@@ -67,7 +67,6 @@ struct AIPlanWizardSheet: View {
                     Button("Cancel", role: .cancel) {
                         attemptDismiss()
                     }
-                    .foregroundStyle(AppColors.appPrimary)
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {

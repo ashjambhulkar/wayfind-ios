@@ -280,7 +280,6 @@ struct MapSearchOverlay: View {
                         }
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(AppColors.textSecondary)
                     }
                     .accessibilityLabel(String(localized: "Close"))
                 }

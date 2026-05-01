@@ -297,29 +297,14 @@ private struct AppRootTabView: View {
                             activeTripDetailViewModel = viewModel
                             attachRealtimeIfReady()
                         },
+                        onCloseTrip: { coordinator.returnToList() },
+                        onOpenMap: { openTripMapWithPlacesSheetHalfOpen() },
                         onOpenBudgetTab: { tripModulePath = [.budget] },
+                        onOpenBookingsTab: { tripModulePath = [.bookings] },
+                        onOpenDocumentsTab: { tripModulePath = [.documents] },
+                        onOpenAIPlanner: { showAIPlanner = true },
                         budgetViewModel: activeBudgetViewModel
                     )
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button {
-                                coordinator.returnToList()
-                            } label: {
-                                Label("Trips", systemImage: "chevron.backward")
-                            }
-                        }
-                        if tripModulePath.isEmpty {
-                            TripDetailHubBottomBar(
-                                showsAI: collaborationStore.canEdit,
-                                showsDocuments: collaborationStore.canViewDocuments,
-                                onMap: { openTripMapWithPlacesSheetHalfOpen() },
-                                onBudget: { tripModulePath = [.budget] },
-                                onBookings: { tripModulePath = [.bookings] },
-                                onDocuments: { tripModulePath = [.documents] },
-                                onAI: { showAIPlanner = true }
-                            )
-                        }
-                    }
                     .navigationDestination(for: TripDetailModule.self) { module in
                         tripModuleDestination(module: module, trip: trip)
                     }
@@ -328,7 +313,7 @@ private struct AppRootTabView: View {
                 TripsListView()
             }
         }
-        .tint(AppColors.appPrimary)
+        .tint(.primary)
         .environment(coordinator)
         .environment(collaborationStore)
         .environment(collaborationUi)
@@ -364,6 +349,12 @@ private struct AppRootTabView: View {
             guard newValue != nil else { return }
             if let pending = pendingDeepLinkStore.consume() {
                 Task { await handlePendingDeepLink(pending) }
+            }
+        }
+        .onChange(of: tripModulePath) { oldPath, newPath in
+            if oldPath.contains(.map), !newPath.contains(.map) {
+                mapTabState.showPlacesSheet = false
+                mapTabState.placesSheetLayout = .docked
             }
         }
         // Phase 3 — soft fade overlay that lands above the trip view but

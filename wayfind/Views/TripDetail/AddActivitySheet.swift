@@ -104,7 +104,7 @@ struct AddActivitySheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppColors.appBackground)
-        .tint(AppColors.appPrimary)
+        .tint(.primary)
         .sheet(isPresented: $showSuggestedPlacesBrowser) {
             SuggestedPlacesAllSheet(
                 cityProfileId: searchContext?.cityProfileId,
@@ -140,7 +140,6 @@ struct AddActivitySheet: View {
                         } label: {
                             Image(systemName: "chevron.left")
                                 .font(.appBody.weight(.medium))
-                                .foregroundStyle(AppColors.textSecondary)
                         }
                     }
 
@@ -171,7 +170,7 @@ struct AddActivitySheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .presentationBackground(AppColors.appBackground)
-        .tint(AppColors.appPrimary)
+        .tint(.primary)
     }
 
     private var searchList: some View {

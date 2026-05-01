@@ -1,4 +1,5 @@
 import CoreLocation
+import MapKit
 import Observation
 import SwiftUI
 
@@ -79,10 +80,15 @@ struct TripDetailView: View {
     /// realtime service needs a direct viewmodel reference because the
     /// kick handler refetches `loadTripData()` on a meaningful change.
     var onViewModelCreated: ((TripDetailViewModel) -> Void)? = nil
+    var onCloseTrip: (() -> Void)? = nil
     /// Optional handle from the parent tab view used by the Budget pill in
     /// the pills row to switch to the dedicated Budget tab. When `nil` the
     /// pill is hidden — keeps this view standalone-renderable in previews.
+    var onOpenMap: (() -> Void)? = nil
     var onOpenBudgetTab: (() -> Void)? = nil
+    var onOpenBookingsTab: (() -> Void)? = nil
+    var onOpenDocumentsTab: (() -> Void)? = nil
+    var onOpenAIPlanner: (() -> Void)? = nil
     /// Owned by `AppRootTabView` so the Budget tab and the pill on the home
     /// tab read from the same snapshot. The pill shows the current trip
     /// total when present; on a fresh trip we just show "Add Expense".
@@ -138,10 +144,6 @@ struct TripDetailView: View {
         shouldShowOpaqueNavigationBar ? colorScheme : .dark
     }
 
-    private var navigationToolbarForegroundColor: Color {
-        AppColors.appPrimary
-    }
-
     private var checklistProgressText: String {
         guard let viewModel else { return "0/0" }
         return "\(viewModel.checklistDoneCount)/\(viewModel.checklistTotalCount)"
@@ -154,9 +156,7 @@ struct TripDetailView: View {
             showTripChecklists = true
         } label: {
             Image(systemName: "checklist")
-                .foregroundStyle(navigationToolbarForegroundColor)
         }
-        .tint(navigationToolbarForegroundColor)
         .accessibilityLabel(checklistToolbarAccessibilityLabel)
         .accessibilityHint("Opens the checklist for this trip.")
     }
@@ -169,9 +169,7 @@ struct TripDetailView: View {
                 showTripNotes = true
             } label: {
                 Image(systemName: "note.text")
-                    .foregroundStyle(navigationToolbarForegroundColor)
             }
-            .tint(navigationToolbarForegroundColor)
             .accessibilityLabel(notesToolbarAccessibilityLabel)
             .accessibilityHint("Opens notes for this trip.")
         }
@@ -186,7 +184,6 @@ struct TripDetailView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "checklist")
-                        .foregroundStyle(navigationToolbarForegroundColor)
                     Text(checklistProgressText)
                         .font(.appCaption.weight(.semibold))
                         .monospacedDigit()
@@ -211,7 +208,6 @@ struct TripDetailView: View {
                     showTripNotes = true
                 } label: {
                     Image(systemName: "note.text")
-                        .foregroundStyle(navigationToolbarForegroundColor)
                         .frame(width: 30)
                         .frame(minHeight: 28)
                         .contentShape(Rectangle())
@@ -221,7 +217,6 @@ struct TripDetailView: View {
                 .accessibilityHint("Opens notes for this trip.")
             }
         }
-        .tint(navigationToolbarForegroundColor)
         .padding(.vertical, 3)
         .environment(\.colorScheme, navigationToolbarColorScheme)
     }
@@ -296,21 +291,6 @@ struct TripDetailView: View {
 
     @ViewBuilder
     private var compactTripToolbarMenuContent: some View {
-        Button {
-            HapticManager.light()
-            showTripChecklists = true
-        } label: {
-            Label("Checklist", systemImage: "checklist")
-        }
-        if collaborationStore.canViewNotes {
-            Button {
-                HapticManager.light()
-                showTripNotes = true
-            } label: {
-                Label("Notes", systemImage: "note.text")
-            }
-        }
-        Divider()
         tripActionsMenuContent
     }
 
@@ -566,15 +546,23 @@ struct TripDetailView: View {
         .toolbarBackground(shouldShowOpaqueNavigationBar ? .visible : .hidden, for: .navigationBar)
         .toolbarColorScheme(navigationToolbarColorScheme, for: .navigationBar)
         .toolbar {
+            if let onCloseTrip {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        onCloseTrip()
+                    } label: {
+                        Label("Trips", systemImage: "chevron.backward")
+                    }
+                }
+            }
+
             if shouldCollapseNavigationToolbarActions {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         compactTripToolbarMenuContent
                     } label: {
                         Image(systemName: "ellipsis.circle")
-                            .foregroundStyle(navigationToolbarForegroundColor)
                     }
-                    .tint(navigationToolbarForegroundColor)
                     .accessibilityLabel("Trip actions")
                 }
             } else {
@@ -592,24 +580,33 @@ struct TripDetailView: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    checklistNotesToolbarGroup
-                }
-
-                if #available(iOS 26.0, *) {
-                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         tripActionsMenuContent
                     } label: {
                         Image(systemName: "ellipsis.circle")
-                            .foregroundStyle(navigationToolbarForegroundColor)
                     }
-                    .tint(navigationToolbarForegroundColor)
                     .accessibilityLabel("Trip actions")
                 }
             }
+
+            TripDetailHubBottomBar(
+                showsAI: collaborationStore.canEdit,
+                showsDocuments: collaborationStore.canViewDocuments,
+                showsNotes: collaborationStore.canViewNotes,
+                onAddActivity: { openAddActivityFromToolbar() },
+                onChecklist: {
+                    HapticManager.light()
+                    showTripChecklists = true
+                },
+                onNotes: {
+                    HapticManager.light()
+                    showTripNotes = true
+                },
+                onBudget: { onOpenBudgetTab?() },
+                onBookings: { onOpenBookingsTab?() },
+                onDocuments: { onOpenDocumentsTab?() },
+                onAI: { onOpenAIPlanner?() }
+            )
         }
         .sheet(isPresented: $showMembersSheet) {
             TripMembersSheet(trip: viewModel?.trip ?? trip)
@@ -736,6 +733,18 @@ struct TripDetailView: View {
                         onInviteMembers: { showMembersSheet = true }
                     )
 
+                    TripDetailMapPreviewCard(
+                        items: mapPreviewItems(viewModel: viewModel),
+                        fallbackCoordinate: tripFallbackCoordinate(for: viewModel.trip),
+                        onOpenMap: {
+                            HapticManager.light()
+                            onOpenMap?()
+                        }
+                    )
+                    .padding(.horizontal, AppSpacing.lg)
+                    .padding(.top, AppSpacing.lg)
+                    .padding(.bottom, AppSpacing.sm)
+
                     LazyVStack(spacing: 0) {
                         if !viewModel.scheduledDays.isEmpty {
                             HStack(alignment: .center, spacing: AppSpacing.md) {
@@ -859,6 +868,64 @@ struct TripDetailView: View {
 
     // MARK: - Day Section
 
+    private func openAddActivityFromToolbar() {
+        guard let viewModel, let targetDay = defaultAddActivityDay(viewModel: viewModel) else {
+            toastManager.show(ToastData(message: "Trip days are unavailable", type: .error))
+            return
+        }
+        addPlaceTargetDay = targetDay.dayNumber
+        HapticManager.light()
+        showAddPlace = true
+    }
+
+    private func defaultAddActivityDay(viewModel: TripDetailViewModel) -> ItineraryDay? {
+        if let currentDayNumber = viewModel.trip.currentDayNumber,
+           let currentDay = viewModel.scheduledDays.first(where: { $0.dayNumber == currentDayNumber }) {
+            return currentDay
+        }
+        return viewModel.scheduledDays.sorted { $0.dayNumber < $1.dayNumber }.first
+    }
+
+    private func mapPreviewItems(viewModel: TripDetailViewModel) -> [TripDetailMapPreviewItem] {
+        var items: [TripDetailMapPreviewItem] = []
+        let scheduledDays = viewModel.scheduledDays
+
+        for day in scheduledDays {
+            let places = viewModel.places(for: day)
+                .filter { $0.hasUsableCoordinate }
+            for (index, place) in places.enumerated() {
+                items.append(TripDetailMapPreviewItem(
+                    id: place.id,
+                    coordinate: place.coordinate,
+                    kind: place.isBooking ? .booking(place.bookingCategoryEnum) : .place(index + 1, day.dayNumber),
+                    title: place.name
+                ))
+            }
+        }
+
+        let wishlistDayNumber = (scheduledDays.map(\.dayNumber).max() ?? 0) + 1
+        let wishlistItems = viewModel.wishlistPlaces
+            .filter { $0.hasUsableCoordinate }
+            .enumerated()
+            .map { index, place in
+                TripDetailMapPreviewItem(
+                    id: place.id,
+                    coordinate: place.coordinate,
+                    kind: place.isBooking ? .booking(place.bookingCategoryEnum) : .place(index + 1, wishlistDayNumber),
+                    title: place.name
+                )
+            }
+        items.append(contentsOf: wishlistItems)
+        return items
+    }
+
+    private func tripFallbackCoordinate(for trip: Trip) -> CLLocationCoordinate2D? {
+        guard let lat = trip.lat, let lng = trip.lng, CLLocationCoordinate2DIsValid(CLLocationCoordinate2D(latitude: lat, longitude: lng)) else {
+            return nil
+        }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    }
+
     private func displayTimeZone(for day: ItineraryDay, viewModel: TripDetailViewModel) -> TimeZone {
         if let raw = day.timeZoneIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
            let tz = TimeZone(identifier: raw) {
@@ -906,13 +973,12 @@ struct TripDetailView: View {
         let emptyDayPrompt = emptyDayPrompt(for: day, isQuietEmptyDay: isQuietEmptyDay, viewModel: viewModel)
         let preview = collapsedDayPreview(places: places, ongoingBookings: ongoingForDay.map(\.place))
         let dayNavigationTitle = "\(viewModel.dayHeaderDayLabel(for: day)) · \(viewModel.dayHeaderDateLabel(for: day, timelineTimeZone: dayTZ))"
-        let isActiveNavigationDay = activeItineraryNavigationTitle == dayNavigationTitle
 
         Section {
             if !viewModel.isDayCollapsed(day) {
                 VStack(spacing: 0) {
                     Spacer()
-                        .frame(height: isActiveNavigationDay ? AppSpacing.xs : AppSpacing.md)
+                        .frame(height: AppSpacing.md)
 
                     DaySummaryView(
                         places: places,
@@ -1014,24 +1080,18 @@ struct TripDetailView: View {
                 }
             }
         } header: {
-            if isActiveNavigationDay && !viewModel.isDayCollapsed(day) {
-                Color.clear
-                    .frame(height: 0)
-                    .accessibilityHidden(true)
-            } else {
-                DaySectionHeaderView(
-                    day: day,
-                    dayLabel: viewModel.dayHeaderDayLabel(for: day),
-                    dateLabel: viewModel.dayHeaderDateLabel(for: day, timelineTimeZone: dayTZ),
-                    isCollapsed: viewModel.isDayCollapsed(day),
-                    contentPreview: preview,
-                    isQuietEmptyDay: isQuietEmptyDay,
-                    emptyDayPrompt: emptyDayPrompt
-                ) {
-                    viewModel.toggleDayCollapse(day)
-                }
-                .id(day.id)
+            DaySectionHeaderView(
+                day: day,
+                dayLabel: viewModel.dayHeaderDayLabel(for: day),
+                dateLabel: viewModel.dayHeaderDateLabel(for: day, timelineTimeZone: dayTZ),
+                isCollapsed: viewModel.isDayCollapsed(day),
+                contentPreview: preview,
+                isQuietEmptyDay: isQuietEmptyDay,
+                emptyDayPrompt: emptyDayPrompt
+            ) {
+                viewModel.toggleDayCollapse(day)
             }
+            .id(day.id)
         } footer: {
             Color.clear
                 .frame(height: AppSpacing.lg)
@@ -1348,6 +1408,194 @@ struct TripDetailView: View {
     }
 }
 
+private enum TripDetailMapPreviewKind: Hashable {
+    case place(Int, Int)
+    case booking(BookingCategory?)
+}
+
+private struct TripDetailMapPreviewItem: Identifiable, Hashable {
+    let id: UUID
+    let coordinate: CLLocationCoordinate2D
+    let kind: TripDetailMapPreviewKind
+    let title: String
+
+    static func == (lhs: TripDetailMapPreviewItem, rhs: TripDetailMapPreviewItem) -> Bool {
+        lhs.id == rhs.id
+            && lhs.coordinate.latitude == rhs.coordinate.latitude
+            && lhs.coordinate.longitude == rhs.coordinate.longitude
+            && lhs.kind == rhs.kind
+            && lhs.title == rhs.title
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(coordinate.latitude)
+        hasher.combine(coordinate.longitude)
+        hasher.combine(kind)
+        hasher.combine(title)
+    }
+}
+
+private struct TripDetailMapPreviewCard: View {
+    let items: [TripDetailMapPreviewItem]
+    let fallbackCoordinate: CLLocationCoordinate2D?
+    let onOpenMap: () -> Void
+
+    @State private var position: MapCameraPosition = .automatic
+
+    var body: some View {
+        Button(action: onOpenMap) {
+            ZStack(alignment: .topLeading) {
+                mapPreview
+
+                LinearGradient(
+                    colors: [
+                        .black.opacity(0.58),
+                        .black.opacity(0.28),
+                        .clear
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text("Places")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                    Label("\(items.count)", systemImage: "mappin.circle.fill")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.82))
+                        .labelStyle(.titleAndIcon)
+                }
+                .padding(.leading, AppSpacing.md)
+                .padding(.top, AppSpacing.md)
+            }
+            .frame(height: TripDetailMapPreviewMetrics.height)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.xLarge, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.xLarge, style: .continuous)
+                    .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: AppCornerRadius.xLarge, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Places map, \(items.count) places")
+        .accessibilityHint("Opens the map for this trip.")
+        .onAppear { updateCamera() }
+        .onChange(of: items) { _, _ in updateCamera() }
+    }
+
+    private var mapPreview: some View {
+        Map(position: $position, interactionModes: []) {
+            ForEach(items.prefix(TripDetailMapPreviewMetrics.maxPins)) { item in
+                Annotation(item.title, coordinate: item.coordinate, anchor: .bottom) {
+                    annotationView(for: item)
+                }
+            }
+        }
+        .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func annotationView(for item: TripDetailMapPreviewItem) -> some View {
+        switch item.kind {
+        case .place(let index, let dayNumber):
+            Text("\(index)")
+                .font(.callout.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: TripDetailMapPreviewMetrics.placePinSize, height: TripDetailMapPreviewMetrics.placePinSize)
+                .background(AppColors.dayColor(for: dayNumber), in: Circle())
+                .overlay {
+                    Circle()
+                        .strokeBorder(.white, lineWidth: 2.5)
+                }
+                .shadow(color: .black.opacity(0.22), radius: 5, y: 3)
+        case .booking(let category):
+            Image(systemName: category?.sfSymbol ?? "ticket.fill")
+                .font(.callout.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: TripDetailMapPreviewMetrics.bookingPinSize, height: TripDetailMapPreviewMetrics.bookingPinSize)
+                .background(category?.color ?? AppColors.appPrimary, in: RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+                .overlay(alignment: .bottom) {
+                    Image(systemName: "triangle.fill")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(category?.color ?? AppColors.appPrimary)
+                        .rotationEffect(.degrees(180))
+                        .offset(y: 5)
+                }
+                .padding(.bottom, 5)
+                .shadow(color: .black.opacity(0.22), radius: 5, y: 3)
+        }
+    }
+
+    private func updateCamera() {
+        let coordinates = items.map(\.coordinate)
+        if coordinates.isEmpty, let fallbackCoordinate {
+            position = .region(MKCoordinateRegion(
+                center: fallbackCoordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+            ))
+            return
+        }
+
+        guard let region = Self.region(for: coordinates) else {
+            position = .automatic
+            return
+        }
+        position = .region(region)
+    }
+
+    private static func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion? {
+        guard !coordinates.isEmpty else { return nil }
+        if coordinates.count == 1 {
+            return MKCoordinateRegion(
+                center: coordinates[0],
+                span: MKCoordinateSpan(latitudeDelta: 0.035, longitudeDelta: 0.035)
+            )
+        }
+
+        let lats = coordinates.map(\.latitude)
+        let lngs = coordinates.map(\.longitude)
+        guard let minLat = lats.min(),
+              let maxLat = lats.max(),
+              let minLng = lngs.min(),
+              let maxLng = lngs.max() else {
+            return nil
+        }
+
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(
+                latitude: (minLat + maxLat) / 2,
+                longitude: (minLng + maxLng) / 2
+            ),
+            span: MKCoordinateSpan(
+                latitudeDelta: max((maxLat - minLat) * 1.5, 0.025),
+                longitudeDelta: max((maxLng - minLng) * 1.5, 0.025)
+            )
+        )
+    }
+}
+
+private enum TripDetailMapPreviewMetrics {
+    static let height: CGFloat = 134
+    static let maxPins = 16
+    static let placePinSize: CGFloat = 34
+    static let bookingPinSize: CGFloat = 34
+}
+
+private extension Place {
+    var hasUsableCoordinate: Bool {
+        guard let lat, let lng else { return false }
+        let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        return CLLocationCoordinate2DIsValid(coordinate)
+            && abs(lat) <= 90
+            && abs(lng) <= 180
+            && !(lat == 0 && lng == 0)
+    }
+}
+
 // MARK: - Hero header (cover image)
 
 /// Full-bleed cover: image runs under the status bar; nav is transparent over the top (tinted via scrims in `TripDetailView`).
@@ -1483,7 +1731,7 @@ private struct TripDetailHeroHeader: View {
 
 private enum TripDetailOverlayMetrics {
     /// Design height of the **main** cover below the status inset (nav floats over the upper part of this band).
-    static let visibleHeroHeight: CGFloat = 304
+    static let visibleHeroHeight: CGFloat = 250
     static let heroImageLoadingBackground = Color(red: 0.12, green: 0.12, blue: 0.14)
     /// SwiftUI pins section headers to the scroll view's top edge. The
     /// itinerary scroll intentionally ignores the top safe area for the hero,
@@ -1546,83 +1794,62 @@ extension TripDetailView {
 }
 
 // Lives in this file so SwiftUI canvas typechecking (single-file) always sees the hub next to `#Preview`.
-/// iOS 26+: Map + Budget + Bookings + Documents | spacer | AI. Earlier OS: same utilities first, AI last.
+/// Native bottom utility toolbar for the trip itinerary root.
 struct TripDetailHubBottomBar: ToolbarContent {
     var showsAI: Bool
     var showsDocuments: Bool
-    var onMap: () -> Void
+    var showsNotes: Bool
+    var onAddActivity: () -> Void
+    var onChecklist: () -> Void
+    var onNotes: () -> Void
     var onBudget: () -> Void
     var onBookings: () -> Void
     var onDocuments: () -> Void
     var onAI: () -> Void
 
     var body: some ToolbarContent {
-        if #available(iOS 26.0, *) {
-            ToolbarItemGroup(placement: .bottomBar) {
-                mapButton
-                budgetBookingsDocumentsButtons
-            }
+        ToolbarItemGroup(placement: .bottomBar) {
+            addActivityButton
+            budgetButton
+            bookingsButton
             if showsAI {
-                ToolbarSpacer(.flexible, placement: .bottomBar)
-                ToolbarItem(placement: .bottomBar) {
-                    aiButton
-                }
+                aiButton
             }
-        } else {
-            ToolbarItemGroup(placement: .bottomBar) {
-                mapButton
-                budgetBookingsDocumentsButtons
-            }
-            if showsAI {
-                ToolbarItem(placement: .bottomBar) {
-                    aiButton
-                }
-            }
+            moreButton
         }
     }
 
-    private var mapButton: some View {
-        Button(action: onMap) {
-            Image(systemName: "map")
+    private var addActivityButton: some View {
+        Button(action: onAddActivity) {
+            Image(systemName: "plus")
         }
         .tint(.primary)
-        .accessibilityLabel(String(localized: "Map"))
+        .accessibilityLabel(String(localized: "Add Activity"))
         .accessibilityHint(
-            String(localized: "Opens the map for this trip. Tap Back to return to the itinerary.")
+            String(localized: "Opens the add activity sheet for this trip.")
         )
     }
 
-    private var budgetBookingsDocumentsButtons: some View {
-        Group {
-            Button(action: onBudget) {
-                Image(systemName: "creditcard")
-            }
-            .tint(.primary)
-            .accessibilityLabel(String(localized: "Budget"))
-            .accessibilityHint(
-                String(localized: "Opens the budget for this trip. Tap Back to return to the itinerary.")
-            )
-
-            Button(action: onBookings) {
-                Image(systemName: "ticket")
-            }
-            .tint(.primary)
-            .accessibilityLabel(String(localized: "Bookings"))
-            .accessibilityHint(
-                String(localized: "Opens bookings for this trip. Tap Back to return to the itinerary.")
-            )
-
-            if showsDocuments {
-                Button(action: onDocuments) {
-                    Image(systemName: "doc.text")
-                }
-                .tint(.primary)
-                .accessibilityLabel(String(localized: "Documents"))
-                .accessibilityHint(
-                    String(localized: "Opens documents for this trip. Tap Back to return to the itinerary.")
-                )
-            }
+    private var budgetButton: some View {
+        Button(action: onBudget) {
+            Image(systemName: "creditcard")
         }
+        .tint(.primary)
+        .accessibilityLabel(String(localized: "Budget"))
+        .accessibilityHint(
+            String(localized: "Opens the budget for this trip. Tap Back to return to the itinerary.")
+        )
+    }
+
+    private var bookingsButton: some View {
+        Button(action: onBookings) {
+            Image(systemName: "ticket")
+        }
+        .tint(.primary)
+        .accessibilityLabel(String(localized: "Bookings"))
+        .accessibilityHint(
+            String(localized: "Opens bookings for this trip. Tap Back to return to the itinerary.")
+        )
     }
 
     private var aiButton: some View {
@@ -1631,12 +1858,40 @@ struct TripDetailHubBottomBar: ToolbarContent {
             onAI()
         } label: {
             Image(systemName: "sparkles")
-                .symbolRenderingMode(.monochrome)
-                .foregroundStyle(AppColors.appPrimary)
         }
-        .tint(AppColors.appPrimary)
+        .tint(.primary)
         .accessibilityLabel(String(localized: "Plan with AI"))
         .accessibilityHint(String(localized: "Opens the day planner for this trip."))
+    }
+
+    private var moreButton: some View {
+        Menu {
+            Button {
+                onChecklist()
+            } label: {
+                Label("Checklist", systemImage: "checklist")
+            }
+
+            if showsNotes {
+                Button {
+                    onNotes()
+                } label: {
+                    Label("Notes", systemImage: "note.text")
+                }
+            }
+
+            if showsDocuments {
+                Button {
+                    onDocuments()
+                } label: {
+                    Label("Documents", systemImage: "doc.text")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .tint(.primary)
+        .accessibilityLabel(String(localized: "More"))
     }
 }
 
@@ -1661,15 +1916,6 @@ private struct TripDetailPreviewHost: View {
                         Label("Trips", systemImage: "chevron.backward")
                             .allowsHitTesting(false)
                     }
-                    TripDetailHubBottomBar(
-                        showsAI: true,
-                        showsDocuments: true,
-                        onMap: {},
-                        onBudget: {},
-                        onBookings: {},
-                        onDocuments: {},
-                        onAI: {}
-                    )
                 }
         }
         .environment(dataService)

@@ -73,7 +73,7 @@ private struct TripsListBody: View {
             }
             .background(AppColors.appBackground)
             .refreshable {
-                await viewModel.loadTrips()
+                await viewModel.loadTrips(preservingExistingOnFailure: true)
             }
             .navigationTitle("My Trips")
             .searchable(text: $viewModel.searchText, prompt: "Search trips...")
@@ -96,7 +96,6 @@ private struct TripsListBody: View {
                     } label: {
                         Image(systemName: "arrow.up.arrow.down")
                             .font(.system(size: 15))
-                            .foregroundStyle(AppColors.appPrimary)
                     }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -105,7 +104,6 @@ private struct TripsListBody: View {
                     } label: {
                         Image(systemName: "bell")
                             .font(.system(size: 17))
-                            .foregroundStyle(AppColors.appPrimary)
                     }
                     .accessibilityLabel("Notifications")
 

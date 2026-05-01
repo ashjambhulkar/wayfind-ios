@@ -71,6 +71,15 @@ final class DataService {
         return await mock!.fetchTrips()
     }
 
+    /// Variant for refresh flows that need to distinguish "server returned
+    /// zero trips" from "the request failed". `fetchTrips()` intentionally
+    /// soft-fails to `[]` for older call sites, which can briefly show empty
+    /// states during pull-to-refresh.
+    func fetchTripsIfAvailable() async -> [Trip]? {
+        if let real { return try? await real.fetchTrips() }
+        return await mock!.fetchTrips()
+    }
+
     /// Full `profiles` row for the signed-in user (nil in mock / offline mode or on error).
     func fetchOwnUserProfileDetail() async -> UserProfileDetail? {
         guard let real else { return nil }

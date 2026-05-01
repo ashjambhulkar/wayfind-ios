@@ -46,6 +46,7 @@ struct TripDocumentsView: View {
     @State private var currentUserId: UUID?
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showingDocumentPicker: Bool = false
+    @State private var showingPhotosPicker: Bool = false
     @State private var showingCategorySheet: Bool = false
     @State private var pendingMimeType: String?
     @State private var pendingBytes: Data?
@@ -66,9 +67,9 @@ struct TripDocumentsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if let service {
-                    addDocumentToolbar(service: service)
+            if let service {
+                ToolbarItemGroup(placement: .bottomBar) {
+                    addDocumentToolbarButtons(service: service)
                 }
             }
         }
@@ -100,6 +101,13 @@ struct TripDocumentsView: View {
                 onPicked: { url in Task { await handleDocument(url: url) } }
             )
         }
+        .photosPicker(
+            isPresented: $showingPhotosPicker,
+            selection: $photoItems,
+            maxSelectionCount: max(0, TripDocumentsService.tripCeiling - (service?.documents.count ?? 0)),
+            matching: .images,
+            photoLibrary: .shared()
+        )
         .sheet(isPresented: $showingCategorySheet) {
             categoryPickerSheet
         }
@@ -251,64 +259,73 @@ struct TripDocumentsView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Navigation bar add
+    // MARK: - Bottom toolbar add
 
-    /// Wave 4.5 — three states for the trailing + control:
-    ///   1. Trip ceiling hit (Pro & Free) → disabled, no menu.
-    ///   2. Free user at per-user cap → tap opens paywall (same as cap pill).
-    ///   3. Otherwise → Menu with Photos / Files.
+    /// Wave 4.5 — three states for the bottom-toolbar add controls:
+    ///   1. Trip ceiling hit (Pro & Free) → both buttons disabled.
+    ///   2. Free user at per-user cap → both buttons route to the paywall.
+    ///   3. Otherwise → PhotosPicker + Files picker.
     @ViewBuilder
-    private func addDocumentToolbar(service: TripDocumentsService) -> some View {
+    private func addDocumentToolbarButtons(service: TripDocumentsService) -> some View {
         if service.quotaSnapshot.hitsHardCeiling {
             Button {
                 // No-op: trip document ceiling reached.
             } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppColors.textTertiary)
+                Label("Photo from Library", systemImage: "photo.on.rectangle.angled")
             }
+            .tint(AppColors.textPrimary)
             .disabled(true)
-            .accessibilityLabel("Add document")
+
+            Button {
+                // No-op: trip document ceiling reached.
+            } label: {
+                Label("File from Files app", systemImage: "doc.badge.plus")
+            }
+            .tint(AppColors.textPrimary)
+            .disabled(true)
         } else if isFreeUserAtCap {
             Button {
                 HapticManager.light()
-                PaywallPresenter.shared.present(
-                    .documents,
-                    dataService: dataService,
-                    metadata: [
-                        "trip_id": trip.id.uuidString,
-                        "user_doc_count": "\(service.quotaSnapshot.perUserUploadCount)",
-                        "trigger": "documents_nav_add",
-                    ]
-                )
+                presentDocumentsPaywall(service: service, trigger: "documents_toolbar_photo")
             } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppColors.appPrimary)
+                Label("Photo from Library", systemImage: "photo.on.rectangle.angled")
             }
-            .accessibilityLabel("Upgrade to add more documents")
+            .tint(AppColors.textPrimary)
+
+            Button {
+                HapticManager.light()
+                presentDocumentsPaywall(service: service, trigger: "documents_toolbar_file")
+            } label: {
+                Label("File from Files app", systemImage: "doc.badge.plus")
+            }
+            .tint(AppColors.textPrimary)
         } else {
-            Menu {
-                PhotosPicker(
-                    selection: $photoItems,
-                    maxSelectionCount: max(0, TripDocumentsService.tripCeiling - service.documents.count),
-                    matching: .images,
-                    photoLibrary: .shared()
-                ) {
-                    Label("Photo from Library", systemImage: "photo.on.rectangle.angled")
-                }
-                Button {
-                    showingDocumentPicker = true
-                } label: {
-                    Label("File from Files app", systemImage: "doc.badge.plus")
-                }
+            Button {
+                showingPhotosPicker = true
             } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(AppColors.appPrimary)
+                Label("Photo from Library", systemImage: "photo.on.rectangle.angled")
             }
-            .accessibilityLabel("Add document")
+            .tint(AppColors.textPrimary)
+
+            Button {
+                showingDocumentPicker = true
+            } label: {
+                Label("File from Files app", systemImage: "doc.badge.plus")
+            }
+            .tint(AppColors.textPrimary)
         }
+    }
+
+    private func presentDocumentsPaywall(service: TripDocumentsService, trigger: String) {
+        PaywallPresenter.shared.present(
+            .documents,
+            dataService: dataService,
+            metadata: [
+                "trip_id": trip.id.uuidString,
+                "user_doc_count": "\(service.quotaSnapshot.perUserUploadCount)",
+                "trigger": trigger,
+            ]
+        )
     }
 
     // MARK: - Category sheet (after picking a file)

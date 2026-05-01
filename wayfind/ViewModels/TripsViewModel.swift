@@ -40,10 +40,16 @@ final class TripsViewModel {
         return sortedTrips(base)
     }
 
-    func loadTrips() async {
+    func loadTrips(preservingExistingOnFailure: Bool = false) async {
         isLoading = true
         defer { isLoading = false }
-        trips = await dataService.fetchTrips()
+        guard let fetchedTrips = await dataService.fetchTripsIfAvailable() else {
+            if !preservingExistingOnFailure {
+                trips = []
+            }
+            return
+        }
+        trips = fetchedTrips
     }
 
     func deleteTrip(_ trip: Trip) async {

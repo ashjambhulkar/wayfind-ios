@@ -156,7 +156,6 @@ struct TripNotesView: View {
                     } label: {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 17, weight: .regular))
-                            .foregroundStyle(AppColors.appPrimary)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("New note")

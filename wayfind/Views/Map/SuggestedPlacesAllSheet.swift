@@ -64,7 +64,6 @@ struct SuggestedPlacesAllSheet: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(.appBody.weight(.semibold))
                             .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(AppColors.textSecondary)
                     }
                     .accessibilityLabel("Close suggested places")
                 }
@@ -73,7 +72,7 @@ struct SuggestedPlacesAllSheet: View {
         .task(id: filterTaskKey) {
             await loadPicks()
         }
-        .tint(AppColors.appPrimary)
+        .tint(.primary)
     }
 
     /// `.task(id:)` only re-runs when this string changes. Combining

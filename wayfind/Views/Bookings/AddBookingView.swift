@@ -164,7 +164,6 @@ struct AddBookingView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.appButton.weight(.semibold))
-                            .foregroundStyle(AppColors.textPrimary)
                     }
                     .accessibilityLabel("Close")
                 }
@@ -184,7 +183,6 @@ struct AddBookingView: View {
                     }
                 }
                 .font(.appButton)
-                .foregroundStyle(AppColors.appPrimary)
                 .disabled(isSaving || isLookingUpFlight || !canPerformToolbarAction)
                 .accessibilityLabel(isEditMode ? "Save booking" : "Add \(selectedType.label)")
             }
