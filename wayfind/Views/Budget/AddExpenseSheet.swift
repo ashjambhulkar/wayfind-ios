@@ -5,7 +5,8 @@
 //  Numpad-first expense composer. Renders at .medium detent by default —
 //  the user lands on the amount field with the keyboard already up so the
 //  most common path (tap +, type "23", tap Save) is one motion. Expanding
-//  to .large reveals notes + the "split with…" editor.
+//  to .large reveals notes; **split** is available on the main Expense card
+//  next to amount and description (no need to expand first).
 //
 //  All persistence flows through `BudgetViewModel.addExpense`/.updateExpense
 //  which manages the optimistic insertion + rollback. We just gather the
@@ -174,6 +175,42 @@ struct AddExpenseSheet: View {
                 accent: category.accentColor,
                 text: $title
             )
+
+            ExpenseMapDivider()
+
+            Button {
+                recomputeSplitsFromCurrentAmount()
+                showSplitEditor = true
+            } label: {
+                HStack(spacing: AppSpacing.md) {
+                    MapStyleIcon(
+                        systemName: "person.2.fill",
+                        size: .small,
+                        accent: category.accentColor,
+                        accessibilityLabel: "Split"
+                    )
+
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        Text("Split with")
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textPrimary)
+                        Text(splitSummary)
+                            .font(.appSmall)
+                            .foregroundStyle(AppColors.textSecondary)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: AppSpacing.md)
+
+                    Image(systemName: "chevron.right")
+                        .font(.appSmall.weight(.semibold))
+                        .foregroundStyle(AppColors.textTertiary)
+                }
+                .padding(.horizontal, AppSpacing.md)
+                .frame(minHeight: ExpenseMapFormMetrics.rowMinHeight)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -200,42 +237,6 @@ struct AddExpenseSheet: View {
                 accent: category.accentColor,
                 selection: $date
             )
-
-            ExpenseMapDivider()
-
-            Button {
-                recomputeSplitsFromCurrentAmount()
-                showSplitEditor = true
-            } label: {
-                HStack(spacing: AppSpacing.md) {
-                    MapStyleIcon(
-                        systemName: "person.2.fill",
-                        size: .small,
-                        accent: category.accentColor,
-                        accessibilityLabel: "Split"
-                    )
-
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        Text("Split With")
-                            .font(.appBody)
-                            .foregroundStyle(AppColors.textPrimary)
-                        Text(splitSummary)
-                            .font(.appSmall)
-                            .foregroundStyle(AppColors.textSecondary)
-                            .lineLimit(1)
-                    }
-
-                    Spacer(minLength: AppSpacing.md)
-
-                    Image(systemName: "chevron.right")
-                        .font(.appSmall.weight(.semibold))
-                        .foregroundStyle(AppColors.textTertiary)
-                }
-                .padding(.horizontal, AppSpacing.md)
-                .frame(minHeight: ExpenseMapFormMetrics.rowMinHeight)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
 
             ExpenseMapDivider()
 
@@ -463,16 +464,22 @@ struct AddExpenseSheet: View {
     }
 
     private var splitSummary: String {
+        let splittableMemberCount = members.filter { $0.userId != nil }.count
+        if splittableMemberCount == 0 {
+            return String(localized: "No collaborators on this trip yet")
+        }
         let acceptedCount = splits.filter(\.isAccepted).count
         switch splitType {
         case .equal:
-            return acceptedCount > 0 ? "Split equally with \(acceptedCount) people" : "Split"
+            return acceptedCount > 0
+                ? String(localized: "Split equally with \(acceptedCount) people")
+                : String(localized: "Split")
         case .exact:
-            return "Exact amounts"
+            return String(localized: "Exact amounts")
         case .percentage:
-            return "By percentage"
+            return String(localized: "By percentage")
         case .full:
-            return "You're covering this"
+            return String(localized: "You're covering this")
         }
     }
 }

@@ -108,11 +108,37 @@ struct FlightStatusBadge: View {
         guard let status else { return "Free preview" }
         if isStale {
             let minutes = max(1, Int(Date().timeIntervalSince(status.polledAt) / 60))
-            return "Updated \(minutes)m ago"
+            let age = Self.humanizedMinutesSinceUpdate(minutes)
+            return String(format: String(localized: "Updated %@ ago"), locale: .current, age)
         }
         if let gate = status.gateOrigin, !gate.isEmpty { return "Gate \(gate)" }
         if status.displayState == .landed, let claim = status.baggageClaim { return "Belt \(claim)" }
         return nil
+    }
+
+    /// Compact age for stale poll copy: under 1h → `45m`; same day scale → `1h 23m`; longer → `1 day 4h` / `2 days`.
+    private static func humanizedMinutesSinceUpdate(_ totalMinutes: Int) -> String {
+        let m = max(1, totalMinutes)
+        let dayMinutes = 24 * 60
+        if m >= dayMinutes {
+            let days = m / dayMinutes
+            let hours = (m % dayMinutes) / 60
+            if hours == 0 {
+                return days == 1
+                    ? String(localized: "1 day")
+                    : String(format: String(localized: "%d days"), locale: .current, days)
+            }
+            if days == 1 {
+                return String(format: String(localized: "1 day %dh"), locale: .current, hours)
+            }
+            return String(format: String(localized: "%d days %dh"), locale: .current, days, hours)
+        }
+        if m >= 60 {
+            let h = m / 60
+            let mins = m % 60
+            return mins == 0 ? "\(h)h" : "\(h)h \(mins)m"
+        }
+        return "\(m)m"
     }
 
     // MARK: - Colour

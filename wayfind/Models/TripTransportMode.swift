@@ -54,7 +54,7 @@ enum TripTransportMode: String, CaseIterable, Identifiable, Sendable {
     /// SF Symbol used in the floating pill and the picker.
     var sfSymbol: String {
         switch self {
-        case .auto:    return "sparkles"
+        case .auto:    return "arrow.triangle.swap"
         case .walking: return "figure.walk"
         case .driving: return "car.fill"
         case .transit: return "tram.fill"

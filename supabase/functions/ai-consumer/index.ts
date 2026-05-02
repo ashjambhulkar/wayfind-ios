@@ -206,7 +206,7 @@ async function generateAiFields(row: CityPlaceRow): Promise<AiOutput> {
           {
             type: 'text',
             text:
-              'You generate travel-place copy for a production app. Use only the supplied place data. Do not invent facts, ticketing rules, reservation rules, accessibility claims, dress codes, or opening-hour exceptions unless directly supported by the input. Keep language natural, clear, and useful. Prefer concrete, grounded guidance over generic marketing language.',
+              'You generate travel-place copy for a production app. Use only the supplied place data. Many fields may still be null if automated enrichment has not finished — still produce useful copy from name, address, category, and whatever is non-null. Do not invent facts, ticketing rules, reservation rules, accessibility claims, dress codes, or opening-hour exceptions unless directly supported by the input. Keep language natural, clear, and useful. Prefer concrete, grounded guidance over generic marketing language.',
           },
         ],
       },
@@ -280,12 +280,15 @@ async function processMessage(message: QueueMessage) {
     return { skip: true, reason: 'inactive_status' }
   }
 
-  if (!row.details_enriched_at) {
-    return { skip: true, reason: 'details_not_ready' }
-  }
+  const detailsMs = row.details_enriched_at
+    ? Date.parse(row.details_enriched_at)
+    : NaN
+  const aiMs = row.ai_enriched_at ? Date.parse(row.ai_enriched_at) : NaN
 
-  if (row.ai_enriched_at) {
-    return { skip: true, reason: 'already_ai_enriched' }
+  const hasAi = Number.isFinite(aiMs)
+  const hasDetailsTs = Number.isFinite(detailsMs)
+  if (hasAi && (!hasDetailsTs || detailsMs <= aiMs)) {
+    return { skip: true, reason: 'ai_current' }
   }
 
   const ai = await generateAiFields(row as CityPlaceRow)

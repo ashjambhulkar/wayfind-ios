@@ -581,7 +581,9 @@ async function processMessage(message: QueueMessage) {
 
   if (updateError) throw new Error(`update city_place failed: ${updateError.message}`)
 
-    const { error: aiQueueError } = await supabase
+  // Re-queue AI when Serp adds fresher detail than the last AI pass (initial AI
+  // may have run earlier from INSERT trigger without waiting for Serp).
+  const { error: aiQueueError } = await supabase
     .schema('pgmq_public')
     .rpc('send', {
       queue_name: 'city_places_ai',

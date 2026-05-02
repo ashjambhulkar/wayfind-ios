@@ -42,6 +42,26 @@ enum BookingCategory: String, CaseIterable, Codable, Identifiable {
         case .transport: "Transport"
         }
     }
+
+    /// Timeline banner / collapsed-day preview when a booking spans another itinerary day (not hotel-only “staying”).
+    func ongoingSpanHeadline(bookingName: String) -> String {
+        let trimmed = bookingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmed.isEmpty ? String(localized: "Booking") : trimmed
+        switch self {
+        case .hotel:
+            return String(localized: "Staying at \(name)")
+        case .carRental:
+            return String(localized: "Renting from \(name)")
+        case .transport:
+            return String(localized: "Transit · \(name)")
+        case .flight:
+            return String(localized: "Flight · \(name)")
+        case .restaurant:
+            return String(localized: "Reservation · \(name)")
+        case .activity:
+            return String(localized: "Activity · \(name)")
+        }
+    }
 }
 
 enum PlaceCategory: String, CaseIterable, Codable {

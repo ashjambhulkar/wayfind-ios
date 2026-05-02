@@ -5,12 +5,7 @@ struct OngoingBookingBannerView: View {
     let bookingType: BookingCategory
 
     private var headline: String {
-        switch bookingType {
-        case .carRental:
-            "Renting from \(bookingName)"
-        default:
-            "Staying at \(bookingName)"
-        }
+        bookingType.ongoingSpanHeadline(bookingName: bookingName)
     }
 
     var body: some View {
@@ -41,6 +36,7 @@ struct OngoingBookingBannerView: View {
     VStack(spacing: 12) {
         OngoingBookingBannerView(bookingName: "Air France AF264", bookingType: .flight)
         OngoingBookingBannerView(bookingName: "Hôtel Plaza Athénée", bookingType: .hotel)
+        OngoingBookingBannerView(bookingName: "Eurostar 9024", bookingType: .transport)
     }
     .padding()
     .background(AppColors.appBackground)

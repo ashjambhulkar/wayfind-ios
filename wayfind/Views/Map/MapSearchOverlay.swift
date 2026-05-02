@@ -345,7 +345,7 @@ struct MapSearchOverlay: View {
                         HapticManager.light()
                         openSuggested()
                     } label: {
-                        Image(systemName: "sparkles")
+                        Image(systemName: "mappin.circle.fill")
                             .font(.appBody.weight(.semibold))
                             .foregroundStyle(AppColors.textPrimary)
                             .frame(width: 36, height: 36)

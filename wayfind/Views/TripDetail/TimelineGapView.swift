@@ -27,7 +27,7 @@ struct TimelineGapView: View {
         collapsedRow
             .animation(AppSpring.smooth, value: isExpanded)
             .animation(AppSpring.smooth, value: effectiveMode)
-            .padding(.vertical, AppSpacing.xs)
+            .padding(.vertical, TimelineBetweenStopsMetrics.gapRowVerticalPadding)
             .padding(.horizontal, AppSpacing.lg)
             .accessibilityElement(children: .contain)
             .task(id: taskIdentity) {
@@ -107,7 +107,7 @@ struct TimelineGapView: View {
                 .minimumScaleFactor(0.82)
 
             if modesForExpansion.count > 1 {
-                Image(systemName: "chevron.down")
+                Image(systemName: "chevron.right")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(AppColors.textTertiary.opacity(0.85))
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
@@ -117,7 +117,7 @@ struct TimelineGapView: View {
         }
     }
 
-    /// Horizontal pills for swapping MapKit routing mode — stays in one row beside the ETA text.
+    /// Compact mode picks when multiple routes exist: icon + duration (`1h 30m`); tap selects and collapses.
     private var inlineModeChips: some View {
         HStack(spacing: AppSpacing.xs) {
             ForEach(modesForExpansion, id: \.self) { mode in
@@ -128,7 +128,7 @@ struct TimelineGapView: View {
 
     private func inlineModeChip(_ mode: AppleTravelTimesService.Mode) -> some View {
         let isSelected = (effectiveMode == mode)
-        let minutesText = expansionRowMinutes(for: mode).map { "\($0)m" }
+        let durationText = expansionRowMinutes(for: mode).map { TimelineBetweenStopsPresentation.compactTravelDuration(minutes: $0) }
 
         return Button {
             userPickedMode = mode
@@ -140,16 +140,11 @@ struct TimelineGapView: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(isSelected ? AppColors.textSecondary : AppColors.textTertiary)
 
-                Text(TimelineBetweenStopsPresentation.shortLabel(for: mode))
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(isSelected ? AppColors.textSecondary : AppColors.textTertiary)
-
-                if let minutesText {
-                    Text(minutesText)
+                if let durationText {
+                    Text(durationText)
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(AppColors.textTertiary)
+                        .foregroundStyle(isSelected ? AppColors.textSecondary : AppColors.textTertiary)
                         .monospacedDigit()
-                        .accessibilityHidden(true)
                 }
             }
             .padding(.horizontal, AppSpacing.sm)
@@ -164,8 +159,14 @@ struct TimelineGapView: View {
             )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(TimelineBetweenStopsPresentation.accessibilityLabel(for: mode))
+        .accessibilityLabel(inlineModeChipAccessibilityLabel(mode: mode, durationMinutes: expansionRowMinutes(for: mode)))
         .accessibilityHint(String(localized: "Sets routing mode"))
+    }
+
+    private func inlineModeChipAccessibilityLabel(mode: AppleTravelTimesService.Mode, durationMinutes: Int?) -> String {
+        let modeName = TimelineBetweenStopsPresentation.accessibilityLabel(for: mode)
+        guard let m = durationMinutes, m >= 0 else { return modeName }
+        return "\(modeName), \(TimelineBetweenStopsPresentation.compactTravelDuration(minutes: m))"
     }
 
     private var mapsGlyphButton: some View {
@@ -177,7 +178,7 @@ struct TimelineGapView: View {
                 .font(.appCaption.weight(.semibold))
                 .foregroundStyle(AppColors.textTertiary)
                 .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, AppSpacing.sm)
+                .padding(.vertical, AppSpacing.xs)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -230,7 +231,7 @@ struct TimelineGapView: View {
     private var summaryLine: String {
         let minutes = resolvedMinutesForSummary
         let distanceText = resolvedDistanceText
-        let minutesText = minutes.map { "\($0) min" } ?? "—"
+        let minutesText = minutes.map { TimelineBetweenStopsPresentation.compactTravelDuration(minutes: $0) } ?? "—"
         return TimelineBetweenStopsPresentation.summaryLine(minutesText: minutesText, distanceText: distanceText)
     }
 

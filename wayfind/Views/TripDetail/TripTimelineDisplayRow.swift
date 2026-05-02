@@ -16,20 +16,6 @@ struct TripTimelineDisplayRow: Identifiable {
     /// for all non-hotel content and for legacy single-card hotel fallback.
     var hotelTimelineRole: HotelTimelineDisplayRole?
 
-    /// Calendar anchor for chapter dividers (time-of-day buckets).
-    var chapterSortDate: Date? {
-        switch hotelTimelineRole {
-        case .checkIn:
-            if case .hotel(let h) = place.bookingDetails { return h.checkInDate ?? place.startTime }
-            return place.startTime
-        case .checkOut:
-            if case .hotel(let h) = place.bookingDetails { return h.checkOutDate ?? place.startTime }
-            return place.startTime
-        case nil:
-            return place.startTime
-        }
-    }
-
     /// Sort key for ordering mixed native + injected rows within a day.
     var timelineSortInstant: Date? {
         switch hotelTimelineRole {

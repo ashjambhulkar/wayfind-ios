@@ -86,20 +86,6 @@ struct TripBudgetTabView: View {
                             }
                             .accessibilityLabel("More budget actions")
                         }
-                        if collaborationStore.canEditExpenses {
-                            ToolbarItem(placement: .bottomBar) {
-                                HStack {
-                                    Spacer(minLength: 0)
-                                    Button {
-                                        showAddExpense = true
-                                    } label: {
-                                        Label("Add expense", systemImage: "plus")
-                                    }
-                                    .accessibilityLabel("Add expense")
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                        }
                     }
                     .sheet(item: $csvShareURL) { item in
                         ExpenseCSVActivitySheet(fileURL: item.url)
@@ -292,6 +278,37 @@ struct TripBudgetTabView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: viewModel.lastFetchFailed)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if collaborationStore.canEditExpenses {
+                budgetAddExpenseBar
+            }
+        }
+    }
+
+    /// Trailing “Add expense” above the home indicator — avoids `ToolbarItemGroup` + `Spacer()` hit-testing bugs on the bottom bar.
+    private var budgetAddExpenseBar: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Button {
+                showAddExpense = true
+            } label: {
+                Label("Add expense", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppColors.appPrimary)
+            .accessibilityLabel("Add expense")
+        }
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.top, AppSpacing.sm)
+        .padding(.bottom, AppSpacing.sm)
+        .frame(maxWidth: .infinity)
+        .background(AppColors.appBackground)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(AppColors.appDivider)
+                .frame(height: 1)
+                .frame(maxWidth: .infinity)
+        }
     }
 
     // MARK: - Scope picker (only shown when there's >1 member)

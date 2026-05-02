@@ -755,6 +755,10 @@ struct TripMapView: View {
                         embeddedSearchFieldActivationDelayMs: activationDelayMs,
                         endInlineSearch: endInline
                     )
+                },
+                showSearchThisArea: shouldShowSearchThisArea,
+                onSearchThisArea: {
+                    rerunCategoryInCurrentRegion()
                 }
             )
             .presentationDetents(
@@ -1083,10 +1087,12 @@ struct TripMapView: View {
     }
 
     private var shouldShowSearchThisArea: Bool {
+        let trimmedQuery = lastSubmittedMapSearchQuery?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hasTypedOrSubmittedQuery = !trimmedQuery.isEmpty
+        let hasCategorySearch = lastPickedCategory != nil
         guard !mapState.searchResults.isEmpty,
               let origin = mapState.searchOriginRegion,
-              let query = lastSubmittedMapSearchQuery?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !query.isEmpty
+              hasTypedOrSubmittedQuery || hasCategorySearch
         else { return false }
         let dLat = abs(searchRegion.center.latitude - origin.center.latitude)
         let dLng = abs(searchRegion.center.longitude - origin.center.longitude)
@@ -1707,10 +1713,9 @@ struct TripMapView: View {
     /// Re-runs the most recent category search in the current viewport
     /// so the user sees fresh results after panning to a new area.
     private func rerunCategoryInCurrentRegion() {
-        guard let submittedQuery = lastSubmittedMapSearchQuery?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !submittedQuery.isEmpty
-        else { return }
+        let trimmedQuery = lastSubmittedMapSearchQuery?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let pill = lastPickedCategory
+        guard !trimmedQuery.isEmpty || pill != nil else { return }
         let category = pill?.matchingPlaceCategory
         let cityId = resolvedCityProfileId
         // The user explicitly chose to refresh the *visible* region,
@@ -1718,7 +1723,7 @@ struct TripMapView: View {
         // turn into a global search.
         let region = Self.clampingSpan(searchRegion, max: Self.maxBiasSpan)
         let excluded = mapState.scheduledDayPlaceIds
-        let q = pill?.id ?? submittedQuery
+        let q = pill?.id ?? (trimmedQuery.isEmpty ? "places" : trimmedQuery)
         Task {
             let apple = AppleMapSearchService()
             async let appleResults = apple.searchNearbyPreviews(

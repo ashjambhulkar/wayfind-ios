@@ -26,9 +26,6 @@ struct EditProfileView: View {
     @State private var displayName = ""
     @State private var username = ""
     @State private var bio = ""
-    @State private var preferredCurrency = ""
-    @State private var venmoUsername = ""
-    @State private var paypalUsername = ""
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var pickedAvatarJPEG: Data?
     @State private var isLoading = true
@@ -52,18 +49,7 @@ struct EditProfileView: View {
         if bio.trimmingCharacters(in: .whitespacesAndNewlines) != (loaded.bio ?? "").trimmingCharacters(
             in: .whitespacesAndNewlines
         ) { return true }
-        let nextCur = (PreferredCurrencyFormatting.normalizeInput(preferredCurrency) ?? "").uppercased()
-        let prevCur = (loaded.preferredCurrency ?? "").uppercased()
-        if nextCur != prevCur { return true }
-        if normalizedHandle(venmoUsername) != normalizedHandle(loaded.venmoUsername ?? "") { return true }
-        if normalizedHandle(paypalUsername) != normalizedHandle(loaded.paypalUsername ?? "") { return true }
         return false
-    }
-
-    private func normalizedHandle(_ raw: String) -> String {
-        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        while trimmed.hasPrefix("@") { trimmed.removeFirst() }
-        return trimmed
     }
 
     private var canSave: Bool {
@@ -93,10 +79,6 @@ struct EditProfileView: View {
                 avatarSection
 
                 identitySection
-
-                currencySection
-
-                paymentHandlesSection
 
                 accountSection
 
@@ -207,20 +189,12 @@ struct EditProfileView: View {
                     .resizable()
                     .scaledToFill()
             } else if let url = loaded?.avatarURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .empty:
-                        ProgressView()
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        avatarPlaceholder
-                    @unknown default:
-                        avatarPlaceholder
-                    }
-                }
+                CachedAvatarImage(
+                    url: url,
+                    showsProgressWhileLoading: true,
+                    idle: { Color.clear },
+                    onFailure: { avatarPlaceholder }
+                )
             } else {
                 avatarPlaceholder
             }
@@ -300,92 +274,6 @@ struct EditProfileView: View {
         }
     }
 
-    private var currencySection: some View {
-        ProfileMapSectionCard(title: "Travel Defaults") {
-            ProfileMapTextRow(
-                title: "Preferred currency",
-                subtitle: "Used as defaults when planning; you can still set currency per trip.",
-                systemName: "dollarsign.circle",
-                accessibilityLabel: "Preferred currency"
-            ) {
-                HStack(spacing: AppSpacing.sm) {
-                    TextField("ISO code, e.g. USD", text: $preferredCurrency)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .onChange(of: preferredCurrency) { _, newValue in
-                            let upper = newValue.uppercased().filter(\.isLetter)
-                            let capped = String(upper.prefix(PreferredCurrencyFormatting.codeMaxLength))
-                            if capped != newValue {
-                                preferredCurrency = capped
-                            }
-                        }
-
-                    Menu {
-                        ForEach(Array(PreferredCurrencyFormatting.presetCycle.enumerated()), id: \.offset) { _, code in
-                            Button(PreferredCurrencyFormatting.displayLabel(code: code)) {
-                                preferredCurrency = code ?? ""
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: AppSpacing.xs) {
-                            Text("Presets")
-                                .font(.appCaption.weight(.semibold))
-                            Image(systemName: "chevron.down.circle.fill")
-                                .font(.appCaption.weight(.semibold))
-                        }
-                        .foregroundStyle(AppColors.appPrimary)
-                        .padding(.horizontal, AppSpacing.sm)
-                        .padding(.vertical, AppSpacing.xs)
-                        .background(AppColors.appPrimaryLight)
-                        .clipShape(Capsule())
-                        .accessibilityLabel("Currency presets")
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private var paymentHandlesSection: some View {
-        ProfileMapSectionCard(title: "Settle Up") {
-            ProfileMapTextRow(
-                title: "Venmo",
-                subtitle: "Used to launch Venmo when collaborators settle up.",
-                systemName: "dollarsign.arrow.circlepath",
-                accessibilityLabel: "Venmo"
-            ) {
-                HStack(spacing: AppSpacing.xs) {
-                    Text("@")
-                        .foregroundStyle(AppColors.textTertiary)
-                    TextField("yourhandle", text: $venmoUsername)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onChange(of: venmoUsername) { _, newValue in
-                            let stripped = newValue.replacingOccurrences(of: "@", with: "")
-                            if stripped != newValue { venmoUsername = stripped }
-                        }
-                }
-            }
-
-            ProfileMapDivider()
-
-            ProfileMapTextRow(
-                title: "PayPal.me",
-                subtitle: "Used to launch paypal.me/yourname when settling up.",
-                systemName: "creditcard",
-                accessibilityLabel: "PayPal"
-            ) {
-                HStack(spacing: AppSpacing.xs) {
-                    Text("paypal.me/")
-                        .foregroundStyle(AppColors.textTertiary)
-                    TextField("yourname", text: $paypalUsername)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-            }
-        }
-    }
-
     private var accountSection: some View {
         ProfileMapSectionCard(title: "Account") {
             Button(role: .destructive) {
@@ -449,9 +337,6 @@ struct EditProfileView: View {
         displayName = detail.displayName ?? ""
         username = detail.username
         bio = detail.bio ?? ""
-        preferredCurrency = detail.preferredCurrency ?? ""
-        venmoUsername = detail.venmoUsername ?? ""
-        paypalUsername = detail.paypalUsername ?? ""
     }
 
     @MainActor
@@ -483,11 +368,6 @@ struct EditProfileView: View {
         let displayNameValue: String? = dnTrim.isEmpty ? nil : dnTrim
         let bioTrim = bio.trimmingCharacters(in: .whitespacesAndNewlines)
         let bioValue: String? = bioTrim.isEmpty ? nil : bioTrim
-        let currencyValue = PreferredCurrencyFormatting.normalizeInput(preferredCurrency)
-        let venmoTrim = normalizedHandle(venmoUsername)
-        let venmoValue: String? = venmoTrim.isEmpty ? nil : venmoTrim
-        let paypalTrim = normalizedHandle(paypalUsername)
-        let paypalValue: String? = paypalTrim.isEmpty ? nil : paypalTrim
 
         var avatarURL = loaded.avatarURLString
         if let jpeg = pickedAvatarJPEG {
@@ -505,10 +385,10 @@ struct EditProfileView: View {
                 username: trimmedUsername,
                 bio: bioValue,
                 preferredAirport: loaded.preferredAirport,
-                preferredCurrency: currencyValue,
+                preferredCurrency: loaded.preferredCurrency,
                 avatarURL: avatarURL,
-                venmoUsername: venmoValue,
-                paypalUsername: paypalValue
+                venmoUsername: loaded.venmoUsername,
+                paypalUsername: loaded.paypalUsername
             )
         } catch {
             saveError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -522,15 +402,16 @@ struct EditProfileView: View {
             avatarURLString: avatarURL,
             bio: bioValue,
             preferredAirport: loaded.preferredAirport,
-            preferredCurrency: currencyValue,
+            preferredCurrency: loaded.preferredCurrency,
             createdAt: loaded.createdAt,
-            venmoUsername: venmoValue,
-            paypalUsername: paypalValue
+            venmoUsername: loaded.venmoUsername,
+            paypalUsername: loaded.paypalUsername
         )
         authViewModel.currentUserName = ProfileHeroFormatting.primaryLine(
             detail: synthetic,
             email: authViewModel.currentUserEmail
         )
+        authViewModel.currentUserAvatarURLString = avatarURL
 
         pickedAvatarJPEG = nil
         photoPickerItem = nil

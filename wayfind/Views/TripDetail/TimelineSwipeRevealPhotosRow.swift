@@ -75,7 +75,7 @@ struct TimelineSwipeRevealPhotosRow<Content: View>: View {
                 .background(Color.clear)
                 .offset(x: offset)
                 .contentShape(Rectangle())
-                .gesture(dragGesture)
+                .simultaneousGesture(dragGesture)
         }
         // Do not clip: `timelineCardChassis` uses a shadow; clipping looked like a cut-off card at rest / mid-swipe.
         .background(
@@ -91,21 +91,29 @@ struct TimelineSwipeRevealPhotosRow<Content: View>: View {
     }
 
     private var photosActionButton: some View {
-        Button {
+        let revealedWidth = max(0, -offset)
+        return Button {
             openPhotosAndReset()
         } label: {
-            VStack(spacing: AppSpacing.xs) {
-                Image(systemName: "photo.on.rectangle.angled")
-                    .font(.body.weight(.semibold))
-                Text(String(localized: "Photos"))
-                    .font(.appSmall.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+            ZStack(alignment: .trailing) {
+                Rectangle()
+                    .fill(AppColors.appPrimary)
+
+                VStack(spacing: AppSpacing.xs) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.body.weight(.semibold))
+                    Text(String(localized: "Photos"))
+                        .font(.appSmall.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+                .foregroundStyle(.white)
+                .frame(width: snapOpenWidth)
+                .frame(maxHeight: .infinity)
             }
-            .foregroundStyle(.white)
-            .frame(width: snapOpenWidth)
+            .frame(width: revealedWidth)
             .frame(maxHeight: .infinity)
-            .background(AppColors.appPrimary)
+            .clipped()
             .clipShape(
                 UnevenRoundedRectangle(
                     topLeadingRadius: 0,
@@ -117,6 +125,8 @@ struct TimelineSwipeRevealPhotosRow<Content: View>: View {
             )
         }
         .buttonStyle(.plain)
+        .allowsHitTesting(revealedWidth > 0.5)
+        .accessibilityHidden(revealedWidth < 0.5)
         .accessibilityLabel(String(localized: "Photos"))
         .accessibilityHint(String(localized: "Opens activity photos"))
     }

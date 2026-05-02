@@ -38,7 +38,7 @@ enum PlacesSheetLayout: Equatable {
 
 // MARK: - Places Sheet
 
-/// Day filters + places list. Top chrome: grabber, search capsule, **Suggested Places** (sparkles)
+/// Day filters + places list. Top chrome: grabber, search capsule, **Suggested Places** (map pin)
 /// whenever the inline search UI is hidden. In the docked detent, active search text keeps the search
 /// capsule visible with a close button; otherwise only the day filters remain.
 /// Dock the sheet by dragging to the compact detent.
@@ -55,7 +55,7 @@ struct TripMapPlacesExpandedSheet: View {
     @Binding var isSearchPresented: Bool
     /// TripMapView sets to true to present search inline (e.g. return-from-preview) without a second sheet.
     @Binding var openInlineMapSearch: Bool
-    /// Opens the suggested-places sheet (sparkles control in docked / half / full chrome).
+    /// Opens the suggested-places sheet (pin control in docked / half / full chrome).
     let onOpenSuggestedPlaces: () -> Void
     /// Pins from the last map search (keyboard Search / category). Shown in the half sheet under the search capsule.
     var mapSearchResults: [MapSearchPreview] = []
@@ -64,6 +64,10 @@ struct TripMapPlacesExpandedSheet: View {
     let onClearActiveMapSearch: () -> Void
     /// Builds map search UI; `activationDelayMs` is 0 when the places sheet is already at `.full`, otherwise a short delay while the detent animates.
     let mapSearchOverlay: (_ embedsInParentSheet: Bool, _ activationDelayMs: Int, _ endInlineSearch: @escaping () -> Void) -> MapSearchOverlay
+
+    /// True when map search pins are shown and the camera has drifted from the search origin (see `TripMapView.shouldShowSearchThisArea`).
+    var showSearchThisArea: Bool = false
+    let onSearchThisArea: () -> Void
 
     @State private var isInlineMapSearchActive = false
     @State private var inlineSearchFieldActivationDelayMs = 0
@@ -100,6 +104,8 @@ struct TripMapPlacesExpandedSheet: View {
     /// Top scroll inset for submitted search results, where only the search row
     /// is overlaid.
     private static let searchChromeScrollTopMargin: CGFloat = AppSpacing.xxxl + AppSpacing.xl
+    /// Extra list scroll inset when the "Search this area" row is visible under the search bar.
+    private static let searchThisAreaScrollTopInset: CGFloat = 52
 
     private var showsMapSearchResultsList: Bool {
         !mapSearchResults.isEmpty
@@ -109,15 +115,30 @@ struct TripMapPlacesExpandedSheet: View {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var dayListTopContentMargin: CGFloat {
+        let base = Self.searchAndDayChromeScrollTopMargin
+        return showSearchThisArea ? base + Self.searchThisAreaScrollTopInset : base
+    }
+
+    private var mapSearchListTopMargin: CGFloat {
+        let base = Self.searchChromeScrollTopMargin
+        return showSearchThisArea ? base + Self.searchThisAreaScrollTopInset : base
+    }
+
     /// Composite key that collapses every driver of chrome layout into a single
     /// value so the body's `.animation(_, value:)` re-runs exactly once per change.
     private struct ChromeAnimationKey: Hashable {
         let layout: PlacesSheetLayout
         let hasSearchText: Bool
+        let showSearchThisArea: Bool
     }
 
     private var chromeAnimationKey: ChromeAnimationKey {
-        ChromeAnimationKey(layout: committedLayout, hasSearchText: hasActiveMapSearchText)
+        ChromeAnimationKey(
+            layout: committedLayout,
+            hasSearchText: hasActiveMapSearchText,
+            showSearchThisArea: showSearchThisArea
+        )
     }
 
     /// Flat ease that co-runs with the native sheet detent animation without
@@ -245,6 +266,28 @@ struct TripMapPlacesExpandedSheet: View {
         VStack(spacing: 0) {
             searchBarChromeRow
 
+            if showSearchThisArea {
+                Button {
+                    HapticManager.light()
+                    onSearchThisArea()
+                } label: {
+                    Label("Search this area", systemImage: "arrow.clockwise.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity)
+                        .background(.regularMaterial)
+                        .clipShape(Capsule())
+                        .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
+                        .foregroundStyle(AppColors.appPrimary)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, AppSpacing.md)
+                .padding(.bottom, AppSpacing.xs)
+                .accessibilityLabel("Search this area")
+                .accessibilityHint("Re-runs the last search in the current map region")
+            }
+
             if !showsMapSearchResultsList {
                 dayCapsulesChromeRow
             }
@@ -291,7 +334,7 @@ struct TripMapPlacesExpandedSheet: View {
                 dayNumberByDayId: dayNumberByDayId,
                 onSelectPlace: onSelectPlace,
                 showsDayTabs: false,
-                topContentMargin: Self.searchAndDayChromeScrollTopMargin
+                topContentMargin: dayListTopContentMargin
             )
         }
     }
@@ -303,7 +346,7 @@ struct TripMapPlacesExpandedSheet: View {
 
             // Trailing accessory mirrors the original behaviour:
             // - Active search text (or committed results) → clear (X) button.
-            // - Otherwise → Suggested Places (sparkles) shortcut.
+            // - Otherwise → Suggested Places (pin) shortcut.
             if hasActiveMapSearchText || showsMapSearchResultsList {
                 activeMapSearchClearButton
             } else {
@@ -408,7 +451,7 @@ struct TripMapPlacesExpandedSheet: View {
             }
         }
         .listStyle(.insetGrouped)
-        .contentMargins(.top, Self.searchChromeScrollTopMargin, for: .scrollContent)
+        .contentMargins(.top, mapSearchListTopMargin, for: .scrollContent)
         .contentMargins(.bottom, 0, for: .scrollContent)
         .listSectionSpacing(0)
         .scrollContentBackground(.hidden)
@@ -478,7 +521,7 @@ struct TripMapPlacesExpandedSheet: View {
 
     private var mapsStyleSuggestedPlacesButton: some View {
         MapChromeIconButton(
-            systemName: "sparkles",
+            systemName: "mappin.circle.fill",
             iconFont: .system(size: MapChromeIconMetrics.accessoryGlyphPointSize, weight: .semibold),
             symbolRenderingMode: .monochrome,
             monochromeForeground: AppColors.iconOnColoredSurface,
@@ -513,6 +556,10 @@ struct TripMapPlacesExpandedSheet: View {
 // This view hosts only day tabs, day pages, and place rows.
 
 private struct TripMapPlacesDayListContent: View {
+    private enum Metrics {
+        static let leadingVisualSize: CGFloat = 44
+    }
+
     let trip: Trip
     @Binding var selectedDayFilter: Int?
     let allPlacesForList: [Place]
@@ -629,17 +676,7 @@ private struct TripMapPlacesDayListContent: View {
             onSelectPlace(place)
         } label: {
             HStack(alignment: .center, spacing: AppSpacing.md) {
-                let icon = placeRowIcon(for: place)
-
-                ZStack {
-                    RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                        .fill(AppColors.iconBadgeGradient(accent: icon.badgeAccent))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: icon.symbol)
-                        .font(.appBody.weight(.medium))
-                        .symbolRenderingMode(.monochrome)
-                        .foregroundStyle(AppColors.iconOnColoredSurface)
-                }
+                placeRowLeadingVisual(for: place)
 
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     Text(place.name)
@@ -665,6 +702,60 @@ private struct TripMapPlacesDayListContent: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(place.name)
+    }
+
+    @ViewBuilder
+    private func placeRowLeadingVisual(for place: Place) -> some View {
+        let icon = placeRowIcon(for: place)
+        if let url = Self.listImageURL(for: place) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    placeIconZStack(icon: icon, showsProgress: true)
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .failure:
+                    placeIconZStack(icon: icon, showsProgress: false)
+                @unknown default:
+                    placeIconZStack(icon: icon, showsProgress: false)
+                }
+            }
+            .frame(width: Metrics.leadingVisualSize, height: Metrics.leadingVisualSize)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+            .accessibilityHidden(true)
+        } else {
+            placeIconZStack(icon: icon, showsProgress: false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func placeIconZStack(icon: (symbol: String, badgeAccent: Color), showsProgress: Bool) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
+                .fill(AppColors.iconBadgeGradient(accent: icon.badgeAccent))
+                .frame(width: Metrics.leadingVisualSize, height: Metrics.leadingVisualSize)
+            if showsProgress {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(AppColors.iconOnColoredSurface)
+            } else {
+                Image(systemName: icon.symbol)
+                    .font(.appBody.weight(.medium))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(AppColors.iconOnColoredSurface)
+            }
+        }
+    }
+
+    /// Prefer catalog `thumbnail_url`, then `hero_image_url` / city hero fallback from `Place.heroImageUrl`.
+    private static func listImageURL(for place: Place) -> URL? {
+        for raw in [place.thumbnailUrl, place.heroImageUrl] {
+            guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { continue }
+            if let url = URL(string: trimmed) { return url }
+        }
+        return nil
     }
 
     private func placeRowIcon(for place: Place) -> (symbol: String, badgeAccent: Color) {
@@ -771,7 +862,7 @@ private extension TripMapPlacesSheet_Previews {
         )
     }
 
-    /// Mirrors `TripMapView.suggestedPlacesBrowserSheet` so Canvas sparkles opens real UI.
+    /// Mirrors `TripMapView.suggestedPlacesBrowserSheet` so Canvas pin opens real UI.
     @ViewBuilder
     static func suggestedPlacesBrowserSheetPreview(isPresented: Binding<Bool>) -> some View {
         SuggestedPlacesAllSheet(
@@ -814,7 +905,9 @@ private enum TripMapPlacesSheet_Previews {}
         onClearActiveMapSearch: {},
         mapSearchOverlay: { embeds, delay, end in
             TripMapPlacesSheet_Previews.previewMapSearchOverlay(embeds: embeds, activationDelayMs: delay, endInline: end)
-        }
+        },
+        showSearchThisArea: false,
+        onSearchThisArea: {}
     )
     .sheet(isPresented: $showSuggestedPlacesBrowser) {
         TripMapPlacesSheet_Previews.suggestedPlacesBrowserSheetPreview(isPresented: $showSuggestedPlacesBrowser)
@@ -843,7 +936,9 @@ private enum TripMapPlacesSheet_Previews {}
         onClearActiveMapSearch: {},
         mapSearchOverlay: { embeds, delay, end in
             TripMapPlacesSheet_Previews.previewMapSearchOverlay(embeds: embeds, activationDelayMs: delay, endInline: end)
-        }
+        },
+        showSearchThisArea: false,
+        onSearchThisArea: {}
     )
     .sheet(isPresented: $showSuggestedPlacesBrowser) {
         TripMapPlacesSheet_Previews.suggestedPlacesBrowserSheetPreview(isPresented: $showSuggestedPlacesBrowser)
@@ -883,7 +978,9 @@ private struct TripMapPlacesExpandedSheetPreviewHost: View {
                     onClearActiveMapSearch: {},
                     mapSearchOverlay: { embeds, delay, end in
                         TripMapPlacesSheet_Previews.previewMapSearchOverlay(embeds: embeds, activationDelayMs: delay, endInline: end)
-                    }
+                    },
+                    showSearchThisArea: false,
+                    onSearchThisArea: {}
                 )
                 .presentationDetents(
                     [PlacesSheetLayout.compactDetent, PlacesSheetLayout.halfOpenDetent, .large],

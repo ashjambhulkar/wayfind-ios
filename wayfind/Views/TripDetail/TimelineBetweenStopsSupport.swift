@@ -6,7 +6,9 @@ enum TimelineBetweenStopsMetrics {
     static let shortWalkThresholdKm: Double = 1.0
     /// Matches `TimelineSpineMetrics.columnWidth` so travel gaps align with card time-pin column.
     static var timePinGutterWidth: CGFloat { TimelineSpineMetrics.columnWidth }
-    static let minRowHeight: CGFloat = 44
+    /// Tight vertical rhythm between itinerary cards; `TimelineGapView` applies this above/below the segment row.
+    static let gapRowVerticalPadding: CGFloat = 0
+    static let minRowHeight: CGFloat = 32
 }
 
 enum TimelineBetweenStopsPresentation {
@@ -77,5 +79,15 @@ enum TimelineBetweenStopsPresentation {
     /// Duration + distance for the collapsed travel segment row (comma-separated; localized pattern).
     static func summaryLine(minutesText: String, distanceText: String) -> String {
         String(format: String(localized: "Timeline travel duration and distance"), minutesText, distanceText)
+    }
+
+    /// E.g. `45m`, `1h`, `1h 30m` — for timeline travel rows (not spelled-out units).
+    static func compactTravelDuration(minutes: Int) -> String {
+        let total = max(0, minutes)
+        let hours = total / 60
+        let mins = total % 60
+        if hours == 0 { return "\(mins)m" }
+        if mins == 0 { return "\(hours)h" }
+        return "\(hours)h \(mins)m"
     }
 }

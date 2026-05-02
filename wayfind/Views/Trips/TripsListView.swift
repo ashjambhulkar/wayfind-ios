@@ -4,6 +4,8 @@ import SwiftUI
 private enum TripsListLayout {
     /// Fixed width for each active trip card when multiple trips overlap "today".
     static let activeTripCardWidth: CGFloat = 300
+    /// Leading toolbar profile control matches common bar button target sizing.
+    static let profileToolbarAvatarSize: CGFloat = 28
 }
 
 struct TripsListView: View {
@@ -22,7 +24,6 @@ struct TripsListView: View {
                 TripsListBody(
                     viewModel: viewModel,
                     showCreateTrip: $showCreateTrip,
-                    userInitials: authViewModel.userInitials,
                     toastManager: toastManager
                 )
             } else {
@@ -40,11 +41,11 @@ struct TripsListView: View {
 
 private struct TripsListBody: View {
     @Bindable var viewModel: TripsViewModel
+    @Environment(AuthViewModel.self) private var authViewModel
     @Environment(UserPreferencesStore.self) private var userPreferences
     @Environment(TabNavigationCoordinator.self) private var coordinator
 
     @Binding var showCreateTrip: Bool
-    var userInitials: String
     var toastManager: ToastManager
 
     private var showMainEmpty: Bool {
@@ -110,13 +111,15 @@ private struct TripsListBody: View {
                     NavigationLink {
                         ProfileView()
                     } label: {
-                        Text(userInitials)
-                            .font(.appCaption)
-                            .foregroundStyle(.white)
-                            .frame(width: 28, height: 28)
-                            .background(AppColors.appPrimary)
-                            .clipShape(Circle())
+                        AvatarView(
+                            displayName: authViewModel.currentUserName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? nil : authViewModel.currentUserName,
+                            imageURL: authViewModel.profileAvatarURL,
+                            stableID: authViewModel.userAvatarStableID,
+                            size: TripsListLayout.profileToolbarAvatarSize
+                        )
                     }
+                    .accessibilityLabel("Profile")
                 }
             }
             .safeAreaInset(edge: .bottom, alignment: .trailing) {

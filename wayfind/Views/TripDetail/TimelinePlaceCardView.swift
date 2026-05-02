@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Activity row in the trip-detail timeline. Same chassis as
-/// `TimelineBookingCardView` (see `TimelineCardChassis`). Leading visual:
+/// `TimelineBookingCardView` (see `timelineCardChassis`). Leading visual:
 /// user activity photos (stack) if any, else `city_places` thumbnail when
 /// present, else the category icon.
 struct TimelinePlaceCardView: View {
@@ -14,6 +14,9 @@ struct TimelinePlaceCardView: View {
     var onMoveToDay: () -> Void = {}
     var onMoveToIdeas: () -> Void = {}
     var onDelete: () -> Void = {}
+
+    /// Opens place detail from spine or title/flash; omitted on the photo stack so gallery / swipe keep taps.
+    var onSelectRow: (() -> Void)? = nil
 
     /// Signed thumbnail URLs for `trip_activity_attachments` (same ids as `place.id`).
     var activityPhotoStack: [ActivityFeedPhotoStackItem] = []
@@ -41,6 +44,11 @@ struct TimelinePlaceCardView: View {
         collaborationUi.flash(for: place.id)
     }
 
+    /// Timeline activity rows for restaurants use a compact layout (name + reservation date/time only).
+    private var isRestaurantActivityLayout: Bool {
+        place.categoryEnum == .restaurant
+    }
+
     private var rowCore: some View {
         HStack(alignment: .top, spacing: TimelineSpineMetrics.pinColumnToCardSpacing) {
             TimelineSpineTimeColumn(
@@ -49,6 +57,8 @@ struct TimelinePlaceCardView: View {
                 timeZone: timelineDisplayTimeZone,
                 accessibilityLabel: spineAccessibilityLabel
             )
+            .contentShape(Rectangle())
+            .timelineRowSelect(onSelectRow)
 
             cardSurface
                 .cardPulse(flashID: flash?.id)
@@ -115,12 +125,16 @@ struct TimelinePlaceCardView: View {
                 accent: familyColor,
                 accessibilityLabel: activityTypeLabel
             )
+            .contentShape(Rectangle())
+            .timelineRowSelect(onSelectRow)
         } else {
             TimelineCardLeadingIconMetrics.categoryBadge(
                 symbol: inlineIcon,
                 accent: familyColor,
                 accessibilityLabel: activityTypeLabel
             )
+            .contentShape(Rectangle())
+            .timelineRowSelect(onSelectRow)
         }
     }
 
@@ -137,21 +151,10 @@ struct TimelinePlaceCardView: View {
             HStack(alignment: .center, spacing: AppSpacing.sm) {
                 activityLeadingVisual
 
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    // Use `Color.primary` (true system-black in light, true white
-                    // in dark) for the strongest, Apple-correct title contrast.
-                    // `AppColors.textPrimary` reads slightly washed at 0x1A1A1A.
-                    Text(TimelinePlaceDisplayName.timelineDisplay(place.name))
-                        .font(.timelineRowTitle)
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(2)
-
-                    Text(activitySummaryParts.joined(separator: " · "))
-                        .font(.footnote)
-                        .foregroundStyle(AppColors.textSecondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                titleColumn
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .timelineRowSelect(onSelectRow)
             }
 
             // Phase 3 — only renders when a recent realtime change has landed
@@ -163,6 +166,8 @@ struct TimelinePlaceCardView: View {
                     actorUserId: flash.actorUserId,
                     kind: flash.kind
                 )
+                .contentShape(Rectangle())
+                .timelineRowSelect(onSelectRow)
             }
         }
         .timelineCardChassis(
@@ -171,6 +176,52 @@ struct TimelinePlaceCardView: View {
             horizontalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding,
             verticalContentPadding: TimelineCardLayoutMetrics.contentVerticalPadding
         )
+    }
+
+    @ViewBuilder
+    private var titleColumn: some View {
+        if isRestaurantActivityLayout {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                Text(TimelinePlaceDisplayName.timelineDisplay(place.name))
+                    .font(.timelineRowTitle)
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(2)
+
+                Text(restaurantReservationScheduleLine)
+                    .font(.footnote)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                Text(TimelinePlaceDisplayName.timelineDisplay(place.name))
+                    .font(.timelineRowTitle)
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(2)
+
+                Text(activitySummaryParts.joined(separator: " · "))
+                    .font(.footnote)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    /// One line: short date in the trip timeline zone, then reservation time (or start–end when both exist).
+    private var restaurantReservationScheduleLine: String {
+        guard let start = place.startTime else {
+            return String(localized: "Flexible time")
+        }
+        let datePart = start.shortFormatted(timeZone: timelineDisplayTimeZone)
+        if let end = place.endTime, end > start {
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = timelineDisplayTimeZone
+            if cal.isDate(start, inSameDayAs: end) {
+                return "\(datePart) · \(start.timeFormatted(timeZone: timelineDisplayTimeZone)) – \(end.timeFormatted(timeZone: timelineDisplayTimeZone))"
+            }
+        }
+        return "\(datePart) · \(start.timeFormatted(timeZone: timelineDisplayTimeZone))"
     }
 
     // MARK: - Type-aware subtitle
@@ -224,6 +275,9 @@ struct TimelinePlaceCardView: View {
     // MARK: - Accessibility
 
     private var accessibilityDescription: String {
+        if isRestaurantActivityLayout {
+            return "\(place.categoryEnum.label): \(place.name), \(restaurantReservationScheduleLine)"
+        }
         var pieces = ["\(place.categoryEnum.label): \(place.name)"]
         if let start = place.startTime {
             if let end = place.endTime {
@@ -407,6 +461,20 @@ private func activityTypeIcon(for label: String) -> String? {
     return mappings.first { mapping in
         mapping.keywords.contains { normalized.contains($0) }
     }?.symbol
+}
+
+// MARK: - Row selection (exclude leading photo hit target)
+
+private extension View {
+    /// Applies a tap only when the host wires selection (e.g. trip timeline); `nil` leaves hit testing unchanged.
+    @ViewBuilder
+    func timelineRowSelect(_ action: (() -> Void)?) -> some View {
+        if let action {
+            self.onTapGesture { action() }
+        } else {
+            self
+        }
+    }
 }
 
 

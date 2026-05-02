@@ -48,51 +48,105 @@ struct ExpenseSplitEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Picker("Split type", selection: $splitType) {
-                        ForEach(TripExpense.SplitType.allCases, id: \.self) { type in
-                            Text(type.displayLabel).tag(type)
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                        FormSectionTitle(String(localized: "Split method"))
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            Picker("Split type", selection: $splitType) {
+                                ForEach(TripExpense.SplitType.allCases, id: \.self) { type in
+                                    Text(type.displayLabel).tag(type)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .onChange(of: splitType) { _, _ in
+                                recomputeAfterTypeChange()
+                            }
+                        }
+                        .padding(AppSpacing.md)
+                        .background(AppColors.appSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                                .strokeBorder(AppColors.appDivider, lineWidth: 1)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .listRowBackground(Color.clear)
-                    .onChange(of: splitType) { _, _ in
-                        recomputeAfterTypeChange()
-                    }
-                }
 
-                if !splitableMembers.isEmpty {
-                    Section("With") {
-                        ForEach(splitableMembers, id: \.stableID) { member in
-                            participantRow(for: member)
+                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                        FormSectionTitle(String(localized: "With"))
+                        VStack(spacing: 0) {
+                            if splitableMembers.isEmpty {
+                                emptyCollaboratorsCallout
+                            } else {
+                                ForEach(Array(splitableMembers.enumerated()), id: \.element.stableID) { index, member in
+                                    if index > 0 {
+                                        Divider()
+                                            .background(AppColors.appDivider)
+                                            .padding(.leading, AppSpacing.xxxl + AppSpacing.sm)
+                                    }
+                                    participantRow(for: member)
+                                }
+                            }
+                        }
+                        .background(AppColors.appSurface)
+                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                                .strokeBorder(AppColors.appDivider, lineWidth: 1)
                         }
                     }
-                }
 
-                if let summary = summaryFooter {
-                    Section {
+                    if let summary = summaryFooter {
                         Text(summary.text)
                             .font(.appCaption)
                             .foregroundStyle(summary.isError ? AppColors.appError : AppColors.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, AppSpacing.xs)
                     }
                 }
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.vertical, AppSpacing.md)
             }
-            .navigationTitle("Split")
+            .scrollDismissesKeyboard(.interactively)
+            .background(AppColors.appBackground)
+            .navigationTitle(String(localized: "Split"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(String(localized: "Cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { commit() }
+                    Button(String(localized: "Save")) { commit() }
                         .disabled(!canCommit)
                 }
             }
             .onAppear { seedInitialState() }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+    }
+
+    private var emptyCollaboratorsCallout: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            HStack(spacing: AppSpacing.md) {
+                Image(systemName: "person.2.slash")
+                    .font(.sectionHeader)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .frame(width: MapStyleIconSize.small.length, alignment: .center)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text(String(localized: "No collaborators yet"))
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                    Text(String(localized: "Invite people to this trip to split expenses. Until then, only you can be assigned shares."))
+                        .font(.appSmall)
+                        .foregroundStyle(AppColors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(AppSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Rows
@@ -101,6 +155,8 @@ struct ExpenseSplitEditorSheet: View {
     private func participantRow(for member: TripCollaborator) -> some View {
         if let memberId = member.userId {
             participantRowBody(memberId: memberId, member: member)
+                .padding(.horizontal, AppSpacing.md)
+                .padding(.vertical, AppSpacing.sm)
         }
     }
 
@@ -333,7 +389,7 @@ private struct CheckmarkToggleStyle: ToggleStyle {
         Button(action: { configuration.isOn.toggle() }) {
             HStack(spacing: AppSpacing.sm) {
                 Image(systemName: configuration.isOn ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22, weight: .regular))
+                    .font(.sectionHeader.weight(.regular))
                     .foregroundStyle(configuration.isOn ? AppColors.appPrimary : AppColors.textTertiary)
                 configuration.label
             }

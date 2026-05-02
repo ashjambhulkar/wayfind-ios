@@ -37,10 +37,12 @@ enum AuthSessionError: LocalizedError {
 private struct ProfileRow: Decodable {
     let id: UUID
     let displayName: String?
+    let avatarURLString: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case displayName = "display_name"
+        case avatarURLString = "avatar_url"
     }
 }
 
@@ -293,7 +295,7 @@ final class AuthSessionService {
         return capped.isEmpty ? "traveler" : capped
     }
 
-    func fetchProfile(for session: Session) async throws -> (displayName: String?, email: String) {
+    func fetchProfile(for session: Session) async throws -> (displayName: String?, email: String, avatarURLString: String?) {
         guard let client else { throw AuthSessionError.notConfigured }
         let userId = session.user.id
         let email = session.user.email ?? ""
@@ -306,10 +308,10 @@ final class AuthSessionService {
                 .single()
                 .execute()
                 .value
-            return (row.displayName, email)
+            return (row.displayName, email, row.avatarURLString)
         } catch {
             // Row may not exist yet (DB trigger race) or RLS edge case — still allow sign-in.
-            return (nil, email)
+            return (nil, email, nil)
         }
     }
 

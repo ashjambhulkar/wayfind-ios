@@ -1054,6 +1054,17 @@ struct TripDetailView: View {
         }
     }
 
+    /// `TimelineGapView` is laid out after this row; full `rowBottomSpacing` leaves a tall band above the travel segment.
+    private func timelineRowBottomSpacing(afterIndex index: Int, rows: [TripTimelineDisplayRow]) -> CGFloat {
+        guard index < rows.count - 1 else { return TimelineSpineMetrics.rowBottomSpacing }
+        let from = rows[index].place
+        let to = rows[index + 1].place
+        if from.hasUsableCoordinate && to.hasUsableCoordinate {
+            return TimelineSpineMetrics.rowBottomSpacingWhenFollowedByTravelGap
+        }
+        return TimelineSpineMetrics.rowBottomSpacing
+    }
+
     @ViewBuilder
     private func daySection(day: ItineraryDay, viewModel: TripDetailViewModel) -> some View {
         let dayTZ = displayTimeZone(for: day, viewModel: viewModel)
@@ -1099,19 +1110,7 @@ struct TripDetailView: View {
                     VStack(spacing: 0) {
                         ForEach(Array(timelineRows.enumerated()), id: \.element.id) { index, row in
                             let place = row.place
-                            // Chapter break (Morning / Afternoon / Evening / Night)
-                            // takes precedence over the travel-time gap when the
-                            // time-of-day bucket changes. Within the same chapter
-                            // we keep the lightweight gap row.
-                            let prevChapter = index > 0
-                                ? TimeOfDayChapter.from(timelineRows[index - 1].chapterSortDate, timeZone: dayTZ)
-                                : nil
-                            let currChapter = TimeOfDayChapter.from(row.chapterSortDate, timeZone: dayTZ)
 
-                            if let chapter = currChapter, chapter != prevChapter {
-                                TimeOfDayDividerView(chapter: chapter)
-                                    .padding(.bottom, AppSpacing.xs)
-                            }
                             if index > 0,
                                timelineRows[index - 1].place.hasUsableCoordinate,
                                place.hasUsableCoordinate {
@@ -1141,6 +1140,10 @@ struct TripDetailView: View {
                                         isProUser: isProUserForFlightTracking,
                                         onUpgradeTap: { presentFlightPaywall() }
                                     )
+                                    .onTapGesture {
+                                        selectedPlacePrevious = index > 0 ? timelineRows[index - 1].place : nil
+                                        selectedPlace = place
+                                    }
                                 } else {
                                     TimelinePlaceCardView(
                                         place: place,
@@ -1150,6 +1153,10 @@ struct TripDetailView: View {
                                         onMoveToDay: { placeToMove = place },
                                         onMoveToIdeas: { moveToIdeas(place, viewModel: viewModel) },
                                         onDelete: { deletePlace(place, viewModel: viewModel) },
+                                        onSelectRow: {
+                                            selectedPlacePrevious = index > 0 ? timelineRows[index - 1].place : nil
+                                            selectedPlace = place
+                                        },
                                         activityPhotoStack: itineraryPhotoStacks[place.id] ?? [],
                                         canEditActivityPhotos: collaborationStore.canEdit,
                                         onOpenActivityPhotoGallery: { openItineraryActivityPhotos(for: place, presentation: .galleryOnly) },
@@ -1160,11 +1167,10 @@ struct TripDetailView: View {
                                 }
                             }
                             .padding(.horizontal, AppSpacing.lg)
-                            .padding(.bottom, AppSpacing.sm)
-                            .onTapGesture {
-                                selectedPlacePrevious = index > 0 ? timelineRows[index - 1].place : nil
-                                selectedPlace = place
-                            }
+                            .padding(
+                                .bottom,
+                                timelineRowBottomSpacing(afterIndex: index, rows: timelineRows)
+                            )
                         }
                     }
                     .timelineSpineContinuousRail()
@@ -1398,7 +1404,7 @@ struct TripDetailView: View {
                             }
                         }
                         .padding(.horizontal, AppSpacing.lg)
-                        .padding(.bottom, AppSpacing.sm)
+                        .padding(.bottom, TimelineSpineMetrics.rowBottomSpacing)
                     }
                 }
                 .timelineSpineContinuousRail()
@@ -1439,7 +1445,9 @@ struct TripDetailView: View {
         let stops = places.filter { !$0.isBooking }
         let stopCount = stops.count
         guard stopCount > 0 else {
-            return ongoingBookings.first.map { "Staying at \($0.name)" } ?? ""
+            guard let first = ongoingBookings.first else { return "" }
+            let category = first.bookingCategoryEnum ?? .hotel
+            return category.ongoingSpanHeadline(bookingName: first.name)
         }
 
         let themes = curatedDayThemes(for: stops)
@@ -1603,30 +1611,39 @@ private struct TripDetailMapPreviewCard: View {
         switch item.kind {
         case .place(let index, let dayNumber):
             Text("\(index)")
-                .font(.callout.weight(.bold))
+                .font(.appCaption.weight(.bold))
                 .foregroundStyle(.white)
                 .frame(width: TripDetailMapPreviewMetrics.placePinSize, height: TripDetailMapPreviewMetrics.placePinSize)
                 .background(AppColors.dayColor(for: dayNumber), in: Circle())
                 .overlay {
                     Circle()
-                        .strokeBorder(.white, lineWidth: 2.5)
+                        .strokeBorder(.white, lineWidth: TripDetailMapPreviewMetrics.placePinStrokeWidth)
                 }
-                .shadow(color: .black.opacity(0.22), radius: 5, y: 3)
+                .shadow(
+                    color: .black.opacity(0.22),
+                    radius: TripDetailMapPreviewMetrics.placePinShadowRadius,
+                    y: TripDetailMapPreviewMetrics.placePinShadowY
+                )
         case .booking(let category):
             Image(systemName: category?.sfSymbol ?? "ticket.fill")
-                .font(.callout.weight(.bold))
+                .font(.appCaption.weight(.bold))
                 .foregroundStyle(.white)
                 .frame(width: TripDetailMapPreviewMetrics.bookingPinSize, height: TripDetailMapPreviewMetrics.bookingPinSize)
                 .background(category?.color ?? AppColors.appPrimary, in: RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
                 .overlay(alignment: .bottom) {
                     Image(systemName: "triangle.fill")
-                        .font(.system(size: 8, weight: .semibold))
+                        // Tail scale matches pin shrink; triangle is a UIKit-style map-marker tail, not available as a TextStyle token.
+                        .font(.system(size: TripDetailMapPreviewMetrics.bookingTailGlyphSize, weight: .semibold))
                         .foregroundStyle(category?.color ?? AppColors.appPrimary)
                         .rotationEffect(.degrees(180))
-                        .offset(y: 5)
+                        .offset(y: TripDetailMapPreviewMetrics.bookingTailOffsetY)
                 }
-                .padding(.bottom, 5)
-                .shadow(color: .black.opacity(0.22), radius: 5, y: 3)
+                .padding(.bottom, TripDetailMapPreviewMetrics.bookingMarkerBottomPadding)
+                .shadow(
+                    color: .black.opacity(0.22),
+                    radius: TripDetailMapPreviewMetrics.placePinShadowRadius,
+                    y: TripDetailMapPreviewMetrics.placePinShadowY
+                )
         }
     }
 
@@ -1681,8 +1698,25 @@ private struct TripDetailMapPreviewCard: View {
 private enum TripDetailMapPreviewMetrics {
     static let height: CGFloat = 134
     static let maxPins = 16
-    static let placePinSize: CGFloat = 34
-    static let bookingPinSize: CGFloat = 34
+
+    /// Pins on the trip-detail preview map are ~30% smaller than the original 34pt baseline so more of the route reads at a glance.
+    private static let mapPreviewPinScale: CGFloat = 0.7
+    private static let baselinePinSize: CGFloat = 34
+    private static let baselinePlaceStroke: CGFloat = 2.5
+    private static let baselineShadowRadius: CGFloat = 5
+    private static let baselineShadowY: CGFloat = 3
+    private static let baselineBookingTailSize: CGFloat = 8
+    private static let baselineBookingTailOffset: CGFloat = 5
+    private static let baselineBookingBottomPad: CGFloat = 5
+
+    static var placePinSize: CGFloat { baselinePinSize * mapPreviewPinScale }
+    static var bookingPinSize: CGFloat { baselinePinSize * mapPreviewPinScale }
+    static var placePinStrokeWidth: CGFloat { baselinePlaceStroke * mapPreviewPinScale }
+    static var placePinShadowRadius: CGFloat { baselineShadowRadius * mapPreviewPinScale }
+    static var placePinShadowY: CGFloat { baselineShadowY * mapPreviewPinScale }
+    static var bookingTailGlyphSize: CGFloat { baselineBookingTailSize * mapPreviewPinScale }
+    static var bookingTailOffsetY: CGFloat { baselineBookingTailOffset * mapPreviewPinScale }
+    static var bookingMarkerBottomPadding: CGFloat { baselineBookingBottomPad * mapPreviewPinScale }
 }
 
 // MARK: - Hero header (cover image)

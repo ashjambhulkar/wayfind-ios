@@ -3,10 +3,11 @@
 //  wayfind
 //
 //  Image-or-initials avatar used by the trip members surfaces, the activity
-//  feed, and any other place we display a person. When `imageURL` is present
-//  we render `AsyncImage`; otherwise we fall back to a solid disc tinted with
-//  one of the brand-warm palette colors derived deterministically from the
-//  identifier so the same person always gets the same color.
+//  feed, and any other place we display a person. When `imageURL` is present,
+//  we load through `CachedAvatarImage` / `AvatarRemoteImageCache`; otherwise we
+//  fall back to a solid disc tinted with one of the brand-warm palette colors
+//  derived deterministically from the identifier so the same person always gets
+//  the same color.
 //
 
 import SwiftUI
@@ -43,19 +44,8 @@ struct AvatarView: View {
     var body: some View {
         ZStack {
             if let imageURL {
-                AsyncImage(url: imageURL) { phase in
-                    switch phase {
-                    case .empty:
-                        initialsDisc
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        initialsDisc
-                    @unknown default:
-                        initialsDisc
-                    }
+                CachedAvatarImage(url: imageURL, showsProgressWhileLoading: false) {
+                    initialsDisc
                 }
             } else {
                 initialsDisc

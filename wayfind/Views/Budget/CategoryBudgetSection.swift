@@ -2,8 +2,9 @@
 //  CategoryBudgetSection.swift
 //  wayfind
 //
-//  Read-only per-category breakdown for the budget hub. Each row shows the
-//  category badge, the planned cap (if any), and an inline progress strip.
+//  Read-only per-category breakdown for the budget hub. Each row uses the
+//  shared `MapStyleIcon` category circles (same as Add Expense / category grid),
+//  the planned cap (if any), and an inline progress strip.
 //  Only renders categories that either have a planned cap *or* have actual
 //  spend — empty categories on a sparse trip stay hidden so the section
 //  doesn't read like a long checklist of zeros.
@@ -19,7 +20,7 @@ struct CategoryBudgetSection: View {
     let onEdit: (ExpenseCategory) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
+        VStack(alignment: .leading, spacing: AppSpacing.lg) {
             HStack {
                 Text("By Category")
                     .font(.sectionHeader)
@@ -44,7 +45,7 @@ struct CategoryBudgetSection: View {
                     .font(.appCaption)
                     .foregroundStyle(AppColors.textTertiary)
             } else {
-                VStack(spacing: AppSpacing.sm) {
+                VStack(spacing: AppSpacing.md) {
                     ForEach(visibleCategories, id: \.self) { category in
                         CategoryBudgetRow(
                             category: category,
@@ -88,16 +89,16 @@ private struct CategoryBudgetRow: View {
     var body: some View {
         Button(action: { if canEdit { onEdit() } }) {
             HStack(spacing: AppSpacing.md) {
-                ZStack {
-                    Circle()
-                        .fill(category.accentColor.opacity(0.18))
-                    Image(systemName: category.systemImage)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(category.accentColor)
-                }
-                .frame(width: 32, height: 32)
+                MapStyleIcon(
+                    systemName: category.systemImage,
+                    size: .small,
+                    accent: category.accentColor,
+                    backgroundStyle: .solidAccent,
+                    shape: .circle,
+                    accessibilityLabel: category.displayLabel
+                )
 
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                VStack(alignment: .leading, spacing: AppSpacing.md) {
                     HStack {
                         Text(category.displayLabel)
                             .font(.cardTitle)
@@ -115,6 +116,7 @@ private struct CategoryBudgetRow: View {
                     }
                 }
             }
+            .padding(.vertical, AppSpacing.sm)
         }
         .buttonStyle(.plain)
         .disabled(!canEdit)

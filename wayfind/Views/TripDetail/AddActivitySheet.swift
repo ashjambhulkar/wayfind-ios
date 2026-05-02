@@ -617,12 +617,6 @@ struct AddActivitySheet: View {
                 }
             }
 
-            if shouldShowScheduleDetails(for: draft) {
-                Section("Details") {
-                    scheduleDetailsRows(for: draft)
-                }
-            }
-
             Section("Schedule") {
                 Picker("Day", selection: Binding(
                     get: { selectedDayId ?? days.first?.id ?? UUID() },
@@ -643,6 +637,12 @@ struct AddActivitySheet: View {
                 if includeTime {
                     DatePicker("Start time", selection: $startTime, displayedComponents: .hourAndMinute)
                         .listRowBackground(AppColors.appSurface)
+                }
+            }
+
+            if shouldShowScheduleDetails(for: draft) {
+                Section("Details") {
+                    scheduleDetailsRows(for: draft)
                 }
             }
 
@@ -671,8 +671,7 @@ struct AddActivitySheet: View {
     private func shouldShowScheduleDetails(for draft: AddActivityDraft) -> Bool {
         switch draft {
         case .preview(let preview):
-            return !preview.subtitle.isEmpty
-                || preview.phone?.isEmpty == false
+            return preview.phone?.isEmpty == false
                 || preview.website != nil
                 || scheduleLookAroundScene != nil
         case .manual:
@@ -683,17 +682,6 @@ struct AddActivitySheet: View {
     @ViewBuilder
     private func scheduleDetailsRows(for draft: AddActivityDraft) -> some View {
         if case .preview(let preview) = draft {
-            if !preview.subtitle.isEmpty {
-                AddActivityDetailRow(
-                    icon: "mappin.and.ellipse",
-                    iconAccent: AppColors.appError,
-                    title: "Address",
-                    value: preview.subtitle,
-                    emphasizesValue: true
-                )
-                .listRowBackground(AppColors.appSurface)
-            }
-
             if let phone = preview.phone, !phone.isEmpty {
                 AddActivityDetailRow(
                     icon: "phone.fill",
@@ -1096,14 +1084,7 @@ private struct AddActivityDetailRow: View {
     let title: String
     let value: String
     var isActionable = false
-    /// When true, value uses `appPrimary` like link rows (readability); does not show chevron unless `isActionable`.
-    var emphasizesValue = false
     var action: (() -> Void)?
-
-    private var valueForeground: Color {
-        if isActionable || emphasizesValue { return AppColors.appPrimary }
-        return AppColors.textPrimary
-    }
 
     var body: some View {
         Button {
@@ -1119,7 +1100,7 @@ private struct AddActivityDetailRow: View {
                     Text(value)
                         .font(.appBody)
                         .foregroundStyle(isActionable ? AppColors.appPrimary : AppColors.textPrimary)
-                        .lineLimit(title == "Address" ? 2 : 1)
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: 0)

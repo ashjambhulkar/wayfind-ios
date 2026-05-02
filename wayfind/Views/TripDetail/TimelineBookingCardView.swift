@@ -1,8 +1,7 @@
 import SwiftUI
 
 /// Booking row in the trip-detail timeline. Sibling of `TimelinePlaceCardView`
-/// — same chassis, same pin column, same rhythm — distinguished by an inline
-/// type icon (plane / bed / fork…) and a type-specific subtitle line that
+/// — same chassis, same pin column, same rhythm — distinguished by a type-specific subtitle line that
 /// surfaces the booking's most useful fact at a glance: a flight's route, a
 /// hotel's nights, a restaurant's party size, etc. The full booking detail
 /// (confirmation chip, address, room type, etc.) lives on the detail screen.
@@ -63,10 +62,6 @@ struct TimelineBookingCardView: View {
 
     private var bookingColor: Color {
         place.bookingCategoryEnum?.color ?? AppColors.appPrimary
-    }
-
-    private var bookingSymbol: String {
-        place.bookingCategoryEnum?.sfSymbol ?? "ticket.fill"
     }
 
     private var bookingCategory: BookingCategory {
@@ -139,7 +134,14 @@ struct TimelineBookingCardView: View {
                 departureTime: flightDepartureTime(details),
                 arrivalTime: flightArrivalTime(details),
                 duration: flightDuration(details),
-                statusText: flightStatusText ?? "Flight"
+                statusText: flightStatusText ?? "Flight",
+                showFlightStatusBadge: shouldShowFlightBadge,
+                flightStatus: flightStatus,
+                isFlightStale: isFlightStale,
+                flightTint: flightTint,
+                isProUser: isProUser,
+                onFlightBadgeTap: onFlightBadgeTap,
+                onFlightUpsellTap: onUpgradeTap
             )
         } else {
             TimelineBookingPassCard(
@@ -150,8 +152,8 @@ struct TimelineBookingCardView: View {
                 statusText: passTimelineStatusChipText,
                 metrics: passMetrics,
                 footerSummaryLines: timelineFooterSummaryLines,
-                titleTrailing: restaurantTitleTrailingText,
-                eyebrowTrailingText: passEyebrowTrailingText,
+                titleTrailing: passTitleTrailingText,
+                eyebrowTrailingText: nil,
                 addressFootnote: hotelTimelineAddressFootnote
             )
         }
@@ -166,75 +168,11 @@ struct TimelineBookingCardView: View {
 
     /// Footer summary lines for timeline booking cards; `nil` falls back to metric columns.
     private var timelineFooterSummaryLines: [String]? {
-        activityTimelineFooterSummaryLines
-            ?? restaurantTimelineFooterSummaryLines
-            ?? carRentalTimelineFooterSummaryLines
-            ?? transportTimelineFooterSummaryLines
+        restaurantTimelineFooterSummaryLines
     }
 
-    /// Hide the top-right status chip when metadata is shown on the eyebrow row or elsewhere (same as restaurant / rental).
-    private var passTimelineStatusChipText: String {
-        switch place.bookingDetails {
-        case .restaurant, .carRental, .transport:
-            return ""
-        default:
-            return passStatusText
-        }
-    }
-
-    /// Car rental pickup date or transport departure calendar day on the eyebrow row (timeline TZ).
-    private var passEyebrowTrailingText: String? {
-        switch place.bookingDetails {
-        case .carRental(let c):
-            guard let pickup = c.pickupTime else { return nil }
-            return pickup.shortFormatted(timeZone: timelineDisplayTimeZone)
-        case .transport(let t):
-            guard let dep = t.departureTime else { return nil }
-            return dep.shortFormatted(timeZone: timelineDisplayTimeZone)
-        default:
-            return nil
-        }
-    }
-
-    /// Car rental: two summary lines instead of three metric columns (pickup schedule · car & confirmation).
-    private var carRentalTimelineFooterSummaryLines: [String]? {
-        guard case .carRental(let c) = place.bookingDetails else { return nil }
-        let tz = timelineDisplayTimeZone
-        let pickupLine: String
-        if let pickup = c.pickupTime {
-            pickupLine = "Pickup \(pickup.shortFormatted(timeZone: tz)) · \(pickup.timeFormatted(timeZone: tz))"
-        } else {
-            pickupLine = "Pickup TBD"
-        }
-        let trimmedCarType = c.carType.trimmingCharacters(in: .whitespacesAndNewlines)
-        let carPart = trimmedCarType.isEmpty ? "Car not selected" : "Car \(trimmedCarType)"
-        let trimmedConfirmation = place.confirmationNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let confirmPart = trimmedConfirmation.isEmpty ? "Confirmation missing" : trimmedConfirmation
-        let detailLine = "\(carPart) · \(confirmPart)"
-        return [pickupLine, detailLine]
-    }
-
-    /// Transport: departure schedule · optional seat (`TransportDetails` has no coach/car or fare-class — omit Car/Class segments).
-    private var transportTimelineFooterSummaryLines: [String]? {
-        guard case .transport(let t) = place.bookingDetails else { return nil }
-        let tz = timelineDisplayTimeZone
-        var segments: [String] = []
-        if let departure = t.departureTime {
-            segments.append("Departs \(departure.timeFormatted(timeZone: tz))")
-        } else {
-            segments.append("Departs TBD")
-        }
-        let trimmedSeat = t.seat.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedSeat.isEmpty {
-            segments.append("Seat \(trimmedSeat)")
-        }
-        let line1 = segments.joined(separator: " · ")
-        let trimmedConfirmation = place.confirmationNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let line2 = trimmedConfirmation.isEmpty
-            ? "Confirmation missing"
-            : "Confirm \(trimmedConfirmation)"
-        return [line1, line2]
-    }
+    /// Status capsule on the eyebrow row — unused on `TimelineBookingPassCard` (title row is enough; flight uses its own card).
+    private var passTimelineStatusChipText: String { "" }
 
     /// Restaurant: party count on the same row as the venue title.
     private var restaurantTitleTrailingText: String? {
@@ -243,6 +181,60 @@ struct TimelineBookingCardView: View {
             return party == 1 ? "1 guest" : "\(party) guests"
         }
         return nil
+    }
+
+    /// Event / activity ticket: start time on the title row (trailing).
+    private var activityTitleTrailingText: String? {
+        guard case .activity = place.bookingDetails else { return nil }
+        if let start = place.startTime {
+            return start.timeFormatted(timeZone: timelineDisplayTimeZone)
+        }
+        return String(localized: "Time TBD")
+    }
+
+    /// Transit: departure time only on the title row (trailing); date belongs on the spine / detail.
+    private var transportTitleTrailingText: String? {
+        guard case .transport(let t) = place.bookingDetails else { return nil }
+        let tz = timelineDisplayTimeZone
+        if let dep = t.departureTime {
+            return dep.timeFormatted(timeZone: tz)
+        }
+        return String(localized: "Time TBD")
+    }
+
+    /// Hotel: night count on the title row (trailing), same for split check-in / check-out rows.
+    private var hotelNightsTitleTrailingText: String? {
+        guard case .hotel(let h) = place.bookingDetails else { return nil }
+        guard let n = h.nights, n > 0 else { return nil }
+        return n == 1
+            ? String(localized: "1 night")
+            : String(format: String(localized: "%d nights"), n)
+    }
+
+    /// Car rental: pickup time only on the title row (trailing); date belongs on the spine / detail.
+    private var carRentalTitleTrailingText: String? {
+        guard case .carRental(let c) = place.bookingDetails else { return nil }
+        let tz = timelineDisplayTimeZone
+        if let pickup = c.pickupTime {
+            return pickup.timeFormatted(timeZone: tz)
+        }
+        return String(localized: "Pickup TBD")
+    }
+
+    private var passTitleTrailingText: String? {
+        transportTitleTrailingText
+            ?? hotelNightsTitleTrailingText
+            ?? carRentalTitleTrailingText
+            ?? activityTitleTrailingText
+            ?? restaurantTitleTrailingText
+    }
+
+    private func hotelCheckInOutMoment(label: String, date: Date?, timeString: String?, timeZone: TimeZone, missing: String) -> String {
+        guard let date else { return "\(label) \(missing)" }
+        let datePart = date.shortFormatted(timeZone: timeZone)
+        let trimmedTime = timeString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let timePart = trimmedTime.isEmpty ? date.timeFormatted(timeZone: timeZone) : trimmedTime
+        return "\(label) \(datePart) · \(timePart)"
     }
 
     /// Restaurant: one scannable footer line — time · guests · confirmation.
@@ -265,22 +257,6 @@ struct TimelineBookingCardView: View {
         let confirmPart = code == "—" ? "—" : code
         let line = "\(timePart) · \(partyPart) · \(confirmPart)"
         return [line]
-    }
-
-    /// Activity bookings: two readable lines under the header (starts · time, then provider name · ticket) instead of three metric columns.
-    private var activityTimelineFooterSummaryLines: [String]? {
-        guard case .activity(let a) = place.bookingDetails else { return nil }
-        let tz = timelineDisplayTimeZone
-        let startsLine: String
-        if let start = place.startTime {
-            startsLine = "Starts \(start.shortFormatted(timeZone: tz)) · \(start.timeFormatted(timeZone: tz))"
-        } else {
-            startsLine = "Starts TBD"
-        }
-        let provider = clean(a.provider, fallback: "—")
-        let ticket = clean(a.ticketNumber, fallback: confirmationValue)
-        let providerLine = "\(provider) · Ticket \(ticket)"
-        return [startsLine, providerLine]
     }
 
     /// Only render the badge for flight bookings — and even then only
@@ -313,23 +289,9 @@ struct TimelineBookingCardView: View {
         }
     }
 
-    private var passEyebrow: String {
-        if place.bookingCategoryEnum == .hotel, let role = hotelTimelineRole {
-            switch role {
-            case .checkIn: return "Check-in"
-            case .checkOut: return "Check-out"
-            }
-        }
-        switch place.bookingDetails {
-        case .flight: return "Flight Pass"
-        case .hotel: return "Stay Pass"
-        case .restaurant: return "Table Card"
-        case .carRental: return "Rental Pass"
-        case .activity: return "Event Ticket"
-        case .transport: return "Transit Pass"
-        case nil: return "\(bookingCategory.label) Pass"
-        }
-    }
+    /// Non-flight pass cards omit the uppercase eyebrow row (restaurant “Table Card”, etc.).
+    /// Flight uses `TimelineFlightBookingPassCard`, not this string.
+    private var passEyebrow: String { "" }
 
     private var passTitle: String {
         guard let details = place.bookingDetails else { return place.name }
@@ -359,25 +321,21 @@ struct TimelineBookingCardView: View {
             return flightCode(f)
         case .hotel(let h):
             let tz = timelineDisplayTimeZone
-            if let role = hotelTimelineRole {
-                switch role {
-                case .checkIn:
-                    let datePart = h.checkInDate.map { $0.shortFormatted(timeZone: tz) } ?? "TBD"
-                    let timeText = h.checkInTime?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    return timeText.isEmpty ? "Arrives \(datePart)" : "\(datePart) · \(timeText)"
-                case .checkOut:
-                    let datePart = h.checkOutDate.map { $0.shortFormatted(timeZone: tz) } ?? "TBD"
-                    let timeText = h.checkOutTime?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    return timeText.isEmpty ? "Departs \(datePart)" : "\(datePart) · \(timeText)"
-                }
-            }
-            switch (h.checkInDate, h.checkOutDate) {
-            case let (checkIn?, checkOut?):
-                return "\(checkIn.shortFormatted(timeZone: tz)) → \(checkOut.shortFormatted(timeZone: tz))"
-            case let (checkIn?, nil): return "Check-in \(checkIn.shortFormatted(timeZone: tz))"
-            case let (nil, checkOut?): return "Check-out \(checkOut.shortFormatted(timeZone: tz))"
-            default: return "Hotel"
-            }
+            let checkInLine = hotelCheckInOutMoment(
+                label: String(localized: "Check-in"),
+                date: h.checkInDate,
+                timeString: h.checkInTime,
+                timeZone: tz,
+                missing: String(localized: "TBD")
+            )
+            let checkOutLine = hotelCheckInOutMoment(
+                label: String(localized: "Check-out"),
+                date: h.checkOutDate,
+                timeString: h.checkOutTime,
+                timeZone: tz,
+                missing: String(localized: "TBD")
+            )
+            return "\(checkInLine) · \(checkOutLine)"
         case .restaurant(let r):
             if let t = r.reservationTime {
                 return "\(t.shortFormatted(timeZone: timelineDisplayTimeZone)) · \(t.timeFormatted(timeZone: timelineDisplayTimeZone))"
@@ -385,31 +343,27 @@ struct TimelineBookingCardView: View {
             return "Reservation"
         case .carRental(let c):
             return "\(clean(c.pickupLocation, fallback: "Pickup TBD")) → \(clean(c.dropoffLocation, fallback: "Dropoff TBD"))"
-        case .activity(let a):
-            return clean(place.address, fallback: clean(a.provider, fallback: "Venue TBD"))
+        case .activity:
+            let trimmed = place.address?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let kind = place.placeKindLabel ?? place.categoryEnum.label
+            let rawDetail = primaryDetail() ?? ""
+            let extra: String? = {
+                let d = rawDetail.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !d.isEmpty, d != kind, d != "Activity" else { return nil }
+                return d
+            }()
+            var segments: [String] = [kind]
+            if let extra {
+                segments.append(extra)
+            }
+            if !trimmed.isEmpty {
+                segments.append(trimmed)
+            } else if segments.count == 1 {
+                return String(localized: "Location not added")
+            }
+            return segments.joined(separator: " · ")
         case .transport(let t):
             return "\(clean(t.departureStation, fallback: "Departure TBD")) → \(clean(t.arrivalStation, fallback: "Arrival TBD"))"
-        }
-    }
-
-    private var passStatusText: String {
-        guard let details = place.bookingDetails else { return bookingCategory.label }
-        switch details {
-        case .flight:
-            return flightStatusText ?? "Flight"
-        case .hotel(let h):
-            if case .checkOut = hotelTimelineRole { return "" }
-            if let nights = h.nights, nights > 0 { return nights == 1 ? "1 night" : "\(nights) nights" }
-            return "Stay"
-        case .restaurant(let r):
-            if let party = r.partySize, party > 0 { return party == 1 ? "1 guest" : "\(party) guests" }
-            return "Table"
-        case .carRental(let c):
-            return c.pickupTime?.shortFormatted ?? "Pickup"
-        case .activity:
-            return place.startTime?.timeFormatted(timeZone: timelineDisplayTimeZone) ?? "Ticket"
-        case .transport(let t):
-            return t.departureTime?.shortFormatted ?? "Transit"
         }
     }
 
@@ -424,43 +378,20 @@ struct TimelineBookingCardView: View {
         case .flight:
             // Flight timeline uses `TimelineFlightBookingPassCard` (no metric footer).
             return []
-        case .hotel(let h):
-            if case .checkOut = hotelTimelineRole {
-                return [
-                    dateTimeMetric(title: "Check-out", date: h.checkOutDate),
-                    TimelineBookingPassMetric(title: "Room", value: clean(h.roomType, fallback: "—")),
-                    TimelineBookingPassMetric(title: "Confirm", value: confirmationValue)
-                ]
-            }
-            return [
-                dateTimeMetric(title: "Check-in", date: h.checkInDate),
-                TimelineBookingPassMetric(title: "Room", value: clean(h.roomType, fallback: "—")),
-                TimelineBookingPassMetric(title: "Confirm", value: confirmationValue)
-            ]
+        case .hotel:
+            return []
         case .restaurant(let r):
             return [
                 TimelineBookingPassMetric(title: "Time", value: r.reservationTime?.timeFormatted(timeZone: timelineDisplayTimeZone) ?? "TBD"),
                 TimelineBookingPassMetric(title: "Party", value: r.partySize.map { "\($0)" } ?? "—"),
                 TimelineBookingPassMetric(title: "Confirm", value: confirmationValue)
             ]
-        case .carRental(let c):
-            return [
-                dateTimeMetric(title: "Pickup", date: c.pickupTime),
-                TimelineBookingPassMetric(title: "Car", value: clean(c.carType, fallback: "—")),
-                TimelineBookingPassMetric(title: "Confirm", value: confirmationValue)
-            ]
-        case .activity(let a):
-            return [
-                dateTimeMetric(title: "Starts", date: place.startTime),
-                TimelineBookingPassMetric(title: "Provider", value: clean(a.provider, fallback: "—")),
-                TimelineBookingPassMetric(title: "Ticket", value: clean(a.ticketNumber, fallback: confirmationValue))
-            ]
-        case .transport(let t):
-            return [
-                dateTimeMetric(title: "Departs", date: t.departureTime),
-                TimelineBookingPassMetric(title: "Seat", value: clean(t.seat, fallback: "—")),
-                TimelineBookingPassMetric(title: "Confirm", value: confirmationValue)
-            ]
+        case .carRental:
+            return []
+        case .activity:
+            return []
+        case .transport:
+            return []
         }
     }
 
@@ -593,12 +524,27 @@ struct TimelineBookingCardView: View {
     // MARK: - Accessibility
 
     private var accessibilityDescription: String {
-        var pieces: [String] = []
         let label = place.bookingCategoryEnum?.label ?? "Booking"
-        pieces.append("\(label): \(place.name)")
-        if place.bookingCategoryEnum == .hotel, let role = hotelTimelineRole {
-            pieces.append(role == .checkIn ? "check-in" : "check-out")
+        if case .hotel = place.bookingDetails {
+            let nightsPart = passTitleTrailingText ?? String(localized: "Nights not set")
+            let addr = hotelTimelineAddressFootnote.map { ", \($0)" } ?? ""
+            return "\(label): \(passTitle), \(nightsPart), \(passSubtitle)\(addr)"
         }
+        if case .carRental = place.bookingDetails {
+            let schedule = passTitleTrailingText ?? String(localized: "Pickup TBD")
+            return "\(label): \(passTitle), \(schedule), \(passSubtitle)"
+        }
+        if case .transport = place.bookingDetails {
+            let schedule = passTitleTrailingText ?? String(localized: "Time TBD")
+            return "\(label): \(passTitle), \(schedule), \(passSubtitle)"
+        }
+        if case .activity = place.bookingDetails {
+            let timePart = place.startTime.map { $0.timeFormatted(timeZone: timelineDisplayTimeZone) }
+                ?? String(localized: "Time TBD")
+            return "\(label): \(place.name), \(timePart), \(passSubtitle)"
+        }
+        var pieces: [String] = []
+        pieces.append("\(label): \(place.name)")
         if let lead = primaryDetail() {
             pieces.append(lead)
         }
@@ -635,7 +581,7 @@ private struct TimelineBookingPassCard: View {
     let subtitle: String
     let statusText: String
     let metrics: [TimelineBookingPassMetric]
-    /// When set (e.g. activity / event ticket), replaces the metric-column footer with stacked summary lines.
+    /// When set (e.g. restaurant footer), replaces the metric-column footer with stacked summary lines.
     var footerSummaryLines: [String]? = nil
     /// Optional trailing text on the title row (e.g. restaurant party size).
     var titleTrailing: String? = nil
@@ -649,37 +595,47 @@ private struct TimelineBookingPassCard: View {
         return !metrics.isEmpty
     }
 
+    private var showsEyebrowRow: Bool {
+        !eyebrow.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || showsStatusChip
+            || !(eyebrowTrailingText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty
+    }
+
     private var showsStatusChip: Bool {
         !statusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    var body: some View {
-        HStack(alignment: .top, spacing: AppSpacing.sm) {
-            TimelineCardLeadingIconMetrics.categoryBadge(
-                symbol: category.sfSymbol,
-                accent: category.color,
-                accessibilityLabel: category.label
-            )
+    private var titleTrailingFont: Font {
+        switch category {
+        case .transport, .carRental, .activity:
+            return .appSmall.weight(.semibold)
+        default:
+            return .subheadline.weight(.semibold)
+        }
+    }
 
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            if showsEyebrowRow {
                 HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
                     Text(eyebrow.uppercased())
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(AppColors.textSecondary)
-                    .tracking(0.7)
-                    .lineLimit(1)
-
-                Spacer(minLength: AppSpacing.xs)
-
-                if showsStatusChip {
-                    statusChip
-                } else if let eyebrowTrailing = eyebrowTrailingText?.trimmingCharacters(in: .whitespacesAndNewlines),
-                          !eyebrowTrailing.isEmpty {
-                    Text(eyebrowTrailing)
-                        .font(.footnote)
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(AppColors.textSecondary)
+                        .tracking(0.7)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.78)
+
+                    Spacer(minLength: AppSpacing.xs)
+
+                    if showsStatusChip {
+                        statusChip
+                    } else if let eyebrowTrailing = eyebrowTrailingText?.trimmingCharacters(in: .whitespacesAndNewlines),
+                              !eyebrowTrailing.isEmpty {
+                        Text(eyebrowTrailing)
+                            .font(.footnote)
+                            .foregroundStyle(AppColors.textSecondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
                 }
             }
 
@@ -693,9 +649,10 @@ private struct TimelineBookingPassCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     Text(trailing)
-                        .font(.subheadline.weight(.semibold))
+                        .font(titleTrailingFont)
                         .foregroundStyle(AppColors.textSecondary)
                         .lineLimit(1)
+                        .monospacedDigit()
                 }
             } else {
                 Text(title)
@@ -708,7 +665,8 @@ private struct TimelineBookingPassCard: View {
             Text(subtitle)
                 .font(.footnote)
                 .foregroundStyle(AppColors.textSecondary)
-                .lineLimit(2)
+                .lineLimit(3)
+                .minimumScaleFactor(0.85)
 
             if let address = addressFootnote?.trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
@@ -760,9 +718,8 @@ private struct TimelineBookingPassCard: View {
                 }
                 .padding(.top, AppSpacing.xs)
             }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .timelineCardChassis(
             stripeColor: category.color,
             showsTopRail: false,
@@ -829,32 +786,32 @@ private struct TimelineFlightBookingPassCard: View {
     let departureTime: Date?
     let arrivalTime: Date?
     let duration: String?
-    /// Retained for VoiceOver; not shown on-card.
+    /// Supplementary summary for the card-level VoiceOver label when the
+    /// status badge is hidden (e.g. Pro user before tracking).
     let statusText: String
+    var showFlightStatusBadge: Bool = false
+    var flightStatus: FlightStatus? = nil
+    var isFlightStale: Bool = false
+    var flightTint: FlightStatus.DisplayState.Tint = .neutral
+    var isProUser: Bool = true
+    var onFlightBadgeTap: (() -> Void)? = nil
+    var onFlightUpsellTap: (() -> Void)? = nil
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpacing.sm) {
-            AirlineLogoView(
-                carrierIATA: carrierIATA,
-                airlineNameFallback: airlineName,
-                variant: .timelineDayLeading
-            )
-
-            header
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, TimelineCardLayoutMetrics.contentHorizontalPadding)
-        .padding(.vertical, TimelineCardLayoutMetrics.contentVerticalPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppColors.appSurface)
-        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                .strokeBorder(AppColors.appDivider, lineWidth: 0.6)
-        }
-        .shadow(color: .black.opacity(0.07), radius: 8, y: 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilitySummary)
+        header
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, TimelineCardLayoutMetrics.contentHorizontalPadding)
+            .padding(.vertical, TimelineCardLayoutMetrics.contentVerticalPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppColors.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 0.6)
+            }
+            .shadow(color: .black.opacity(0.07), radius: 8, y: 4)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilitySummary)
     }
 
     private var accessibilitySummary: String {
@@ -866,26 +823,43 @@ private struct TimelineFlightBookingPassCard: View {
 
     private var header: some View {
         VStack(spacing: AppSpacing.xs) {
-            airlineBrandingRow
             rowTimesAndCenterPlane
             rowAirportCodesAndArc
             rowAirportCaptionsAndDuration
+            airlineBrandingAndStatusRow
         }
     }
 
-    private var airlineBrandingRow: some View {
+    /// Bottom row: airline identity (leading) · flight status pill (trailing).
+    private var airlineBrandingAndStatusRow: some View {
         HStack(alignment: .center, spacing: AppSpacing.sm) {
-            AirlineLogoView(
-                carrierIATA: carrierIATA,
-                airlineNameFallback: airlineName,
-                variant: .timelineCard
-            )
-            Text(airlineName)
-                .font(.appCaption.weight(.semibold))
-                .foregroundStyle(AppColors.textPrimary)
-                .lineLimit(2)
-                .minimumScaleFactor(0.78)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .center, spacing: AppSpacing.sm) {
+                AirlineLogoView(
+                    carrierIATA: carrierIATA,
+                    airlineNameFallback: airlineName,
+                    variant: .timelineCard
+                )
+                Text(airlineName)
+                    .font(.appCaption.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+
+            if showFlightStatusBadge {
+                FlightStatusBadge(
+                    status: flightStatus,
+                    isStale: isFlightStale,
+                    tint: flightTint,
+                    isProUser: isProUser,
+                    onUpsellTap: onFlightUpsellTap,
+                    onTap: onFlightBadgeTap
+                )
+                .fixedSize(horizontal: true, vertical: false)
+            }
         }
     }
 

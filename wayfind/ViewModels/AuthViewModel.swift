@@ -21,6 +21,9 @@ final class AuthViewModel {
     var authState: AuthState = .loading
     var currentUserEmail = ""
     var currentUserName = ""
+    /// Public URL from `profiles.avatar_url`; drives list/nav avatars without a separate profile fetch.
+    var currentUserAvatarURLString: String?
+    var currentUserId: UUID?
     var isLoading = false
     var errorMessage: String?
     /// Shown after sign-up when the project requires email confirmation (no session yet).
@@ -81,6 +84,8 @@ final class AuthViewModel {
         authState = .signedOut
         currentUserEmail = ""
         currentUserName = ""
+        currentUserAvatarURLString = nil
+        currentUserId = nil
         needsDisplayName = false
         errorMessage = nil
         successMessage = nil
@@ -340,18 +345,19 @@ final class AuthViewModel {
 
     var isSignedIn: Bool { authState == .signedIn }
 
-    var userInitials: String {
-        let parts = currentUserName.split(separator: " ")
-        if parts.count >= 2 {
-            return (String(parts[0].prefix(1)) + String(parts[1].prefix(1))).uppercased()
+    /// Resolved avatar URL for toolbar / list chrome; nil when absent or not a valid URL.
+    var profileAvatarURL: URL? {
+        guard let raw = currentUserAvatarURLString?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
         }
-        let name = currentUserName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty { return String(name.prefix(2)).uppercased() }
-        let email = currentUserEmail
-        if email.contains("@") {
-            return String(email.prefix(2)).uppercased()
-        }
-        return "?"
+        return URL(string: raw)
+    }
+
+    /// Stable key for `AvatarView` tint and initials fallback.
+    var userAvatarStableID: String {
+        if let currentUserId { return currentUserId.uuidString }
+        let trimmed = currentUserEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "user" : trimmed
     }
 
     private func applySession(
@@ -359,10 +365,12 @@ final class AuthViewModel {
         appleCredential: ASAuthorizationAppleIDCredential?
     ) async throws {
         await AuthSessionService.shared.ensureProfileExists(for: session)
-        let (displayName, email) = try await AuthSessionService.shared.fetchProfile(for: session)
+        let (displayName, email, avatarURLString) = try await AuthSessionService.shared.fetchProfile(for: session)
 
         let sessionEmail = session.user.email ?? email
         currentUserEmail = sessionEmail
+        currentUserId = session.user.id
+        currentUserAvatarURLString = avatarURLString
 
         if let displayName, !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             currentUserName = displayName

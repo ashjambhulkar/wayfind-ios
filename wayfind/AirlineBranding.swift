@@ -38,23 +38,14 @@ struct AirlineLogoView: View {
     var variant: Variant
 
     private static let logoDimension: CGFloat = 30
-    /// Same footprint as timeline activity / booking solid leading tiles (`TimelineCardLeadingIconMetrics`).
-    private static let timelineDayLeadingSide: CGFloat = TimelineCardLeadingIconMetrics.solidSquareSideLength
 
     enum Variant {
         case bookingPassFooter
         case timelineCard
-        /// Rounded square matching timeline activity / booking leading `MapStyleIcon` tiles; full-bleed logo when available.
-        case timelineDayLeading
     }
 
     var body: some View {
-        switch variant {
-        case .timelineDayLeading:
-            timelineDayLeadingBody
-        case .bookingPassFooter, .timelineCard:
-            compactMarkBody
-        }
+        compactMarkBody
     }
 
     private var compactMarkBody: some View {
@@ -97,52 +88,10 @@ struct AirlineLogoView: View {
             case .timelineCard:
                 RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous)
                     .strokeBorder(AppColors.appDivider.opacity(0.75), lineWidth: 0.5)
-            case .timelineDayLeading:
-                EmptyView()
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityHidden(true)
-    }
-
-    private var timelineDayLeadingBody: some View {
-        ZStack {
-            if let url = AirlineLogoURL.logoURL(carrierCode: carrierIATA, pixelSize: 128) {
-                AsyncImage(url: url, transaction: .init(animation: .easeInOut(duration: 0.15))) { phase in
-                    switch phase {
-                    case .empty:
-                        ProgressView()
-                            .controlSize(.regular)
-                            .tint(AppColors.iconOnColoredSurface)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(BookingCategory.flight.color)
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                            .transition(.opacity)
-                    case .failure:
-                        timelineDayLeadingGlyphFallback
-                    @unknown default:
-                        timelineDayLeadingGlyphFallback
-                    }
-                }
-            } else {
-                timelineDayLeadingGlyphFallback
-            }
-        }
-        .frame(width: Self.timelineDayLeadingSide, height: Self.timelineDayLeadingSide)
-        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-        .accessibilityElement(children: .ignore)
-        .accessibilityHidden(true)
-    }
-
-    private var timelineDayLeadingGlyphFallback: some View {
-        Image(systemName: "airplane")
-            .font(.sectionHeader.weight(.semibold))
-            .foregroundStyle(AppColors.iconOnColoredSurface)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(BookingCategory.flight.color)
     }
 
     @ViewBuilder
@@ -165,8 +114,6 @@ struct AirlineLogoView: View {
                 .font(.appCaption.weight(.semibold))
                 .foregroundStyle(BookingCategory.flight.color.opacity(0.95))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .timelineDayLeading:
-            timelineDayLeadingGlyphFallback
         }
     }
 
@@ -177,8 +124,6 @@ struct AirlineLogoView: View {
             Color.white.opacity(0.16)
         case .timelineCard:
             AppColors.textPrimary.opacity(0.04)
-        case .timelineDayLeading:
-            BookingCategory.flight.color
         }
     }
 
@@ -188,8 +133,6 @@ struct AirlineLogoView: View {
             return .white.opacity(0.75)
         case .timelineCard:
             return AppColors.textSecondary.opacity(0.85)
-        case .timelineDayLeading:
-            return AppColors.iconOnColoredSurface.opacity(0.9)
         }
     }
 }
