@@ -1691,9 +1691,75 @@ final class SupabaseManager {
             .execute()
     }
 
+    func fetchForwardingEmailAddress(for tripId: UUID) async throws -> String {
+        let (client, userId) = try await requireClientAndUserId()
+        let rows: [ForwardingAddressRow] = try await client
+            .from("user_forwarding_addresses")
+            .select("id,address_token,is_active")
+            .eq("user_id", value: userId.uuidString)
+            .eq("trip_id", value: tripId.uuidString)
+            .limit(1)
+            .execute()
+            .value
+
+        if let existing = rows.first {
+            if !existing.is_active {
+                try await client
+                    .from("user_forwarding_addresses")
+                    .update(ForwardingAddressUpdate(is_active: true))
+                    .eq("id", value: existing.id.uuidString)
+                    .execute()
+            }
+            return Self.forwardingEmailAddress(from: existing.address_token)
+        }
+
+        let token = Self.makeForwardingAddressToken()
+        let inserted: ForwardingAddressRow = try await client
+            .from("user_forwarding_addresses")
+            .insert(
+                ForwardingAddressInsert(
+                    user_id: userId,
+                    trip_id: tripId,
+                    address_token: token,
+                    is_active: true
+                ),
+                returning: .representation
+            )
+            .select("id,address_token,is_active")
+            .single()
+            .execute()
+            .value
+        return Self.forwardingEmailAddress(from: inserted.address_token)
+    }
+
+    func fetchForwardedBookingSummary(for tripId: UUID) async throws -> ForwardedBookingSummary {
+        let (client, _) = try await requireClientAndUserId()
+        let rows: [EmailForwardingStatusRow] = try await client
+            .from("email_forwarding_queue")
+            .select("status")
+            .eq("trip_id", value: tripId.uuidString)
+            .execute()
+            .value
+
+        return ForwardedBookingSummary(
+            pendingCount: rows.filter { Self.isForwardingPendingStatus($0.status) }.count,
+            needsReviewCount: rows.filter { Self.isForwardingReviewStatus($0.status) }.count,
+            importedCount: rows.filter { $0.status == "processed" }.count
+        )
+    }
+
     func fetchParsedBookings(for tripId: UUID) async throws -> [ParsedBooking] {
-        _ = tripId
-        return [ParsedBooking]()
+        let (client, _) = try await requireClientAndUserId()
+        let rows: [EmailForwardingQueueRow] = try await client
+            .from("email_forwarding_queue")
+            .select("id,user_id,trip_id,status,subject,error_message,extracted_bookings,created_at")
+            .eq("trip_id", value: tripId.uuidString)
+            .order("created_at", ascending: false)
+            .limit(50)
+            .execute()
+            .value
+
+        return rows.compactMap(Self.mapEmailForwardingQueueRow)
     }
 
     /// Uploads JPEG bytes to Storage (path matches Expo: `{userId}/trip-covers/{tripId}/cover.jpg`).
@@ -1893,6 +1959,133 @@ final class SupabaseManager {
             .delete()
             .eq("id", value: itemId.uuidString)
             .execute()
+    }
+
+    private struct ForwardingAddressRow: Decodable, Sendable {
+        let id: UUID
+        let address_token: String
+        let is_active: Bool
+    }
+
+    private struct ForwardingAddressInsert: Encodable, Sendable {
+        let user_id: UUID
+        let trip_id: UUID
+        let address_token: String
+        let is_active: Bool
+    }
+
+    private struct ForwardingAddressUpdate: Encodable, Sendable {
+        let is_active: Bool
+    }
+
+    private struct EmailForwardingStatusRow: Decodable, Sendable {
+        let status: String
+    }
+
+    private struct EmailForwardingQueueRow: Decodable, Sendable {
+        let id: UUID
+        let user_id: UUID?
+        let trip_id: UUID?
+        let status: String
+        let subject: String?
+        let error_message: String?
+        let extracted_bookings: JSONValue?
+        let created_at: String?
+    }
+
+    private static func makeForwardingAddressToken() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    }
+
+    private static func forwardingEmailAddress(from token: String) -> String {
+        "trips+\(token)@\(AppConfig.bookingForwardingDomain)"
+    }
+
+    private static func isForwardingPendingStatus(_ status: String) -> Bool {
+        ["received", "pending", "processing"].contains(status)
+    }
+
+    private static func isForwardingReviewStatus(_ status: String) -> Bool {
+        ["failed", "no_user", "needs_assignment"].contains(status)
+    }
+
+    private static func mapEmailForwardingQueueRow(_ row: EmailForwardingQueueRow) -> ParsedBooking? {
+        guard let userId = row.user_id, let tripId = row.trip_id else { return nil }
+        let status: ParsedBookingStatus
+        if isForwardingPendingStatus(row.status) {
+            status = .pending
+        } else if row.status == "processed" {
+            status = .confirmed
+        } else {
+            status = .failed
+        }
+
+        return ParsedBooking(
+            id: row.id,
+            userId: userId,
+            tripId: tripId,
+            status: status,
+            parsedData: forwardingParsedData(from: row),
+            createdAt: SupabaseModelMapping.parsePostgresTimestamp(row.created_at) ?? Date()
+        )
+    }
+
+    private static func forwardingParsedData(from row: EmailForwardingQueueRow) -> [String: String]? {
+        var data: [String: String] = [:]
+        if let subject = row.subject?.trimmingCharacters(in: .whitespacesAndNewlines), !subject.isEmpty {
+            data["Subject"] = subject
+        }
+        if let error = row.error_message?.trimmingCharacters(in: .whitespacesAndNewlines), !error.isEmpty {
+            data["Issue"] = error
+        }
+        if let booking = firstForwardedBookingObject(from: row.extracted_bookings) {
+            for (sourceKey, displayKey) in forwardedBookingDisplayKeys {
+                if let value = booking[sourceKey].flatMap(forwardingDisplayString) {
+                    data[displayKey] = value
+                }
+            }
+        }
+        return data.isEmpty ? nil : data
+    }
+
+    private static let forwardedBookingDisplayKeys: [(String, String)] = [
+        ("title", "Title"),
+        ("kind", "Type"),
+        ("provider", "Provider"),
+        ("confirmation_code", "Confirmation"),
+        ("starts_at", "Starts"),
+        ("start_location", "From"),
+        ("end_location", "To"),
+        ("total_price", "Total"),
+        ("currency", "Currency"),
+    ]
+
+    private static func firstForwardedBookingObject(from value: JSONValue?) -> [String: JSONValue]? {
+        switch value {
+        case .array(let items):
+            for item in items {
+                if case .object(let object) = item { return object }
+            }
+        case .object(let object):
+            return object
+        default:
+            break
+        }
+        return nil
+    }
+
+    private static func forwardingDisplayString(from value: JSONValue) -> String? {
+        switch value {
+        case .string(let string):
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        case .number(let number):
+            return number.formatted()
+        case .bool(let bool):
+            return bool ? "Yes" : "No"
+        default:
+            return nil
+        }
     }
 
     private struct TripNoteRow: Decodable, Sendable {
@@ -2425,7 +2618,8 @@ final class SupabaseManager {
             durationMinutes: mergedDurationMinutes,
             subtypes: enrichment?.subtypes,
             travelFromPreviousMinutes: row.travel_from_previous_minutes,
-            travelMode: row.travel_mode
+            travelMode: row.travel_mode,
+            thumbnailUrl: enrichment?.nonEmptyThumbnailURL
         )
     }
 
@@ -2983,6 +3177,12 @@ final class SupabaseManager {
 }
 
 extension SupabaseManager.CityPlaceEnrichmentRow {
+    /// Trimmed `city_places.thumbnail_url` for timeline/catalog thumbnails.
+    var nonEmptyThumbnailURL: String? {
+        guard let t = thumbnail_url?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        return t
+    }
+
     /// Activity hero merge: first `images` gallery URL, else non-empty `thumbnail_url`.
     var mergedHeroImageURL: String? {
         SupabaseManager.firstGalleryImageURL(from: images) ?? thumbnailHeroFallback

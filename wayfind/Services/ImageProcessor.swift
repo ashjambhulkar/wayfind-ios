@@ -222,13 +222,16 @@ enum AttachmentValidator {
         }
     }
 
-    static func validate(data: Data, mimeType: String) throws {
+    /// - Parameter byteLimit: When `nil`, uses `maxByteCount` (25 MB). Surfaces
+    ///   such as trip documents pass a lower cap without changing image-processor defaults.
+    static func validate(data: Data, mimeType: String, byteLimit: Int? = nil) throws {
         guard !data.isEmpty else { throw ValidationError.emptyInput }
         guard allowedMimeTypes.contains(mimeType.lowercased()) else {
             throw ValidationError.unsupportedMime(mimeType)
         }
-        if data.count > maxByteCount {
-            throw ValidationError.sizeLimitExceeded(byteCount: data.count, limit: maxByteCount)
+        let limit = byteLimit ?? maxByteCount
+        if data.count > limit {
+            throw ValidationError.sizeLimitExceeded(byteCount: data.count, limit: limit)
         }
     }
 

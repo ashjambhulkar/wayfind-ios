@@ -266,31 +266,31 @@ struct SuggestedThumbnail: View {
     var size: CGFloat = 52
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                .fill(AppColors.iconBadgeGradient(accent: badgeAccent))
-
+        Group {
             if let url = preview.thumbnailURL {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .empty:
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(family.color)
+                        ZStack {
+                            solidCategoryGlyph
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(family.color)
+                        }
                     case .success(let image):
                         image
                             .resizable()
                             .scaledToFill()
                     case .failure:
-                        glyph
+                        solidCategoryGlyph
                     @unknown default:
-                        glyph
+                        solidCategoryGlyph
                     }
                 }
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
             } else {
-                glyph
+                solidCategoryGlyph
             }
         }
         .frame(width: size, height: size)
@@ -309,11 +309,16 @@ struct SuggestedThumbnail: View {
         preview.category?.mapBadgeSymbol ?? "mappin"
     }
 
-    private var glyph: some View {
-        Image(systemName: symbol)
-            .font(.sectionHeader.weight(.semibold))
-            .symbolRenderingMode(.monochrome)
-            .foregroundStyle(AppColors.iconOnColoredSurface)
+    private var solidCategoryGlyph: some View {
+        MapStyleIcon(
+            systemName: symbol,
+            size: MapStyleIconSize.suggestedThumbnailGlyphBucket(side: size),
+            accent: badgeAccent,
+            backgroundStyle: .solidAccent,
+            shape: .roundedRectangle,
+            frameSide: size,
+            accessibilityLabel: nil
+        )
     }
 }
 

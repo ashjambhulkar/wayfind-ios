@@ -1,46 +1,63 @@
 import SwiftUI
 
+/// How `ActivityPhotosSheet` should present when opened (e.g. timeline swipe vs menu).
+enum ActivityPhotosManageEntry: Hashable {
+    /// Land on grid or empty state.
+    case browse
+    /// Present the system photo picker after attachments finish loading.
+    case openSystemPickerOnAppear
+}
+
 /// Identifies which activity to show when using `.sheet(item:)` — full manager vs view-only gallery.
 struct ActivityPhotosSheetTarget: Identifiable, Hashable {
-    enum Presentation: String, Hashable {
-        case manage
+    enum Presentation: Hashable {
+        case manage(ActivityPhotosManageEntry)
         case galleryOnly
     }
 
     let activityId: UUID
     let title: String
-    var presentation: Presentation = .manage
+    var presentation: Presentation = .manage(.browse)
 
-    var id: String { "\(activityId.uuidString)-\(presentation.rawValue)" }
+    var id: String {
+        switch presentation {
+        case .manage(let entry):
+            let suffix = entry == .browse ? "browse" : "picker"
+            return "\(activityId.uuidString)-manage-\(suffix)"
+        case .galleryOnly:
+            return "\(activityId.uuidString)-galleryOnly"
+        }
+    }
 }
 
 /// Overlapping thumbnails for activity attachments (timeline + recent activity).
 struct ActivityFeedPhotoStackView: View {
     let items: [ActivityFeedPhotoStackItem]
     var maxVisible: Int = 3
-    let onTap: () -> Void
+    /// Default matches recent-activity rows; timeline matches `TimelineCardLeadingIconMetrics.solidSquareSideLength`.
+    var tileSize: CGFloat = 38
+    var tileCornerRadius: CGFloat = AppCornerRadius.small
+    enum Arrangement {
+        /// Loose fan — peek and tilt for sheet rows.
+        case sheetRow
+        /// Minimal offset, centered vertically with the headline row beside it.
+        case timelineLeading
+    }
 
-    private let tileSize: CGFloat = 38
-    /// Horizontal step between stack layers (peek of cards underneath).
-    private var stackStepX: CGFloat { 7 }
-    /// Vertical step so back cards sit slightly lower — reads as a pile.
-    private var stackStepY: CGFloat { 2.5 }
+    var arrangement: Arrangement = .sheetRow
+    let onTap: () -> Void
 
     var body: some View {
         let visible = Array(items.prefix(maxVisible))
         let overflow = max(0, items.count - maxVisible)
-        let spreadX = CGFloat(max(visible.count - 1, 0)) * stackStepX
         Button(action: onTap) {
-            ZStack(alignment: .bottomTrailing) {
+            ZStack(alignment: arrangement == .timelineLeading ? .center : .bottomTrailing) {
                 // Draw back-to-front so the first model item (cover from the
                 // service) is the last subview and paints on top.
                 ForEach(Array(visible.enumerated().reversed()), id: \.element.id) { index, item in
                     tile(for: item.url)
                         .rotationEffect(.degrees(stackTilt(depth: index)))
-                        .offset(
-                            x: -CGFloat(index) * stackStepX,
-                            y: CGFloat(index) * stackStepY
-                        )
+                        .offset(stackOffset(for: index, count: visible.count))
                         .shadow(
                             color: index == 0 ? Color.black.opacity(0.2) : Color.black.opacity(0.06),
                             radius: index == 0 ? 4 : 2,
@@ -59,12 +76,11 @@ struct ActivityFeedPhotoStackView: View {
                         }
                 }
             }
-            .padding(.top, 4)
-            .padding(.leading, 3)
+            .modifier(PhotoStackOuterInsets(arrangement: arrangement))
             .frame(
-                width: tileSize + spreadX + 6,
-                height: tileSize + CGFloat(max(visible.count - 1, 0)) * stackStepY + 6,
-                alignment: .bottomTrailing
+                width: frameWidth(for: visible.count),
+                height: frameHeight(for: visible.count),
+                alignment: arrangement == .timelineLeading ? .center : .bottomTrailing
             )
         }
         .buttonStyle(.plain)
@@ -76,13 +92,73 @@ struct ActivityFeedPhotoStackView: View {
         .accessibilityHint(String(localized: "Opens gallery"))
     }
 
-    /// Alternating tilt by depth so layers read as a messy real-world stack.
+    private var stackStepX: CGFloat {
+        switch arrangement {
+        case .sheetRow: return 7
+        case .timelineLeading: return 2
+        }
+    }
+
+    private var stackStepY: CGFloat {
+        switch arrangement {
+        case .sheetRow: return 2.5
+        case .timelineLeading: return 1.25
+        }
+    }
+
+    private func stackOffset(for index: Int, count: Int) -> CGSize {
+        switch arrangement {
+        case .sheetRow:
+            return CGSize(
+                width: -CGFloat(index) * stackStepX,
+                height: CGFloat(index) * stackStepY
+            )
+        case .timelineLeading:
+            guard count > 1 else { return .zero }
+            let midY = CGFloat(count - 1) * stackStepY / 2
+            let midX = CGFloat(count - 1) * stackStepX / 2
+            let x = -CGFloat(index) * stackStepX + midX
+            let y = CGFloat(index) * stackStepY - midY
+            return CGSize(width: x, height: y)
+        }
+    }
+
+    private func frameWidth(for visibleCount: Int) -> CGFloat {
+        let spread = CGFloat(max(visibleCount - 1, 0)) * stackStepX
+        switch arrangement {
+        case .sheetRow:
+            return tileSize + spread + 6
+        case .timelineLeading:
+            return tileSize + spread + AppSpacing.xs
+        }
+    }
+
+    private func frameHeight(for visibleCount: Int) -> CGFloat {
+        let verticalSpread = CGFloat(max(visibleCount - 1, 0)) * stackStepY
+        switch arrangement {
+        case .sheetRow:
+            return tileSize + verticalSpread + 6 + 4
+        case .timelineLeading:
+            return tileSize + verticalSpread + AppSpacing.xs
+        }
+    }
+
     private func stackTilt(depth: Int) -> Double {
-        switch depth {
-        case 0: return 0
-        case 1: return -6
-        case 2: return 5
-        default: return 0
+        switch arrangement {
+        case .sheetRow:
+            switch depth {
+            case 0: return 0
+            case 1: return -6
+            case 2: return 5
+            default: return 0
+            }
+        case .timelineLeading:
+            switch depth {
+            case 0: return 0
+            case 1: return -3
+            case 2: return 3
+            default: return 0
+            }
         }
     }
 
@@ -103,15 +179,31 @@ struct ActivityFeedPhotoStackView: View {
             }
         }
         .frame(width: tileSize, height: tileSize)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: tileCornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: tileCornerRadius, style: .continuous)
                 .strokeBorder(AppColors.appDivider.opacity(0.9), lineWidth: 1)
         )
     }
 
     private var tilePlaceholder: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
+        RoundedRectangle(cornerRadius: tileCornerRadius, style: .continuous)
             .fill(AppColors.appDivider.opacity(0.35))
     }
 }
+
+private struct PhotoStackOuterInsets: ViewModifier {
+    let arrangement: ActivityFeedPhotoStackView.Arrangement
+
+    func body(content: Content) -> some View {
+        switch arrangement {
+        case .sheetRow:
+            content
+                .padding(.top, 4)
+                .padding(.leading, 3)
+        case .timelineLeading:
+            content
+        }
+    }
+}
+

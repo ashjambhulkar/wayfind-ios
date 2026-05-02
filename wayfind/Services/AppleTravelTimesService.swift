@@ -136,6 +136,20 @@ final class AppleTravelTimesService {
         return cache[key]?.minutes(for: mode)
     }
 
+    /// City-scoped route distance in meters when both Google place ids are known.
+    func cachedDistanceMeters(
+        cityProfileId: UUID,
+        fromPlaceId: String,
+        toPlaceId: String
+    ) -> Int? {
+        let key = CacheKey(
+            cityProfileId: cityProfileId,
+            fromPlaceId: fromPlaceId,
+            toPlaceId: toPlaceId
+        )
+        return cache[key]?.distanceMeters
+    }
+
     /// Encoded polyline for the cached leg, if present. Used by
     /// TripMapView (Phase J.4) when the server-side row hasn't synced
     /// the polyline yet.
@@ -204,6 +218,43 @@ final class AppleTravelTimesService {
             if let d = leg.distanceMeters { return d }
         }
         return nil
+    }
+
+    /// Route distance for a specific transport mode when MapKit returned one.
+    func cachedRouteDistanceMeters(
+        cityProfileId: UUID,
+        fromPlaceId: String,
+        toPlaceId: String,
+        mode: Mode
+    ) -> Int? {
+        let key = CacheKey(
+            cityProfileId: cityProfileId,
+            fromPlaceId: fromPlaceId,
+            toPlaceId: toPlaceId
+        )
+        return cache[key]?.routeDistanceMeters(for: mode)
+    }
+
+    func cachedRouteDistanceMetersForAnyScope(
+        fromPlaceId: String,
+        toPlaceId: String,
+        mode: Mode
+    ) -> Int? {
+        for (key, leg) in cache where
+            key.fromPlaceId == fromPlaceId && key.toPlaceId == toPlaceId
+        {
+            if let d = leg.routeDistanceMeters(for: mode) { return d }
+        }
+        return nil
+    }
+
+    func cachedCoordRouteDistance(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D,
+        mode: Mode
+    ) -> Int? {
+        let key = CoordCacheKey(from: from, to: to)
+        return coordCache[key]?.routeDistanceMeters(for: mode)
     }
 
     /// Unscoped minutes lookup. Mirrors `cachedPolylineForAnyScope`
@@ -425,14 +476,17 @@ final class AppleTravelTimesService {
         if let m = computed.modes[.walking] {
             cached.walkingMinutes = m.minutes
             cached.walkingPolyline = m.polyline
+            cached.walkingRouteDistanceMeters = m.distanceMeters
         }
         if let m = computed.modes[.driving] {
             cached.drivingMinutes = m.minutes
             cached.drivingPolyline = m.polyline
+            cached.drivingRouteDistanceMeters = m.distanceMeters
         }
         if let m = computed.modes[.transit] {
             cached.transitMinutes = m.minutes
             cached.transitPolyline = m.polyline
+            cached.transitRouteDistanceMeters = m.distanceMeters
         }
         coordCache[key] = cached
         // Treat "no modes succeeded" as failure so the caller doesn't
@@ -485,6 +539,9 @@ final class AppleTravelTimesService {
         var walkingMinutes: Int?
         var drivingMinutes: Int?
         var transitMinutes: Int?
+        var walkingRouteDistanceMeters: Int?
+        var drivingRouteDistanceMeters: Int?
+        var transitRouteDistanceMeters: Int?
         var walkingPolyline: String?
         var drivingPolyline: String?
         var transitPolyline: String?
@@ -496,6 +553,18 @@ final class AppleTravelTimesService {
             case .driving: return drivingMinutes
             case .transit: return transitMinutes
             }
+        }
+
+        /// Per-mode length from MapKit when available; otherwise the leg-level `distanceMeters`
+        /// (server aggregate or first successful route in `compute`).
+        func routeDistanceMeters(for mode: Mode) -> Int? {
+            let perMode: Int?
+            switch mode {
+            case .walking: perMode = walkingRouteDistanceMeters
+            case .driving: perMode = drivingRouteDistanceMeters
+            case .transit: perMode = transitRouteDistanceMeters
+            }
+            return perMode ?? distanceMeters
         }
 
         func polyline(for mode: Mode) -> String? {
@@ -617,6 +686,7 @@ final class AppleTravelTimesService {
     private struct ComputedMode {
         var minutes: Int
         var polyline: String?
+        var distanceMeters: Int
     }
 
     private func compute(leg: LegRequest) async -> ComputedLeg {
@@ -631,9 +701,18 @@ final class AppleTravelTimesService {
         var out = ComputedLeg()
         // Distance comes from whichever route succeeded first; walking
         // is the most accurate for door-to-door figures so we prefer it.
-        if let w { out.modes[.walking] = ComputedMode(minutes: w.minutes, polyline: w.polyline); out.distanceMeters = w.distanceMeters }
-        if let d { out.modes[.driving] = ComputedMode(minutes: d.minutes, polyline: d.polyline); out.distanceMeters = out.distanceMeters ?? d.distanceMeters }
-        if let t { out.modes[.transit] = ComputedMode(minutes: t.minutes, polyline: t.polyline); out.distanceMeters = out.distanceMeters ?? t.distanceMeters }
+        if let w {
+            out.modes[.walking] = ComputedMode(minutes: w.minutes, polyline: w.polyline, distanceMeters: w.distanceMeters)
+            out.distanceMeters = w.distanceMeters
+        }
+        if let d {
+            out.modes[.driving] = ComputedMode(minutes: d.minutes, polyline: d.polyline, distanceMeters: d.distanceMeters)
+            out.distanceMeters = out.distanceMeters ?? d.distanceMeters
+        }
+        if let t {
+            out.modes[.transit] = ComputedMode(minutes: t.minutes, polyline: t.polyline, distanceMeters: t.distanceMeters)
+            out.distanceMeters = out.distanceMeters ?? t.distanceMeters
+        }
         return out
     }
 
@@ -689,14 +768,17 @@ final class AppleTravelTimesService {
         if let m = computed.modes[.walking] {
             cached.walkingMinutes = m.minutes
             cached.walkingPolyline = m.polyline
+            cached.walkingRouteDistanceMeters = m.distanceMeters
         }
         if let m = computed.modes[.driving] {
             cached.drivingMinutes = m.minutes
             cached.drivingPolyline = m.polyline
+            cached.drivingRouteDistanceMeters = m.distanceMeters
         }
         if let m = computed.modes[.transit] {
             cached.transitMinutes = m.minutes
             cached.transitPolyline = m.polyline
+            cached.transitRouteDistanceMeters = m.distanceMeters
         }
         cached.refreshedAt = Date()
         cache[key] = cached

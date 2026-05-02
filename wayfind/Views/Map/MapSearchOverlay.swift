@@ -730,23 +730,16 @@ struct MapSearchOverlay: View {
         let badgeAccent = symbol.hasPrefix("mappin") || family == .generic
             ? AppColors.appError
             : family.color
-        return ZStack {
-            if let badgeFill {
-                Circle()
-                    .fill(badgeFill)
-            } else {
-                Circle()
-                    .fill(AppColors.iconBadgeGradient(accent: badgeAccent))
-            }
-            Circle()
-                .strokeBorder(AppColors.appDivider, lineWidth: 0.5)
-            Image(systemName: symbol)
-                .font(.sectionHeader.weight(.semibold))
-                .symbolRenderingMode(.monochrome)
-                .foregroundStyle(AppColors.iconOnColoredSurface)
-        }
-        .frame(width: 36, height: 36)
-        .accessibilityHidden(true)
+        return MapStyleIcon(
+            systemName: symbol,
+            size: .mapSearchBadge,
+            accent: badgeAccent,
+            backgroundStyle: .tinted,
+            shape: .circle,
+            solidFillOverride: badgeFill,
+            monochromeSearchBadge: true,
+            accessibilityLabel: nil
+        )
     }
 
     private func googleRowButton(_ prediction: PlaceAutocompleteResult) -> some View {

@@ -18,8 +18,6 @@ final class ForwardingDiscoveryManager {
         set { UserDefaults.standard.set(newValue, forKey: "first_booking_parsed") }
     }
 
-    let forwardingEmail = "bookings@wayfind.app"
-
     func isBannerDismissed(for tripId: UUID) -> Bool {
         dismissedTripIds.contains(tripId.uuidString)
     }

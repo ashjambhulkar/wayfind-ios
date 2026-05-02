@@ -35,14 +35,14 @@ struct ExpenseCategoryGrid: View {
             selection = category
         } label: {
             VStack(spacing: AppSpacing.xs) {
-                ZStack {
-                    Circle()
-                        .fill(category.accentColor)
-                    Image(systemName: category.systemImage)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 48, height: 48)
+                MapStyleIcon(
+                    systemName: category.systemImage,
+                    size: .expenseCategory,
+                    accent: category.accentColor,
+                    backgroundStyle: .solidAccent,
+                    shape: .circle,
+                    accessibilityLabel: nil
+                )
                 Text(category.displayLabel)
                     .font(.appCaption)
                     .foregroundStyle(AppColors.textPrimary)

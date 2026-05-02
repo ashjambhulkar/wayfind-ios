@@ -80,7 +80,9 @@ struct TripChecklistsView: View {
                                             Task { await deleteChecklistItem(item.id) }
                                         } label: {
                                             Label(String(localized: "Delete"), systemImage: "trash")
+                                                .foregroundStyle(AppColors.iconOnColoredSurface)
                                         }
+                                        .tint(AppColors.swipeDestructiveTint)
                                         .accessibilityLabel(String(localized: "Delete"))
                                     }
                                 }

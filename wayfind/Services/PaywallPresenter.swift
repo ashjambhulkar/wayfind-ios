@@ -90,7 +90,7 @@ enum PaywallPlacement: String, Sendable {
     /// Flight status badge tap on a timeline booking card.
     case flightTracking = "flight_tracking"
 
-    /// Trip documents tab — soft 5/25 ceiling tap.
+    /// Trip documents tab — soft 5/15 ceiling tap.
     case documents = "documents"
 
     /// Manual entry from Settings → Wayfind Pro tile.

@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TripNoteEditorView: View {
     let note: TripNote
+    /// When false (e.g. trip member with notes access but not editor), fields are read-only; Close dismisses without Save.
+    var isEditable: Bool
     var onChanged: () -> Void
 
     /// True when the note was empty on disk when this editor opened (typical for “New note”).
@@ -10,15 +12,17 @@ struct TripNoteEditorView: View {
     @Environment(DataService.self) private var dataService
     @Environment(\.dismiss) private var dismiss
 
+    @FocusState private var focusedField: NoteEditorFocus?
+
     @State private var title: String
     @State private var bodyText: String
     @State private var isSaving = false
-    @State private var showDeleteConfirm = false
-    /// When true, skip discarding an empty note on disappear (Save / Delete already handled persistence).
+    /// When true, skip discarding an empty note on disappear (Save already handled persistence).
     @State private var skipEmptyDiscardOnDisappear = false
 
-    init(note: TripNote, onChanged: @escaping () -> Void = {}) {
+    init(note: TripNote, isEditable: Bool = true, onChanged: @escaping () -> Void = {}) {
         self.note = note
+        self.isEditable = isEditable
         self.onChanged = onChanged
         let trimmedTitle = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedBody = note.body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -41,26 +45,31 @@ struct TripNoteEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Save") {
-                    Task { await save() }
-                }
-                .fontWeight(.semibold)
-                .disabled(isSaving)
-            }
             ToolbarItem(placement: .topBarLeading) {
-                Button("Delete", role: .destructive) {
-                    showDeleteConfirm = true
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 17, weight: .regular))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(AppColors.textPrimary)
+                .accessibilityLabel("Close")
+            }
+            if isEditable {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        Task { await save() }
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(isSaving)
                 }
             }
         }
-        .confirmationDialog("Delete this note?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) {
-                Task { await deleteNote() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This cannot be undone.")
+        .task {
+            guard isEditable else { return }
+            try? await Task.sleep(for: TripNoteEditorTiming.sheetBodyFocusDelay)
+            focusedField = .body
         }
         .onDisappear {
             Task { await discardEmptyNoteIfNeeded() }
@@ -69,49 +78,34 @@ struct TripNoteEditorView: View {
 
     private var noteTitleSection: some View {
         TripNoteMapSectionCard(title: "Title") {
-            HStack(spacing: AppSpacing.md) {
-                MapStyleIcon(
-                    systemName: "textformat",
-                    size: .small,
-                    accent: AppColors.appPrimary,
-                    accessibilityLabel: "Title"
-                )
-
-                TextField("Give this note a title", text: $title)
-                    .font(.appBody)
-                    .foregroundStyle(AppColors.textPrimary)
-                    .textInputAutocapitalization(.sentences)
-                    .frame(minHeight: TripNoteMapFormMetrics.rowMinHeight)
-            }
-            .padding(.horizontal, AppSpacing.md)
+            TextField("Give this note a title", text: $title)
+                .font(.appBody)
+                .foregroundStyle(AppColors.textPrimary)
+                .textInputAutocapitalization(.sentences)
+                .disabled(!isEditable)
+                .focused($focusedField, equals: .title)
+                .frame(minHeight: TripNoteMapFormMetrics.rowMinHeight)
+                .padding(.horizontal, AppSpacing.md)
         }
     }
 
     private var noteBodySection: some View {
         TripNoteMapSectionCard(title: "Note") {
-            HStack(alignment: .top, spacing: AppSpacing.md) {
-                MapStyleIcon(
-                    systemName: "note.text",
-                    size: .small,
-                    accent: AppColors.appPrimary,
-                    accessibilityLabel: "Note body"
-                )
-                .padding(.top, AppSpacing.sm)
-
-                ZStack(alignment: .topLeading) {
-                    if bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("Write ideas, links, reminders, or plans for this trip")
-                            .font(.appBody)
-                            .foregroundStyle(AppColors.textTertiary)
-                            .padding(.top, AppSpacing.sm)
-                            .allowsHitTesting(false)
-                    }
-
-                    TextField("", text: $bodyText, axis: .vertical)
+            ZStack(alignment: .topLeading) {
+                if bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Write ideas, links, reminders, or plans for this trip")
                         .font(.appBody)
-                        .foregroundStyle(AppColors.textPrimary)
-                        .lineLimit(8...24)
+                        .foregroundStyle(AppColors.textTertiary)
+                        .padding(.top, AppSpacing.sm)
+                        .allowsHitTesting(false)
                 }
+
+                TextField("", text: $bodyText, axis: .vertical)
+                    .font(.appBody)
+                    .foregroundStyle(AppColors.textPrimary)
+                    .lineLimit(8...24)
+                    .disabled(!isEditable)
+                    .focused($focusedField, equals: .body)
             }
             .padding(.horizontal, AppSpacing.md)
             .padding(.vertical, AppSpacing.sm)
@@ -125,15 +119,6 @@ struct TripNoteEditorView: View {
         defer { isSaving = false }
         skipEmptyDiscardOnDisappear = true
         await dataService.updateTripNote(noteId: note.id, title: title, body: bodyText)
-        onChanged()
-        HapticManager.success()
-        dismiss()
-    }
-
-    @MainActor
-    private func deleteNote() async {
-        skipEmptyDiscardOnDisappear = true
-        await dataService.deleteTripNote(noteId: note.id)
         onChanged()
         HapticManager.success()
         dismiss()
@@ -184,8 +169,18 @@ private struct TripNoteMapSectionCard<Content: View>: View {
     }
 }
 
+private enum TripNoteEditorTiming {
+    /// Wait for sheet presentation before focusing the body field so the keyboard appears reliably.
+    static let sheetBodyFocusDelay = Duration.milliseconds(350)
+}
+
 private enum TripNoteMapFormMetrics {
     static let rowMinHeight: CGFloat = 56
     static let bodyMinHeight: CGFloat = 220
+}
+
+private enum NoteEditorFocus: Hashable {
+    case title
+    case body
 }
 

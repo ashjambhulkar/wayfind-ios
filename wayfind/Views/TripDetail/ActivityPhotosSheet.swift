@@ -28,6 +28,8 @@ struct ActivityPhotosSheet: View {
     let activityId: UUID
     let tripId: UUID
     let activityTitle: String
+    /// Timeline swipe uses `.openSystemPickerOnAppear` to skip an extra tap on Add.
+    var manageEntry: ActivityPhotosManageEntry = .browse
     /// When false, hides add affordances and per-tile edit actions (view-only gallery).
     var canEditAttachments: Bool = true
 
@@ -37,6 +39,7 @@ struct ActivityPhotosSheet: View {
 
     @State private var service: ActivityAttachmentService?
     @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var isPhotoPickerPresented = false
     @State private var isUploading: Bool = false
     @State private var uploadError: String?
     @State private var pendingUploads: [PendingAttachmentUpload] = []
@@ -74,12 +77,10 @@ struct ActivityPhotosSheet: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     if canEditAttachments {
-                        PhotosPicker(
-                            selection: $pickerItems,
-                            maxSelectionCount: remainingSlots,
-                            matching: .images,
-                            photoLibrary: .shared()
-                        ) {
+                        Button {
+                            guard remainingSlots > 0 else { return }
+                            isPhotoPickerPresented = true
+                        } label: {
                             Label(String(localized: "Add"), systemImage: "plus.circle.fill")
                                 .labelStyle(.iconOnly)
                         }
@@ -113,14 +114,36 @@ struct ActivityPhotosSheet: View {
                     service = new
                     await new.reload()
                 }
+                guard manageEntry == .openSystemPickerOnAppear, canEditAttachments else { return }
+                guard remainingSlots > 0 else { return }
+                isPhotoPickerPresented = true
             }
             .onChange(of: pickerItems) { _, newItems in
                 guard !newItems.isEmpty else { return }
                 Task { await handlePicked(items: newItems) }
             }
         }
+        .photosPicker(
+            isPresented: photoPickerPresentedBinding,
+            selection: $pickerItems,
+            maxSelectionCount: photoPickerMaxSelectionCount,
+            matching: .images,
+            photoLibrary: .shared()
+        )
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+    }
+
+    /// Keeps picker dismissed when at the 5-photo cap (e.g. after uploads while the sheet stays open).
+    private var photoPickerPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { isPhotoPickerPresented && remainingSlots > 0 },
+            set: { isPhotoPickerPresented = $0 }
+        )
+    }
+
+    private var photoPickerMaxSelectionCount: Int {
+        max(1, min(5, remainingSlots))
     }
 
     // MARK: - Sections
@@ -166,12 +189,9 @@ struct ActivityPhotosSheet: View {
                     .font(.appCaption)
                     .foregroundStyle(AppColors.textSecondary)
                     .multilineTextAlignment(.center)
-                PhotosPicker(
-                    selection: $pickerItems,
-                    maxSelectionCount: 5,
-                    matching: .images,
-                    photoLibrary: .shared()
-                ) {
+                Button {
+                    isPhotoPickerPresented = true
+                } label: {
                     Label("Add photo", systemImage: "plus")
                         .font(.appBody.weight(.semibold))
                         .labelStyle(.titleAndIcon)
@@ -183,6 +203,7 @@ struct ActivityPhotosSheet: View {
                         .shadow(color: Color.black.opacity(0.12), radius: 4, x: 0, y: 2)
                 }
                 .buttonStyle(.plain)
+                .disabled(remainingSlots == 0)
                 .padding(.top, AppSpacing.sm)
             } else {
                 Text("No photos yet")

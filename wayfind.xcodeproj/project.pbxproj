@@ -22,11 +22,19 @@
 			remoteGlobalIDString = 21CB27232F7F0D8C00154A0F;
 			remoteInfo = wayfind;
 		};
+		21CB29162F7F0D8C00154A86 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 21CB271C2F7F0D8C00154A0F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 21CB27232F7F0D8C00154A0F;
+			remoteInfo = wayfind;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		21CB27242F7F0D8C00154A0F /* wayfind.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = wayfind.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		21CB280A2F7F0D8C00154A10 /* wayfindTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = wayfindTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		21CB29102F7F0D8C00154A80 /* wayfindUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = wayfindUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -38,6 +46,11 @@
 		21CB280E2F7F0D8C00154A14 /* wayfindTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = wayfindTests;
+			sourceTree = "<group>";
+		};
+		21CB29112F7F0D8C00154A81 /* wayfindUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = wayfindUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -62,6 +75,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		21CB29122F7F0D8C00154A82 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -70,6 +90,7 @@
 			children = (
 				21CB27262F7F0D8C00154A0F /* wayfind */,
 				21CB280E2F7F0D8C00154A14 /* wayfindTests */,
+				21CB29112F7F0D8C00154A81 /* wayfindUITests */,
 				21CB27252F7F0D8C00154A0F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -79,6 +100,7 @@
 			children = (
 				21CB27242F7F0D8C00154A0F /* wayfind.app */,
 				21CB280A2F7F0D8C00154A10 /* wayfindTests.xctest */,
+				21CB29102F7F0D8C00154A80 /* wayfindUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -136,6 +158,29 @@
 			productReference = 21CB280A2F7F0D8C00154A10 /* wayfindTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		21CB29152F7F0D8C00154A85 /* wayfindUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 21CB291A2F7F0D8C00154A8A /* Build configuration list for PBXNativeTarget "wayfindUITests" */;
+			buildPhases = (
+				21CB29132F7F0D8C00154A83 /* Sources */,
+				21CB29122F7F0D8C00154A82 /* Frameworks */,
+				21CB29142F7F0D8C00154A84 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				21CB29172F7F0D8C00154A87 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				21CB29112F7F0D8C00154A81 /* wayfindUITests */,
+			);
+			name = wayfindUITests;
+			packageProductDependencies = (
+			);
+			productName = wayfindUITests;
+			productReference = 21CB29102F7F0D8C00154A80 /* wayfindUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -150,6 +195,10 @@
 						CreatedOnToolsVersion = 26.4;
 					};
 					21CB280B2F7F0D8C00154A11 = {
+						CreatedOnToolsVersion = 26.4;
+						TestTargetID = 21CB27232F7F0D8C00154A0F;
+					};
+					21CB29152F7F0D8C00154A85 = {
 						CreatedOnToolsVersion = 26.4;
 						TestTargetID = 21CB27232F7F0D8C00154A0F;
 					};
@@ -177,6 +226,7 @@
 			targets = (
 				21CB27232F7F0D8C00154A0F /* wayfind */,
 				21CB280B2F7F0D8C00154A11 /* wayfindTests */,
+				21CB29152F7F0D8C00154A85 /* wayfindUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -190,6 +240,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		21CB28142F7F0D8C00154A20 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		21CB29142F7F0D8C00154A84 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -213,6 +270,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		21CB29132F7F0D8C00154A83 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -220,6 +284,11 @@
 			isa = PBXTargetDependency;
 			target = 21CB27232F7F0D8C00154A0F /* wayfind */;
 			targetProxy = 21CB28122F7F0D8C00154A18 /* PBXContainerItemProxy */;
+		};
+		21CB29172F7F0D8C00154A87 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 21CB27232F7F0D8C00154A0F /* wayfind */;
+			targetProxy = 21CB29162F7F0D8C00154A86 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -459,6 +528,48 @@
 			};
 			name = Release;
 		};
+		21CB29182F7F0D8C00154A88 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7RNU3W6ND4;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.wayfind.travel.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = wayfind;
+			};
+			name = Debug;
+		};
+		21CB29192F7F0D8C00154A89 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7RNU3W6ND4;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.wayfind.travel.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = wayfind;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -485,6 +596,15 @@
 			buildConfigurations = (
 				21CB280F2F7F0D8C00154A15 /* Debug */,
 				21CB28102F7F0D8C00154A16 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		21CB291A2F7F0D8C00154A8A /* Build configuration list for PBXNativeTarget "wayfindUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				21CB29182F7F0D8C00154A88 /* Debug */,
+				21CB29192F7F0D8C00154A89 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

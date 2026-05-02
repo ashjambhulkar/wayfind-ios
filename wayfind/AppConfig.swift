@@ -17,6 +17,10 @@ enum AppConfig {
     static let googlePlacesAPIKey = "AIzaSyDPGzUKxDVuPZYKD-FfGVX7eekhX_kdliA"
     static let unsplashAccessKey = "0IsL7-FEKZSxVFvSVNcFo7SJopjjrvtkFV-rbfXYesI"
 
+    /// SendGrid inbound parse domain. Backend routes `trips+{token}@domain`
+    /// by looking up `{token}` in `user_forwarding_addresses`.
+    static let bookingForwardingDomain = "mail.wayfind.app"
+
     /// iOS OAuth client ID (Google Cloud Console). Must match bundle ID `app.wayfind.travel` or replace with your own client.
     static let googleIOSClientID = "1009434603775-8c92mfkampnmj1l7goj6517raaelq0vl.apps.googleusercontent.com"
 
@@ -30,8 +34,22 @@ enum AppConfig {
             && !googleWebClientID.contains("YOUR_")
     }
 
+    /// **DEBUG + UI tests:** pass launch argument `-wayfind-ui-testing` so
+    /// `AuthViewModel`, `DataService`, and realtime use the existing offline
+    /// mock path (no Supabase session required). Never used in Release.
+    static var isUITestingLaunch: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-wayfind-ui-testing")
+        #else
+        return false
+        #endif
+    }
+
     static var useRealBackend: Bool {
-        !supabaseURL.contains("YOUR_PROJECT")
+        #if DEBUG
+        if isUITestingLaunch { return false }
+        #endif
+        return !supabaseURL.contains("YOUR_PROJECT")
     }
 
     // MARK: - Observability

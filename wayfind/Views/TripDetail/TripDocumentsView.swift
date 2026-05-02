@@ -20,9 +20,9 @@
 //        (5) docs they themselves uploaded for this trip. The nav + is
 //        disabled at the trip ceiling; at the per-user cap, + presents
 //        the paywall and the cap pill does the same.
-//      • Paid Pro and free-launch users: only the per-trip ceiling (25)
+//      • Paid Pro and free-launch users: only the per-trip ceiling (15)
 //        applies — the per-user check is skipped server-side and client-side.
-//      • Hitting the trip ceiling (25) is a hard error for both tiers
+//      • Hitting the trip ceiling (15) is a hard error for both tiers
 //        — Pro doesn't unlock more storage, just removes the per-user
 //        cap. Copy in `TripDocumentError.ceilingReached` says so.
 //      • Every gate trip logs `pro_gate_attempted` through

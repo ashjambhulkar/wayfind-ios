@@ -58,9 +58,21 @@ struct Place: Identifiable, Codable, Hashable {
     /// Stored travel mode for the same hop (e.g. "driving", "walking",
     /// "transit"). Falls back to the estimator's heuristic when nil.
     var travelMode: String?
+    /// `city_places.thumbnail_url` when enriched (timeline leading image before category icon).
+    var thumbnailUrl: String? = nil
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: lat ?? 0, longitude: lng ?? 0)
+    }
+
+    /// Valid, non-null island coordinate suitable for routing and map pins.
+    var hasUsableCoordinate: Bool {
+        guard let lat, let lng else { return false }
+        let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        return CLLocationCoordinate2DIsValid(coordinate)
+            && abs(lat) <= 90
+            && abs(lng) <= 180
+            && !(lat == 0 && lng == 0)
     }
 
     var categoryEnum: PlaceCategory {

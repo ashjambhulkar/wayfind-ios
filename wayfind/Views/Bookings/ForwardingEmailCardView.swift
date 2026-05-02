@@ -1,32 +1,82 @@
 import SwiftUI
 import UIKit
 
+/// Vertical density for booking-forward promo cards (e.g. bookings hub vs. detail).
+enum ForwardingEmailCardDensity {
+    case standard
+    case compact
+}
+
 struct ForwardingEmailCardView: View {
+    @Environment(DataService.self) private var dataService
+
     let trip: Trip
+    var density: ForwardingEmailCardDensity = .standard
 
-    private let forwardEmail = "user@wayfind.app"
-
+    @State private var forwardingEmail: String?
+    @State private var forwardingSummary: ForwardedBookingSummary = .empty
+    @State private var didFailLoadingAddress = false
     @State private var copied = false
 
+    private var displayedEmail: String {
+        if let forwardingEmail { return forwardingEmail }
+        return didFailLoadingAddress ? "Could not load forwarding address" : "Loading forwarding address..."
+    }
+
+    private var cardVSpacing: CGFloat {
+        switch density {
+        case .standard: return AppSpacing.md
+        case .compact: return AppSpacing.sm
+        }
+    }
+
+    private var cardPadding: CGFloat {
+        switch density {
+        case .standard: return AppSpacing.lg
+        case .compact: return AppSpacing.md
+        }
+    }
+
+    private var emailFieldVerticalPadding: CGFloat {
+        switch density {
+        case .standard: return AppSpacing.sm
+        case .compact: return AppSpacing.xs
+        }
+    }
+
+    private var cardCornerRadius: CGFloat {
+        switch density {
+        case .standard: return AppCornerRadius.large
+        case .compact: return AppCornerRadius.medium
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
+        VStack(alignment: .leading, spacing: cardVSpacing) {
             Text("FORWARD A BOOKING")
                 .font(.appSmall)
                 .foregroundStyle(AppColors.textTertiary)
 
-            Text("Forward confirmation emails to add them automatically:")
-                .font(.appBody)
-                .foregroundStyle(AppColors.textSecondary)
+            if density == .compact {
+                Text("Forward confirmations to:")
+                    .font(.appCaption)
+                    .foregroundStyle(AppColors.textSecondary)
+            } else {
+                Text("Forward confirmation emails to add them automatically:")
+                    .font(.appBody)
+                    .foregroundStyle(AppColors.textSecondary)
+            }
 
             HStack(spacing: AppSpacing.sm) {
-                Text(forwardEmail)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(AppColors.textPrimary)
+                Text(displayedEmail)
+                    .font(.subheadline)
+                    .fontDesign(.monospaced)
+                    .foregroundStyle(forwardingEmail == nil ? AppColors.textTertiary : AppColors.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, AppSpacing.md)
-                    .padding(.vertical, AppSpacing.sm)
+                    .padding(.vertical, emailFieldVerticalPadding)
                     .background(AppColors.appSurface)
                     .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
                     .overlay(
@@ -35,7 +85,8 @@ struct ForwardingEmailCardView: View {
                     )
 
                 Button {
-                    UIPasteboard.general.string = forwardEmail
+                    guard let forwardingEmail else { return }
+                    UIPasteboard.general.string = forwardingEmail
                     HapticManager.success()
                     copied = true
                     Task {
@@ -46,33 +97,53 @@ struct ForwardingEmailCardView: View {
                     }
                 } label: {
                     Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 20, weight: .medium))
+                        .font(.body.weight(.medium))
                         .foregroundStyle(AppColors.appPrimary)
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
+                .disabled(forwardingEmail == nil)
+                .opacity(forwardingEmail == nil ? 0.45 : 1)
                 .accessibilityLabel(copied ? "Copied" : "Copy email")
             }
 
-            Text("2 pending · 1 needs review")
-                .font(.appCaption)
-                .foregroundStyle(AppColors.textSecondary)
-
-            NavigationLink {
-                ReviewForwardedBookingsView(trip: trip)
-            } label: {
-                HStack {
-                    Text("Review →")
+            if density == .compact {
+                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+                    Text(forwardingSummary.displayText)
                         .font(.appCaption)
-                        .foregroundStyle(AppColors.appPrimary)
-                    Spacer(minLength: 0)
+                        .foregroundStyle(AppColors.textSecondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    NavigationLink {
+                        ReviewForwardedBookingsView(trip: trip)
+                    } label: {
+                        Text("Review")
+                            .font(.appCaption.weight(.semibold))
+                            .foregroundStyle(AppColors.appPrimary)
+                    }
+                }
+            } else {
+                Text(forwardingSummary.displayText)
+                    .font(.appCaption)
+                    .foregroundStyle(AppColors.textSecondary)
+
+                NavigationLink {
+                    ReviewForwardedBookingsView(trip: trip)
+                } label: {
+                    HStack {
+                        Text("Review →")
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.appPrimary)
+                        Spacer(minLength: 0)
+                    }
                 }
             }
         }
-        .padding(AppSpacing.lg)
+        .padding(cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppColors.appPrimaryLight)
-        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
         .overlay(alignment: .topTrailing) {
             if copied {
                 Text("Copied!")
@@ -87,6 +158,18 @@ struct ForwardingEmailCardView: View {
             }
         }
         .animation(AppSpring.snappy, value: copied)
+        .task(id: trip.id) {
+            await loadForwardingState()
+        }
+    }
+
+    private func loadForwardingState() async {
+        async let address = dataService.fetchForwardingEmailAddress(for: trip.id)
+        async let summary = dataService.fetchForwardedBookingSummary(for: trip.id)
+        let (loadedAddress, loadedSummary) = await (address, summary)
+        forwardingEmail = loadedAddress
+        forwardingSummary = loadedSummary
+        didFailLoadingAddress = loadedAddress == nil
     }
 }
 
@@ -98,5 +181,6 @@ struct ForwardingEmailCardView: View {
     ForwardingEmailCardView(trip: .preview)
         .padding()
         .background(AppColors.appBackground)
+        .environment(DataService(previewMockData: true))
 }
 #endif

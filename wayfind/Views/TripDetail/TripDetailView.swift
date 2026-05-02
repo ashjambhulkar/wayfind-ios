@@ -37,11 +37,14 @@ struct TripDetailView: View {
     // Sheet state
     @State private var showTripNotes = false
     @State private var showTripChecklists = false
+    @State private var showBudgetSheet = false
+    @State private var showBookingsSheet = false
     @State private var showAddPlace = false
     @State private var showAddBooking = false
     @State private var addPlaceTargetDay: Int = 1
     @State private var hasAutoScrolled = false
     @State private var discoveryManager = ForwardingDiscoveryManager()
+    @State private var forwardingEmailAddress: String?
     @State private var bannerDismissed = false
     @State private var showEditTrip = false
     @State private var showDeleteConfirmation = false
@@ -294,6 +297,48 @@ struct TripDetailView: View {
         tripActionsMenuContent
     }
 
+    @ViewBuilder
+    private var tripBudgetSheetContent: some View {
+        if collaborationStore.canViewExpenses {
+            TripBudgetTabView(
+                trip: viewModel?.trip ?? trip,
+                viewModel: budgetViewModel,
+                supportsPullToRefresh: false
+            )
+                .navigationTitle("Budget")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            showBudgetSheet = false
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .accessibilityLabel(String(localized: "Close"))
+                    }
+                }
+        } else {
+            ContentUnavailableView {
+                Label("Budget locked", systemImage: "lock.fill")
+            } description: {
+                Text("You don’t have access to trip expenses. Ask the trip owner if you need access.")
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle("Budget")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        showBudgetSheet = false
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel(String(localized: "Close"))
+                }
+            }
+        }
+    }
+
     var body: some View {
         tripDetailNavigationShell
         .confirmationDialog("Delete \(viewModel?.trip.title ?? trip.title)?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
@@ -408,11 +453,53 @@ struct TripDetailView: View {
                 bookingTitle: place.name
             )
         }
-        .navigationDestination(isPresented: $showTripNotes) {
-            TripNotesView(trip: viewModel?.trip ?? trip)
+        .sheet(isPresented: $showTripNotes) {
+            NavigationStack {
+                TripNotesView(trip: viewModel?.trip ?? trip)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button {
+                                showTripNotes = false
+                            } label: {
+                                Image(systemName: "xmark")
+                            }
+                            .accessibilityLabel(String(localized: "Close"))
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(AppColors.appBackground)
         }
         .navigationDestination(isPresented: $showTripChecklists) {
             TripChecklistsView(trip: viewModel?.trip ?? trip)
+        }
+        .sheet(isPresented: $showBudgetSheet) {
+            NavigationStack {
+                tripBudgetSheetContent
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showBookingsSheet) {
+            NavigationStack {
+                BookingsScreenView(
+                    trip: viewModel?.trip ?? trip,
+                    onOpenBudgetTab: { showBudgetSheet = true }
+                )
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            showBookingsSheet = false
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .accessibilityLabel(String(localized: "Close"))
+                    }
+                }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .onChange(of: showTripNotes) { _, isOpen in
             if !isOpen {
@@ -426,7 +513,7 @@ struct TripDetailView: View {
         }
         // Per-surface access revocation (Phase 1.5): if the owner removes
         // access while a member is currently in Notes, the realtime layer
-        // (Phase 3) flips the gate and we bail out of the pushed view +
+        // (Phase 3) flips the gate and we dismiss the sheet +
         // toast. Documents is popped from the hub stack in `AppRootTabView`.
         .onChange(of: collaborationStore.canViewNotes) { _, canView in
             if !canView, showTripNotes {
@@ -493,6 +580,7 @@ struct TripDetailView: View {
             await viewModel?.loadTripData()
             await refreshItineraryPhotoStacks()
             bannerDismissed = discoveryManager.isBannerDismissed(for: trip.id)
+            forwardingEmailAddress = await dataService.fetchForwardingEmailAddress(for: trip.id)
             await flightTracking.bind(tripId: trip.id)
         }
         .onDisappear {
@@ -602,8 +690,8 @@ struct TripDetailView: View {
                     HapticManager.light()
                     showTripNotes = true
                 },
-                onBudget: { onOpenBudgetTab?() },
-                onBookings: { onOpenBookingsTab?() },
+                onBudget: { showBudgetSheet = true },
+                onBookings: { showBookingsSheet = true },
                 onDocuments: { onOpenDocumentsTab?() },
                 onAI: { onOpenAIPlanner?() }
             )
@@ -626,11 +714,12 @@ struct TripDetailView: View {
                         activityTitle: target.title
                     )
                     .environment(dataService)
-                case .manage:
+                case .manage(let entry):
                     ActivityPhotosSheet(
                         activityId: target.activityId,
                         tripId: viewModel?.trip.id ?? trip.id,
                         activityTitle: target.title,
+                        manageEntry: entry,
                         canEditAttachments: collaborationStore.canEdit
                     )
                     .environment(dataService)
@@ -777,9 +866,10 @@ struct TripDetailView: View {
                             .accessibilityLabel(String(localized: "Itinerary"))
                         }
 
-                        if discoveryManager.shouldShowTimelineBanner(tripBookingCount: tripBookingCount, tripId: trip.id) && !bannerDismissed {
+                        if let forwardingEmailAddress,
+                           discoveryManager.shouldShowTimelineBanner(tripBookingCount: tripBookingCount, tripId: trip.id) && !bannerDismissed {
                             ForwardingBannerView(
-                                email: discoveryManager.forwardingEmail,
+                                email: forwardingEmailAddress,
                                 onCopy: {
                                     withAnimation(AppSpring.smooth) {
                                         bannerDismissed = true
@@ -968,8 +1058,9 @@ struct TripDetailView: View {
     private func daySection(day: ItineraryDay, viewModel: TripDetailViewModel) -> some View {
         let dayTZ = displayTimeZone(for: day, viewModel: viewModel)
         let places = viewModel.places(for: day)
+        let timelineRows = viewModel.timelineDisplayRows(for: day, timelineTimeZone: dayTZ)
         let ongoingForDay = viewModel.ongoingBookings(for: day)
-        let isQuietEmptyDay = places.isEmpty && ongoingForDay.isEmpty
+        let isQuietEmptyDay = timelineRows.isEmpty && ongoingForDay.isEmpty
         let emptyDayPrompt = emptyDayPrompt(for: day, isQuietEmptyDay: isQuietEmptyDay, viewModel: viewModel)
         let preview = collapsedDayPreview(places: places, ongoingBookings: ongoingForDay.map(\.place))
         let dayNavigationTitle = "\(viewModel.dayHeaderDayLabel(for: day)) · \(viewModel.dayHeaderDateLabel(for: day, timelineTimeZone: dayTZ))"
@@ -1005,78 +1096,80 @@ struct TripDetailView: View {
                         }
                     }
 
-                    ForEach(Array(places.enumerated()), id: \.element.id) { index, place in
-                        // Chapter break (Morning / Afternoon / Evening / Night)
-                        // takes precedence over the travel-time gap when the
-                        // time-of-day bucket changes. Within the same chapter
-                        // we keep the lightweight gap row.
-                        let prevChapter = index > 0
-                            ? TimeOfDayChapter.from(places[index - 1].startTime, timeZone: dayTZ)
-                            : nil
-                        let currChapter = TimeOfDayChapter.from(place.startTime, timeZone: dayTZ)
+                    VStack(spacing: 0) {
+                        ForEach(Array(timelineRows.enumerated()), id: \.element.id) { index, row in
+                            let place = row.place
+                            // Chapter break (Morning / Afternoon / Evening / Night)
+                            // takes precedence over the travel-time gap when the
+                            // time-of-day bucket changes. Within the same chapter
+                            // we keep the lightweight gap row.
+                            let prevChapter = index > 0
+                                ? TimeOfDayChapter.from(timelineRows[index - 1].chapterSortDate, timeZone: dayTZ)
+                                : nil
+                            let currChapter = TimeOfDayChapter.from(row.chapterSortDate, timeZone: dayTZ)
 
-                        if let chapter = currChapter, chapter != prevChapter {
-                            TimeOfDayDividerView(chapter: chapter)
-                                .padding(.bottom, AppSpacing.xs)
-                        } else if index > 0 {
-                            TimelineGapView(fromPlace: places[index - 1], toPlace: place)
-                        }
+                            if let chapter = currChapter, chapter != prevChapter {
+                                TimeOfDayDividerView(chapter: chapter)
+                                    .padding(.bottom, AppSpacing.xs)
+                            }
+                            if index > 0,
+                               timelineRows[index - 1].place.hasUsableCoordinate,
+                               place.hasUsableCoordinate {
+                                TimelineGapView(
+                                    tripId: viewModel.trip.id,
+                                    cityProfileId: viewModel.trip.cityProfileId,
+                                    fromPlace: timelineRows[index - 1].place,
+                                    toPlace: place
+                                )
+                                .id("itinerary-gap-\(timelineRows[index - 1].id)-\(row.id)")
+                            }
 
-                        Group {
-                            if place.isBooking {
-                                TimelineBookingCardView(
-                                    place: place,
-                                    dayNumber: day.dayNumber,
-                                    timelineDisplayTimeZone: dayTZ,
-                                    onEdit: { placeToEdit = place },
-                                    onMoveToDay: { placeToMove = place },
-                                    onDelete: { deletePlace(place, viewModel: viewModel) },
-                                    onAttachments: { bookingForAttachments = place },
-                                    flightStatus: flightStatus(for: place),
-                                    isFlightStale: flightStaleness(for: place),
-                                    flightTint: flightTint(for: place),
-                                    isProUser: isProUserForFlightTracking,
-                                    onUpgradeTap: { presentFlightPaywall() }
-                                )
-                            } else {
-                                TimelinePlaceCardView(
-                                    place: place,
-                                    dayNumber: day.dayNumber,
-                                    timelineDisplayTimeZone: dayTZ,
-                                    onEdit: { placeToEdit = place },
-                                    onMoveToDay: { placeToMove = place },
-                                    onMoveToIdeas: { moveToIdeas(place, viewModel: viewModel) },
-                                    onDelete: { deletePlace(place, viewModel: viewModel) },
-                                    activityPhotoStack: itineraryPhotoStacks[place.id] ?? [],
-                                    canEditActivityPhotos: collaborationStore.canEdit,
-                                    onOpenActivityPhotoGallery: { openItineraryActivityPhotos(for: place, presentation: .galleryOnly) },
-                                    onOpenActivityPhotoManage: { openItineraryActivityPhotos(for: place, presentation: .manage) }
-                                )
+                            Group {
+                                if place.isBooking {
+                                    TimelineBookingCardView(
+                                        place: place,
+                                        dayNumber: day.dayNumber,
+                                        timelineDisplayTimeZone: dayTZ,
+                                        hotelTimelineRole: row.hotelTimelineRole,
+                                        onEdit: { placeToEdit = place },
+                                        onMoveToDay: { placeToMove = place },
+                                        onDelete: { deletePlace(place, viewModel: viewModel) },
+                                        onAttachments: { bookingForAttachments = place },
+                                        flightStatus: flightStatus(for: place),
+                                        isFlightStale: flightStaleness(for: place),
+                                        flightTint: flightTint(for: place),
+                                        isProUser: isProUserForFlightTracking,
+                                        onUpgradeTap: { presentFlightPaywall() }
+                                    )
+                                } else {
+                                    TimelinePlaceCardView(
+                                        place: place,
+                                        dayNumber: day.dayNumber,
+                                        timelineDisplayTimeZone: dayTZ,
+                                        onEdit: { placeToEdit = place },
+                                        onMoveToDay: { placeToMove = place },
+                                        onMoveToIdeas: { moveToIdeas(place, viewModel: viewModel) },
+                                        onDelete: { deletePlace(place, viewModel: viewModel) },
+                                        activityPhotoStack: itineraryPhotoStacks[place.id] ?? [],
+                                        canEditActivityPhotos: collaborationStore.canEdit,
+                                        onOpenActivityPhotoGallery: { openItineraryActivityPhotos(for: place, presentation: .galleryOnly) },
+                                        onOpenActivityPhotoManage: { entry in
+                                            openItineraryActivityPhotos(for: place, presentation: .manage(entry))
+                                        }
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, AppSpacing.lg)
+                            .padding(.bottom, AppSpacing.sm)
+                            .onTapGesture {
+                                selectedPlacePrevious = index > 0 ? timelineRows[index - 1].place : nil
+                                selectedPlace = place
                             }
                         }
-                        .padding(.horizontal, AppSpacing.lg)
-                        .padding(.bottom, AppSpacing.sm)
-                        .onTapGesture {
-                            selectedPlacePrevious = index > 0 ? places[index - 1] : nil
-                            selectedPlace = place
-                        }
                     }
+                    .timelineSpineContinuousRail()
 
-                    if collaborationStore.canEdit {
-                        InlineAddButtonView(
-                            dayNumber: day.dayNumber
-                        ) {
-                            addPlaceTargetDay = day.dayNumber
-                            showAddPlace = true
-                        }
-                        .padding(.horizontal, AppSpacing.lg)
-                        .padding(.top, AppSpacing.xs)
-                        .padding(.bottom, AppSpacing.lg)
-                    } else {
-                        // Viewers see normal trailing breathing room without
-                        // an add-affordance they can't act on.
-                        Spacer().frame(height: AppSpacing.lg)
-                    }
+                    Spacer().frame(height: AppSpacing.lg)
                 }
             }
         } header: {
@@ -1269,41 +1362,46 @@ struct TripDetailView: View {
                 Spacer()
                     .frame(height: AppSpacing.md)
 
-                ForEach(viewModel.wishlistPlaces) { place in
-                    Group {
-                        if place.isBooking {
-                            TimelineBookingCardView(
-                                place: place,
-                                dayNumber: 0,
-                                timelineDisplayTimeZone: tripTimelineGeocodedTimeZone,
-                                onEdit: { placeToEdit = place },
-                                onMoveToDay: { placeToMove = place },
-                                onDelete: { deletePlace(place, viewModel: viewModel) },
-                                onAttachments: { bookingForAttachments = place },
-                                flightStatus: flightStatus(for: place),
-                                isFlightStale: flightStaleness(for: place),
-                                flightTint: flightTint(for: place),
-                                isProUser: isProUserForFlightTracking,
-                                onUpgradeTap: { presentFlightPaywall() }
-                            )
-                        } else {
-                            TimelinePlaceCardView(
-                                place: place,
-                                dayNumber: 0,
-                                timelineDisplayTimeZone: tripTimelineGeocodedTimeZone,
-                                onEdit: { placeToEdit = place },
-                                onMoveToDay: { placeToMove = place },
-                                onDelete: { deletePlace(place, viewModel: viewModel) },
-                                activityPhotoStack: itineraryPhotoStacks[place.id] ?? [],
-                                canEditActivityPhotos: collaborationStore.canEdit,
-                                onOpenActivityPhotoGallery: { openItineraryActivityPhotos(for: place, presentation: .galleryOnly) },
-                                onOpenActivityPhotoManage: { openItineraryActivityPhotos(for: place, presentation: .manage) }
-                            )
+                VStack(spacing: 0) {
+                    ForEach(viewModel.wishlistPlaces) { place in
+                        Group {
+                            if place.isBooking {
+                                TimelineBookingCardView(
+                                    place: place,
+                                    dayNumber: 0,
+                                    timelineDisplayTimeZone: tripTimelineGeocodedTimeZone,
+                                    onEdit: { placeToEdit = place },
+                                    onMoveToDay: { placeToMove = place },
+                                    onDelete: { deletePlace(place, viewModel: viewModel) },
+                                    onAttachments: { bookingForAttachments = place },
+                                    flightStatus: flightStatus(for: place),
+                                    isFlightStale: flightStaleness(for: place),
+                                    flightTint: flightTint(for: place),
+                                    isProUser: isProUserForFlightTracking,
+                                    onUpgradeTap: { presentFlightPaywall() }
+                                )
+                            } else {
+                                TimelinePlaceCardView(
+                                    place: place,
+                                    dayNumber: 0,
+                                    timelineDisplayTimeZone: tripTimelineGeocodedTimeZone,
+                                    onEdit: { placeToEdit = place },
+                                    onMoveToDay: { placeToMove = place },
+                                    onDelete: { deletePlace(place, viewModel: viewModel) },
+                                    activityPhotoStack: itineraryPhotoStacks[place.id] ?? [],
+                                    canEditActivityPhotos: collaborationStore.canEdit,
+                                    onOpenActivityPhotoGallery: { openItineraryActivityPhotos(for: place, presentation: .galleryOnly) },
+                                    onOpenActivityPhotoManage: { entry in
+                                        openItineraryActivityPhotos(for: place, presentation: .manage(entry))
+                                    }
+                                )
+                            }
                         }
+                        .padding(.horizontal, AppSpacing.lg)
+                        .padding(.bottom, AppSpacing.sm)
                     }
-                    .padding(.horizontal, AppSpacing.lg)
-                    .padding(.bottom, AppSpacing.sm)
                 }
+                .timelineSpineContinuousRail()
             }
             .padding(.bottom, AppSpacing.xl)
         } header: {
@@ -1328,7 +1426,9 @@ struct TripDetailView: View {
     private func emptyDayPrompt(for day: ItineraryDay, isQuietEmptyDay: Bool, viewModel: TripDetailViewModel) -> String {
         guard isQuietEmptyDay else { return "" }
         let firstQuietEmptyDay = viewModel.scheduledDays.first { candidate in
-            viewModel.places(for: candidate).isEmpty && viewModel.ongoingBookings(for: candidate).isEmpty
+            let tz = displayTimeZone(for: candidate, viewModel: viewModel)
+            return viewModel.timelineDisplayRows(for: candidate, timelineTimeZone: tz).isEmpty
+                && viewModel.ongoingBookings(for: candidate).isEmpty
         }
         return firstQuietEmptyDay?.id == day.id
             ? "Add an activity or plan this day with AI"
@@ -1585,17 +1685,6 @@ private enum TripDetailMapPreviewMetrics {
     static let bookingPinSize: CGFloat = 34
 }
 
-private extension Place {
-    var hasUsableCoordinate: Bool {
-        guard let lat, let lng else { return false }
-        let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
-        return CLLocationCoordinate2DIsValid(coordinate)
-            && abs(lat) <= 90
-            && abs(lng) <= 180
-            && !(lat == 0 && lng == 0)
-    }
-}
-
 // MARK: - Hero header (cover image)
 
 /// Full-bleed cover: image runs under the status bar; nav is transparent over the top (tinted via scrims in `TripDetailView`).
@@ -1809,13 +1898,14 @@ struct TripDetailHubBottomBar: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .bottomBar) {
-            addActivityButton
             budgetButton
             bookingsButton
             if showsAI {
                 aiButton
             }
             moreButton
+            Spacer()
+            addActivityButton
         }
     }
 
@@ -1823,7 +1913,9 @@ struct TripDetailHubBottomBar: ToolbarContent {
         Button(action: onAddActivity) {
             Image(systemName: "plus")
         }
-        .tint(.primary)
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.circle)
+        .tint(AppColors.appPrimary)
         .accessibilityLabel(String(localized: "Add Activity"))
         .accessibilityHint(
             String(localized: "Opens the add activity sheet for this trip.")

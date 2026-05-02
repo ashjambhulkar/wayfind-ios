@@ -215,10 +215,9 @@ final class BackgroundUploader {
                 signedURL: commit.signedUploadURL,
                 bytes: descriptor.bytes,
                 mimeType: descriptor.mimeType,
-                onProgress: { [weak pending] p in
-                    Task { @MainActor in
-                        pending?.status = .uploading(progress: p)
-                    }
+                onProgress: { p in
+                    guard case .uploading = pending.status else { return }
+                    pending.status = .uploading(progress: p)
                 }
             )
 
@@ -248,7 +247,7 @@ final class BackgroundUploader {
         signedURL: URL,
         bytes: Data,
         mimeType: String,
-        onProgress: @Sendable @escaping (Double) -> Void
+        onProgress: @escaping (Double) -> Void
     ) async throws {
         let maxAttempts = 3
         var lastError: Error?
@@ -279,7 +278,7 @@ final class BackgroundUploader {
         signedURL: URL,
         bytes: Data,
         mimeType: String,
-        onProgress: @Sendable @escaping (Double) -> Void
+        onProgress: @escaping (Double) -> Void
     ) async throws {
         var request = URLRequest(url: signedURL)
         request.httpMethod = "PUT"

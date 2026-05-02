@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Activity row in the trip-detail timeline. Same chassis as
-/// `TimelineBookingCardView` (see `TimelineCardChassis`) — what makes each
-/// card recognisable at a glance is the inline category icon next to the
-/// title and the type-aware subtitle (rating · price · duration · area).
+/// `TimelineBookingCardView` (see `TimelineCardChassis`). Leading visual:
+/// user activity photos (stack) if any, else `city_places` thumbnail when
+/// present, else the category icon.
 struct TimelinePlaceCardView: View {
     let place: Place
     let dayNumber: Int
@@ -21,8 +21,8 @@ struct TimelinePlaceCardView: View {
     var canEditActivityPhotos: Bool = false
     /// Tap on the stacked thumbnails — paged gallery only.
     var onOpenActivityPhotoGallery: (() -> Void)? = nil
-    /// Swipe / context **Photos** — full add–manage sheet (editors).
-    var onOpenActivityPhotoManage: (() -> Void)? = nil
+    /// Context menu vs swipe: swipe passes `.openSystemPickerOnAppear` for direct add.
+    var onOpenActivityPhotoManage: ((ActivityPhotosManageEntry) -> Void)? = nil
 
     /// Phase 3 — pulled from the environment so cards in the wishlist
     /// section pick up flashes too, not just cards in scheduled days.
@@ -34,10 +34,7 @@ struct TimelinePlaceCardView: View {
     }
 
     private var inlineIcon: String {
-        if place.categoryEnum == .attraction {
-            return "binoculars.fill"
-        }
-        return place.categoryEnum.sfSymbol
+        activityTypeIcon(for: activityTypeLabel) ?? place.categoryEnum.sfSymbol
     }
 
     private var flash: TripCollaborationUiStore.ChangeFlash? {
@@ -45,17 +42,30 @@ struct TimelinePlaceCardView: View {
     }
 
     private var rowCore: some View {
-        HStack(alignment: .center, spacing: AppSpacing.xs) {
-            leadingMarker
+        HStack(alignment: .top, spacing: TimelineSpineMetrics.pinColumnToCardSpacing) {
+            TimelineSpineTimeColumn(
+                startTime: place.startTime,
+                accentColor: familyColor,
+                timeZone: timelineDisplayTimeZone,
+                accessibilityLabel: spineAccessibilityLabel
+            )
+
             cardSurface
                 .cardPulse(flashID: flash?.id)
         }
     }
 
+    private var spineAccessibilityLabel: String {
+        if let start = place.startTime {
+            return "Starts \(start.timeFormatted(timeZone: timelineDisplayTimeZone))"
+        }
+        return String(localized: "Flexible time")
+    }
+
     var body: some View {
         Group {
             if let manage = onOpenActivityPhotoManage, canEditActivityPhotos {
-                TimelineSwipeRevealPhotosRow(onPhotos: manage) {
+                TimelineSwipeRevealPhotosRow(onPhotos: { manage(.openSystemPickerOnAppear) }) {
                     rowCore
                 }
             } else {
@@ -70,7 +80,7 @@ struct TimelinePlaceCardView: View {
             }
             if canEditActivityPhotos, let manage = onOpenActivityPhotoManage {
                 Button {
-                    manage()
+                    manage(.browse)
                 } label: {
                     Label("Photos", systemImage: "photo.on.rectangle.angled")
                 }
@@ -87,77 +97,80 @@ struct TimelinePlaceCardView: View {
         .accessibilityLabel(accessibilityDescription)
     }
 
-    // MARK: - Leading marker
-
+    /// User activity photos when present, else catalog thumbnail, else category icon.
     @ViewBuilder
-    private var leadingMarker: some View {
-        if let start = place.startTime {
-            TimePinView(time: start, tint: familyColor, timeZone: timelineDisplayTimeZone)
+    private var activityLeadingVisual: some View {
+        if !activityPhotoStack.isEmpty {
+            ActivityFeedPhotoStackView(
+                items: activityPhotoStack,
+                tileSize: TimelineCardLeadingIconMetrics.solidSquareSideLength,
+                tileCornerRadius: AppCornerRadius.medium,
+                arrangement: .timelineLeading,
+                onTap: { onOpenActivityPhotoGallery?() }
+            )
+        } else if let thumbURL = timelineCatalogThumbnailURL {
+            TimelineLeadingCatalogThumbnail(
+                url: thumbURL,
+                symbol: inlineIcon,
+                accent: familyColor,
+                accessibilityLabel: activityTypeLabel
+            )
         } else {
-            UnscheduledMarkerView(tint: familyColor)
+            TimelineCardLeadingIconMetrics.categoryBadge(
+                symbol: inlineIcon,
+                accent: familyColor,
+                accessibilityLabel: activityTypeLabel
+            )
         }
+    }
+
+    private var timelineCatalogThumbnailURL: URL? {
+        let trimmed = place.thumbnailUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty, let url = URL(string: trimmed) else { return nil }
+        return url
     }
 
     // MARK: - Card surface
 
     private var cardSurface: some View {
-        HStack(alignment: .center, spacing: AppSpacing.sm) {
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
-                    Image(systemName: inlineIcon)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(familyColor.opacity(0.72))
-                        .frame(width: 14, alignment: .center)
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            HStack(alignment: .center, spacing: AppSpacing.sm) {
+                activityLeadingVisual
 
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     // Use `Color.primary` (true system-black in light, true white
                     // in dark) for the strongest, Apple-correct title contrast.
                     // `AppColors.textPrimary` reads slightly washed at 0x1A1A1A.
-                    Text(place.name)
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
+                    Text(TimelinePlaceDisplayName.timelineDisplay(place.name))
+                        .font(.timelineRowTitle)
+                        .foregroundStyle(Color.primary)
                         .lineLimit(2)
-                }
 
-                if !subtitleParts.isEmpty {
-                    Text(subtitleParts.joined(separator: " · "))
+                    Text(activitySummaryParts.joined(separator: " · "))
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppColors.textSecondary)
                         .lineLimit(1)
                 }
-
-                if let addressLine {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(AppColors.textTertiary.opacity(0.78))
-                            .frame(width: 12, alignment: .center)
-                        Text(addressLine)
-                            .font(.caption)
-                            .foregroundStyle(Color.secondary.opacity(0.8))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                }
-
-                // Phase 3 — only renders when a recent realtime change has
-                // landed for this card. Layout-stable: the row collapses
-                // back to nothing once the flash expires (no border, no
-                // sized placeholder) so neighbours don't shift.
-                if let flash {
-                    CollaborativeAttributionPill(
-                        actorDisplayName: flash.displayActor,
-                        actorUserId: flash.actorUserId,
-                        kind: flash.kind
-                    )
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let gallery = onOpenActivityPhotoGallery, !activityPhotoStack.isEmpty {
-                ActivityFeedPhotoStackView(items: activityPhotoStack, onTap: gallery)
+            // Phase 3 — only renders when a recent realtime change has landed
+            // for this card. Layout-stable: the row collapses back to nothing
+            // once the flash expires.
+            if let flash {
+                CollaborativeAttributionPill(
+                    actorDisplayName: flash.displayActor,
+                    actorUserId: flash.actorUserId,
+                    kind: flash.kind
+                )
             }
         }
-        .timelineCardChassis(stripeColor: familyColor)
+        .timelineCardChassis(
+            stripeColor: familyColor,
+            showsTopRail: false,
+            horizontalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding,
+            verticalContentPadding: TimelineCardLayoutMetrics.contentVerticalPadding
+        )
     }
 
     // MARK: - Type-aware subtitle
@@ -167,13 +180,17 @@ struct TimelinePlaceCardView: View {
     // the row so users can scan "Restaurant", "Museum", "Attraction", etc.
     // before reading rating, price, or duration.
 
-    private var subtitleParts: [String] {
+    private var activitySummaryParts: [String] {
+        var parts = [activityTypeLabel]
+        parts.append(contentsOf: detailParts)
+        return parts
+    }
+
+    private var detailParts: [String] {
         var parts: [String] = []
 
-        parts.append(activityTypeLabel)
-
         if let r = place.rating {
-            parts.append(String(format: "★ %.1f", r))
+            parts.append(String(format: "%.1f ★", r))
         }
 
         switch place.categoryEnum {
@@ -192,14 +209,6 @@ struct TimelinePlaceCardView: View {
 
     private var activityTypeLabel: String {
         place.placeKindLabel ?? place.categoryEnum.label
-    }
-
-    private var addressLine: String? {
-        guard let address = place.address?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !address.isEmpty else {
-            return nil
-        }
-        return address
     }
 
     /// Prefer the actual scheduled duration (start→end) since that reflects
@@ -318,6 +327,86 @@ func neighborhood(from address: String?) -> String? {
     let candidate = deduped[deduped.count - 2]
     if candidate.caseInsensitiveCompare(city) == .orderedSame { return nil }
     return candidate
+}
+
+/// Catalog `thumbnail_url` tile on the timeline; matches leading icon size. Falls back to the category badge if the image fails.
+private struct TimelineLeadingCatalogThumbnail: View {
+    let url: URL
+    let symbol: String
+    let accent: Color
+    let accessibilityLabel: String
+
+    private var side: CGFloat { TimelineCardLeadingIconMetrics.solidSquareSideLength }
+
+    var body: some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .empty:
+                ZStack {
+                    RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
+                        .fill(AppColors.appSurface)
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(accent)
+                }
+            case .success(let image):
+                image
+                    .resizable()
+                    .scaledToFill()
+            case .failure:
+                TimelineCardLeadingIconMetrics.categoryBadge(
+                    symbol: symbol,
+                    accent: accent,
+                    accessibilityLabel: accessibilityLabel
+                )
+            @unknown default:
+                TimelineCardLeadingIconMetrics.categoryBadge(
+                    symbol: symbol,
+                    accent: accent,
+                    accessibilityLabel: accessibilityLabel
+                )
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+        .accessibilityHidden(true)
+    }
+}
+
+private func activityTypeIcon(for label: String) -> String? {
+    let normalized = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !normalized.isEmpty else { return nil }
+
+    let mappings: [(keywords: [String], symbol: String)] = [
+        (["wildlife", "zoo", "animal", "safari", "aquarium"], "pawprint.fill"),
+        (["buddhist temple", "temple", "shrine", "church", "cathedral", "mosque", "synagogue"], "building.columns.fill"),
+        (["scenic", "viewpoint", "lookout", "observation", "photo spot"], "camera.viewfinder"),
+        (["museum", "gallery", "exhibit", "art"], "paintpalette.fill"),
+        (["historic", "monument", "landmark", "castle", "palace", "ruins"], "building.columns.fill"),
+        (["park", "garden", "botanical"], "tree.fill"),
+        (["trail", "hike", "hiking", "mountain"], "figure.hiking"),
+        (["beach", "island"], "beach.umbrella.fill"),
+        (["lake", "river", "waterfall", "spring"], "water.waves"),
+        (["restaurant", "dining", "food", "bistro", "brasserie"], "fork.knife"),
+        (["cafe", "coffee", "tea", "bakery"], "cup.and.saucer.fill"),
+        (["bar", "pub", "wine", "cocktail"], "wineglass.fill"),
+        (["market", "shopping", "mall", "store", "boutique"], "bag.fill"),
+        (["show", "theater", "theatre", "cinema", "performance"], "theatermasks.fill"),
+        (["music", "concert", "festival"], "music.note"),
+        (["stadium", "arena", "sport"], "sportscourt.fill"),
+        (["tour", "ticket", "experience"], "ticket.fill"),
+        (["spa", "wellness", "onsen", "hot spring"], "sparkles"),
+        (["hotel", "resort", "hostel"], "bed.double.fill"),
+        (["train", "rail", "station"], "tram.fill"),
+        (["bus", "coach"], "bus.fill"),
+        (["boat", "ferry", "cruise"], "ferry.fill"),
+        (["airport", "flight"], "airplane"),
+        (["attraction"], "star.fill")
+    ]
+
+    return mappings.first { mapping in
+        mapping.keywords.contains { normalized.contains($0) }
+    }?.symbol
 }
 
 

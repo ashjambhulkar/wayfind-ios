@@ -226,6 +226,16 @@ final class DataService {
         return await mock!.fetchParsedBookings(for: tripId)
     }
 
+    func fetchForwardingEmailAddress(for tripId: UUID) async -> String? {
+        if let real { return try? await real.fetchForwardingEmailAddress(for: tripId) }
+        return await mock!.fetchForwardingEmailAddress(for: tripId)
+    }
+
+    func fetchForwardedBookingSummary(for tripId: UUID) async -> ForwardedBookingSummary {
+        if let real { return (try? await real.fetchForwardedBookingSummary(for: tripId)) ?? .empty }
+        return await mock!.fetchForwardedBookingSummary(for: tripId)
+    }
+
     /// Counts for trip detail hero pills (Expo `TripDetailHero` checklist + notes chips).
     /// Returns nil on network/RLS failure so callers can preserve the last
     /// visible counts instead of flashing them back to zero.

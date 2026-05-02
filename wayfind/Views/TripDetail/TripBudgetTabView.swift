@@ -19,6 +19,9 @@ import SwiftUI
 struct TripBudgetTabView: View {
     let trip: Trip
     let viewModel: BudgetViewModel?
+    /// When `false` (e.g. budget presented as a large detent sheet), omit pull-to-refresh so
+    /// downward drags can dismiss the sheet instead of exclusively triggering `.refreshable`.
+    var supportsPullToRefresh: Bool = true
 
     @Environment(CollaborationStore.self) private var collaborationStore
     @Environment(DataService.self) private var dataService
@@ -65,6 +68,13 @@ struct TripBudgetTabView: View {
                                 .accessibilityLabel("Edit trip budget")
                             }
                             Menu {
+                                if !supportsPullToRefresh {
+                                    Button {
+                                        Task { await viewModel.reload() }
+                                    } label: {
+                                        Label(String(localized: "Refresh"), systemImage: "arrow.clockwise")
+                                    }
+                                }
                                 Button {
                                     exportCSV(viewModel: viewModel)
                                 } label: {
@@ -75,13 +85,19 @@ struct TripBudgetTabView: View {
                                 Label("More", systemImage: "ellipsis.circle")
                             }
                             .accessibilityLabel("More budget actions")
-                            if collaborationStore.canEditExpenses {
-                                Button {
-                                    showAddExpense = true
-                                } label: {
-                                    Label("Add expense", systemImage: "plus")
+                        }
+                        if collaborationStore.canEditExpenses {
+                            ToolbarItem(placement: .bottomBar) {
+                                HStack {
+                                    Spacer(minLength: 0)
+                                    Button {
+                                        showAddExpense = true
+                                    } label: {
+                                        Label("Add expense", systemImage: "plus")
+                                    }
+                                    .accessibilityLabel("Add expense")
                                 }
-                                .accessibilityLabel("Add expense")
+                                .frame(maxWidth: .infinity)
                             }
                         }
                     }
@@ -264,9 +280,9 @@ struct TripBudgetTabView: View {
             }
             .padding(.vertical, AppSpacing.lg)
         }
-        .refreshable {
+        .modifier(BudgetPullToRefreshModifier(isEnabled: supportsPullToRefresh) {
             await viewModel.reload()
-        }
+        })
         .overlay(alignment: .top) {
             if viewModel.lastFetchFailed {
                 fetchFailedBanner(viewModel: viewModel)
@@ -637,6 +653,24 @@ private struct MixedCurrencyBanner: View {
     }
 }
 
+
+// Pull-to-refresh on scroll content steals the vertical drag gesture that would
+// otherwise dismiss an interactive sheet; disable it when the budget is sheet-hosted.
+private struct BudgetPullToRefreshModifier: ViewModifier {
+    let isEnabled: Bool
+    let reload: @Sendable () async -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.refreshable {
+                await reload()
+            }
+        } else {
+            content
+        }
+    }
+}
 
 // =============================================================================
 

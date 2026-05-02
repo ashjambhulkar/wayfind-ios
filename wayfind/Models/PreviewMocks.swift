@@ -245,6 +245,7 @@ extension Place {
         confirmationNumber: "AF264",
         bookingDetails: .flight(FlightDetails(
             airline: "Air France",
+            carrierIATA: "AF",
             flightNumber: "AF264",
             departureAirport: "CDG",
             arrivalAirport: "NRT",

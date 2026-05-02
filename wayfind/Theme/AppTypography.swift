@@ -25,6 +25,11 @@ extension Font {
         .system(.headline, design: .rounded)
     }
 
+    /// Primary title on timeline / trip-detail dense list rows — semibold headline (lighter than `.bold`).
+    static var timelineRowTitle: Font {
+        .system(.headline, design: .rounded).weight(.semibold)
+    }
+
     static var appBody: Font {
         .system(.body, design: .rounded)
     }

@@ -17,45 +17,32 @@ private struct TripNoteListRow: View {
     private var hasBody: Bool { !bodyText.isEmpty }
 
     var body: some View {
-        HStack(alignment: .top, spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: "note.text",
-                size: .small,
-                accent: AppColors.appPrimary,
-                accessibilityLabel: "Note"
-            )
-
-            VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    if hasTitle {
-                        Text(titleText)
-                            .font(.appBody.weight(.semibold))
-                            .foregroundStyle(AppColors.textPrimary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                    }
-
-                    if hasBody {
-                        Text(bodyText)
-                            .font(.appBody)
-                            .foregroundStyle(hasTitle ? AppColors.textSecondary : AppColors.textPrimary)
-                            .lineLimit(3)
-                            .multilineTextAlignment(.leading)
-                            .lineSpacing(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                if hasTitle {
+                    Text(titleText)
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                Text(note.updatedAt.noteListCaption)
-                    .font(.appCaption)
-                    .foregroundStyle(AppColors.textTertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if hasBody {
+                    Text(bodyText)
+                        .font(.appBody)
+                        .foregroundStyle(hasTitle ? AppColors.textSecondary : AppColors.textPrimary)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(AppColors.textTertiary.opacity(0.55))
-                .accessibilityHidden(true)
+            Text(note.updatedAt.noteListCaption)
+                .font(.appCaption)
+                .foregroundStyle(AppColors.textTertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(AppSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -125,23 +112,42 @@ struct TripNotesView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                ScrollView {
-                    LazyVStack(spacing: AppSpacing.md) {
-                        notesHeader
-
+                List {
+                    Section {
                         ForEach(displayNotes) { note in
-                            Button {
-                                HapticManager.selection()
-                                noteToEdit = note
-                            } label: {
-                                TripNoteListRow(note: note)
+                            Group {
+                                if collaborationStore.canEditNotes {
+                                    noteRow(note)
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                            Button(role: .destructive) {
+                                                Task { await deleteNoteFromList(note) }
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                                    .foregroundStyle(AppColors.iconOnColoredSurface)
+                                            }
+                                            .tint(AppColors.swipeDestructiveTint)
+                                            .accessibilityLabel("Delete note")
+                                        }
+                                } else {
+                                    noteRow(note)
+                                }
                             }
-                            .buttonStyle(.plain)
+                            .listRowInsets(TripNotesViewMetrics.listRowInsets)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                         }
+                    } header: {
+                        notesHeader
+                            .padding(.horizontal, AppSpacing.lg)
+                            .padding(.bottom, AppSpacing.xs)
+                            .textCase(nil)
                     }
-                    .padding(AppSpacing.lg)
                 }
+                .listStyle(.plain)
+                .listRowSpacing(AppSpacing.md)
+                .scrollContentBackground(.hidden)
                 .scrollIndicators(.hidden)
+                .background(AppColors.appBackground)
             }
         }
         .background(AppColors.appBackground)
@@ -162,39 +168,46 @@ struct TripNotesView: View {
                 }
             }
         }
-        .navigationDestination(item: $noteToEdit) { note in
-            TripNoteEditorView(note: note) {
-                Task { await reload() }
+        .sheet(item: $noteToEdit) { note in
+            NavigationStack {
+                TripNoteEditorView(note: note, isEditable: collaborationStore.canEditNotes) {
+                    Task { await reload() }
+                }
             }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(AppColors.appBackground)
         }
         .task {
             await reload()
         }
     }
 
-    private var notesHeader: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: "lightbulb.fill",
-                size: .small,
-                accent: AppColors.appPrimary,
-                backgroundStyle: .soft,
-                accessibilityLabel: "Trip notes"
-            )
-
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                Text("\(displayNotes.count) \(displayNotes.count == 1 ? "note" : "notes")")
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-                Text("Ideas, links, reminders, and shared context for this trip")
-                    .font(.appSmall)
-                    .foregroundStyle(AppColors.textSecondary)
-                    .lineLimit(2)
+    private func noteRow(_ note: TripNote) -> some View {
+        TripNoteListRow(note: note)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                HapticManager.selection()
+                noteToEdit = note
             }
+            .accessibilityAddTraits(.isButton)
+    }
 
-            Spacer(minLength: 0)
+    private var notesHeader: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            Text("\(displayNotes.count) \(displayNotes.count == 1 ? "note" : "notes")")
+                .font(.appBody.weight(.semibold))
+                .foregroundStyle(AppColors.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Ideas, links, reminders, and shared context for this trip")
+                .font(.appSmall)
+                .foregroundStyle(AppColors.textSecondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(AppSpacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppColors.appSurface)
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
         .overlay {
@@ -230,6 +243,22 @@ struct TripNotesView: View {
         notes.insert(note, at: 0)
         noteToEdit = note
     }
+
+    @MainActor
+    private func deleteNoteFromList(_ note: TripNote) async {
+        await dataService.deleteTripNote(noteId: note.id)
+        notes.removeAll { $0.id == note.id }
+        HapticManager.success()
+    }
+}
+
+private enum TripNotesViewMetrics {
+    static let listRowInsets = EdgeInsets(
+        top: 0,
+        leading: AppSpacing.lg,
+        bottom: 0,
+        trailing: AppSpacing.lg
+    )
 }
 
 

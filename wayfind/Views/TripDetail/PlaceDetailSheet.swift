@@ -470,9 +470,16 @@ struct PlaceDetailSheet: View {
     @ToolbarContentBuilder
     private var placeDetailDismissToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
-            MapChromeIconButton.placeDismiss {
+            Button {
                 dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 44)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(localized: "Close"))
         }
     }
 

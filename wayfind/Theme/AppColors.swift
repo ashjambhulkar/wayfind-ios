@@ -45,6 +45,8 @@ enum AppColors {
     static let appSuccess = Color(light: Color(hex: 0x059669), dark: Color(hex: 0x059669))
     static let appWarning = Color(light: Color(hex: 0xD97706), dark: Color(hex: 0xD97706))
     static let appError = Color(light: Color(hex: 0xDC2626), dark: Color(hex: 0xDC2626))
+    /// List swipe-delete backgrounds; UIKit semantic red tracks light/dark (distinct from flat `appError` fills).
+    static let swipeDestructiveTint = Color(uiColor: .systemRed)
     static let appDivider = Color(light: Color(hex: 0xF3EDE4), dark: Color(hex: 0x3A3A3C))
     static let bookingPassHeaderTop = Color(light: Color(hex: 0x2C3E50), dark: Color(hex: 0x0D1224))
     static let bookingPassHeaderBottom = Color(light: Color(hex: 0x243447), dark: Color(hex: 0x151A33))

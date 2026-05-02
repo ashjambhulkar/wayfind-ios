@@ -39,18 +39,26 @@ struct BookingsScreenView: View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
                 if allBookings.isEmpty {
+                    ForwardingEmailCardView(trip: trip, density: .compact)
+                        .padding(.horizontal, AppSpacing.lg)
+                        .padding(.top, AppSpacing.sm)
+                        .padding(.bottom, AppSpacing.md)
+
                     EmptyStateView(
                         sfSymbol: "airplane",
                         title: "No bookings yet",
                         subtitle: "Use the Add menu to create a flight, hotel, restaurant, car rental, activity, or transport booking."
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                    ForwardingEmailCardView(trip: trip)
-                        .padding(.horizontal, AppSpacing.lg)
-                        .padding(.bottom, AppSpacing.lg)
                 } else {
                     List {
+                        Section {
+                            ForwardingEmailCardView(trip: trip, density: .compact)
+                                .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.lg, bottom: AppSpacing.sm, trailing: AppSpacing.lg))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+
                         ForEach(groupedBookings, id: \.category) { group in
                             Section {
                                 ForEach(group.places) { place in
@@ -80,13 +88,6 @@ struct BookingsScreenView: View {
                             } header: {
                                 categorySectionHeader(group.category)
                             }
-                        }
-
-                        Section {
-                            ForwardingEmailCardView(trip: trip)
-                                .listRowInsets(EdgeInsets(top: AppSpacing.md, leading: AppSpacing.lg, bottom: AppSpacing.lg, trailing: AppSpacing.lg))
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
                         }
                     }
                     .listStyle(.plain)
@@ -573,13 +574,7 @@ private struct BookingPassCard: View {
             passPerforation
         }
         .padding(AppSpacing.lg)
-        .background(
-            LinearGradient(
-                colors: [AppColors.bookingPassHeaderTop, AppColors.bookingPassHeaderBottom],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .background(passHeaderBackground)
     }
 
     private var passFooter: some View {
@@ -591,7 +586,22 @@ private struct BookingPassCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, AppSpacing.lg)
         .padding(.vertical, AppSpacing.md)
-        .background(
+        .background(passFooterBackground)
+    }
+
+    private var passHeaderBackground: some View {
+        ZStack {
+            LinearGradient(
+                colors: [AppColors.bookingPassHeaderTop, AppColors.bookingPassHeaderBottom],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Color.black.opacity(0.08)
+        }
+    }
+
+    private var passFooterBackground: some View {
+        ZStack {
             LinearGradient(
                 colors: [
                     category.color,
@@ -600,7 +610,8 @@ private struct BookingPassCard: View {
                 startPoint: .leading,
                 endPoint: .trailing
             )
-        )
+            Color.black.opacity(0.18)
+        }
     }
 
     private var categoryBadge: some View {
@@ -681,6 +692,21 @@ private struct FlightBookingPassCard: View {
         let mins = minutes % 60
         if hours == 0 { return "\(mins)m" }
         return mins == 0 ? "\(hours)h" : "\(hours)h \(mins)m"
+    }
+
+    private var effectiveCarrierCode: String? {
+        let candidates = [details.carrierIATA, status?.carrierIata]
+        for c in candidates {
+            let t = c?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !t.isEmpty { return t }
+        }
+        return nil
+    }
+
+    private var airlineDisplayName: String {
+        let trimmed = details.airline.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return flightCode
     }
 
     private var flightCode: String {
@@ -805,7 +831,40 @@ private struct FlightBookingPassCard: View {
             }
         }
         .padding(AppSpacing.lg)
-        .background(
+        .background(flightHeaderBackground)
+    }
+
+    private var bottomPanel: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            HStack(alignment: .center, spacing: AppSpacing.sm) {
+                AirlineLogoView(
+                    carrierIATA: effectiveCarrierCode,
+                    airlineNameFallback: airlineDisplayName,
+                    variant: .bookingPassFooter
+                )
+                Text(airlineDisplayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(alignment: .top, spacing: AppSpacing.lg) {
+                flightMetric(title: "Flight", value: flightCode)
+                flightMetric(title: "Gate", value: gate)
+                flightMetric(title: "Seat", value: seat)
+                flightMetric(title: "Confirm", value: confirmationCode)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.vertical, AppSpacing.md)
+        .background(flightFooterBackground)
+    }
+
+    private var flightHeaderBackground: some View {
+        ZStack {
             LinearGradient(
                 colors: [
                     passHeaderTopColor,
@@ -814,20 +873,12 @@ private struct FlightBookingPassCard: View {
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-        )
+            Color.black.opacity(0.08)
+        }
     }
 
-    private var bottomPanel: some View {
-        HStack(alignment: .top, spacing: AppSpacing.lg) {
-            flightMetric(title: "Flight", value: flightCode)
-            flightMetric(title: "Gate", value: gate)
-            flightMetric(title: "Seat", value: seat)
-            flightMetric(title: "Confirm", value: confirmationCode)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, AppSpacing.lg)
-        .padding(.vertical, AppSpacing.md)
-        .background(
+    private var flightFooterBackground: some View {
+        ZStack {
             LinearGradient(
                 colors: [
                     AppColors.appPrimary,
@@ -836,7 +887,8 @@ private struct FlightBookingPassCard: View {
                 startPoint: .leading,
                 endPoint: .trailing
             )
-        )
+            Color.black.opacity(0.18)
+        }
     }
 
     private var routeArc: some View {
@@ -942,6 +994,7 @@ private struct FlightBookingPassCard: View {
 
     private var accessibilitySummary: String {
         [
+            airlineDisplayName,
             "\(flightCode), \(departureAirport) to \(arrivalAirport)",
             statusTitle,
             "confirmation \(confirmationCode)"

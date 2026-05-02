@@ -62,11 +62,12 @@ struct RecentActivitySheet: View {
                         activityTitle: target.title
                     )
                     .environment(dataService)
-                case .manage:
+                case .manage(let entry):
                     ActivityPhotosSheet(
                         activityId: target.activityId,
                         tripId: trip.id,
                         activityTitle: target.title,
+                        manageEntry: entry,
                         canEditAttachments: collaborationStore.canEdit
                     )
                     .environment(dataService)
@@ -110,13 +111,13 @@ struct RecentActivitySheet: View {
                             entry: entry,
                             photoStack: store.photoStack(for: entry),
                             onOpenPhotoGallery: { openPhotos(for: entry, presentation: .galleryOnly) },
-                            onOpenPhotoManage: { openPhotos(for: entry, presentation: .manage) }
+                            onOpenPhotoManage: { openPhotos(for: entry, presentation: .manage(.browse)) }
                         )
                         .listRowBackground(AppColors.appSurface)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             if collaborationStore.canEdit, entry.tripActivityAttachmentTargetId != nil {
                                 Button {
-                                    openPhotos(for: entry, presentation: .manage)
+                                    openPhotos(for: entry, presentation: .manage(.browse))
                                 } label: {
                                     Label("Photos", systemImage: "photo.on.rectangle.angled")
                                 }

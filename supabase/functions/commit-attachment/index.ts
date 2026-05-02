@@ -47,7 +47,8 @@ const ALLOWED_MIME = new Set([
   "application/pdf",
 ]);
 
-const HARD_BYTE_LIMIT = 25 * 1024 * 1024; // 25 MB per plan §0.5 E4
+const HARD_BYTE_LIMIT = 25 * 1024 * 1024; // 25 MB — default for activity / booking / expense attachments
+const TRIP_DOCUMENT_BYTE_LIMIT = 10 * 1024 * 1024; // 10 MB — trip documents only (abuse guard)
 
 type Kind =
   | "trip_activity_attachment"
@@ -221,8 +222,10 @@ serve(async (req) => {
   if (typeof body.byte_size !== "number" || body.byte_size < 0) {
     return json({ error: "byte_size_required" }, 400);
   }
-  if (body.byte_size > HARD_BYTE_LIMIT) {
-    return json({ error: "file_too_large", limit_bytes: HARD_BYTE_LIMIT }, 413);
+  const byteLimit =
+    body.kind === "trip_document" ? TRIP_DOCUMENT_BYTE_LIMIT : HARD_BYTE_LIMIT;
+  if (body.byte_size > byteLimit) {
+    return json({ error: "file_too_large", limit_bytes: byteLimit }, 413);
   }
 
   const surface = SURFACES[body.kind];
@@ -254,6 +257,22 @@ serve(async (req) => {
     const detail = insertErr.message ?? "insert_failed";
     if (detail.includes("ACTIVITY_PHOTO_LIMIT")) {
       return json({ error: "limit_reached", detail: "activity_photo_limit", surface: body.kind }, 409);
+    }
+    if (detail.includes("TRIP_DOCUMENT_LIMIT")) {
+      return json(
+        {
+          error: "limit_reached",
+          detail: "trip_document_count_limit",
+          surface: body.kind,
+        },
+        409,
+      );
+    }
+    if (detail.includes("TRIP_DOCUMENT_FILE_TOO_LARGE")) {
+      return json(
+        { error: "file_too_large", limit_bytes: TRIP_DOCUMENT_BYTE_LIMIT },
+        413,
+      );
     }
     return json({ error: "insert_failed", detail }, 400);
   }

@@ -68,6 +68,23 @@ final class MockDataService {
         parsedBookings.filter { $0.tripId == tripId }
     }
 
+    func fetchForwardingEmailAddress(for tripId: UUID) async -> String {
+        let token = tripId.uuidString
+            .replacingOccurrences(of: "-", with: "")
+            .lowercased()
+            .prefix(12)
+        return "trips+\(token)@\(AppConfig.bookingForwardingDomain)"
+    }
+
+    func fetchForwardedBookingSummary(for tripId: UUID) async -> ForwardedBookingSummary {
+        let bookings = await fetchParsedBookings(for: tripId)
+        return ForwardedBookingSummary(
+            pendingCount: bookings.filter { $0.status == .pending }.count,
+            needsReviewCount: bookings.filter { $0.status == .failed || $0.status == .parsed }.count,
+            importedCount: bookings.filter { $0.status == .confirmed }.count
+        )
+    }
+
     func fetchProfileAggregateStats() async -> ProfileAggregateStats {
         let calendar = Calendar.current
         let inputs: [ProfileTripBucketInput] = trips.map { trip in

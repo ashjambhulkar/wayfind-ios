@@ -178,6 +178,111 @@ final class TripDetailViewModel {
         HapticManager.selection()
     }
 
+    /// Anchor date for a scheduled day (server `trip_days.date` when present,
+    /// otherwise derived from `trip.startDate` + day number).
+    func resolvedTimelineAnchorDate(for day: ItineraryDay) -> Date {
+        day.date ?? dateForScheduledDay(day.dayNumber)
+    }
+
+    /// Places and bookings for the day section UI — expands each **hotel**
+    /// into check-in / check-out rows when those dates match this day’s
+    /// calendar (in `timelineTimeZone`), and appends “detached” hotel rows
+    /// when check-in or check-out falls on this day but the booking lives on
+    /// another itinerary day in the database.
+    func timelineDisplayRows(for day: ItineraryDay, timelineTimeZone: TimeZone) -> [TripTimelineDisplayRow] {
+        let anchor = resolvedTimelineAnchorDate(for: day)
+        let dayPlaces = places(for: day)
+
+        var nativeRows: [TripTimelineDisplayRow] = []
+        for place in dayPlaces {
+            if place.isBooking,
+               place.bookingCategoryEnum == .hotel,
+               case .hotel(let h) = place.bookingDetails {
+                var splitRoles: [(HotelTimelineDisplayRole, String)] = []
+                if TripTimelineRowCalendar.isSameCalendarDay(
+                    hotelDate: h.checkInDate,
+                    itineraryAnchor: anchor,
+                    timelineTimeZone: timelineTimeZone
+                ) {
+                    splitRoles.append((.checkIn, "\(place.id.uuidString)-hotel-checkin"))
+                }
+                if TripTimelineRowCalendar.isSameCalendarDay(
+                    hotelDate: h.checkOutDate,
+                    itineraryAnchor: anchor,
+                    timelineTimeZone: timelineTimeZone
+                ) {
+                    splitRoles.append((.checkOut, "\(place.id.uuidString)-hotel-checkout"))
+                }
+                if splitRoles.isEmpty {
+                    nativeRows.append(TripTimelineDisplayRow(
+                        id: "\(place.id.uuidString)-hotel-stay",
+                        place: place,
+                        hotelTimelineRole: nil
+                    ))
+                } else {
+                    for (role, rowId) in splitRoles {
+                        nativeRows.append(TripTimelineDisplayRow(id: rowId, place: place, hotelTimelineRole: role))
+                    }
+                }
+            } else {
+                nativeRows.append(TripTimelineDisplayRow(id: place.id.uuidString, place: place, hotelTimelineRole: nil))
+            }
+        }
+
+        var seenIds = Set(nativeRows.map(\.id))
+        var injected: [TripTimelineDisplayRow] = []
+        for place in allScheduledPlaces() {
+            guard place.isBooking,
+                  place.bookingCategoryEnum == .hotel,
+                  place.itineraryDayId != day.id,
+                  case .hotel(let h) = place.bookingDetails else { continue }
+
+            if TripTimelineRowCalendar.isSameCalendarDay(
+                hotelDate: h.checkInDate,
+                itineraryAnchor: anchor,
+                timelineTimeZone: timelineTimeZone
+            ) {
+                let rowId = "\(place.id.uuidString)-hotel-checkin"
+                if !seenIds.contains(rowId) {
+                    injected.append(TripTimelineDisplayRow(id: rowId, place: place, hotelTimelineRole: .checkIn))
+                    seenIds.insert(rowId)
+                }
+            }
+            if TripTimelineRowCalendar.isSameCalendarDay(
+                hotelDate: h.checkOutDate,
+                itineraryAnchor: anchor,
+                timelineTimeZone: timelineTimeZone
+            ) {
+                let rowId = "\(place.id.uuidString)-hotel-checkout"
+                if !seenIds.contains(rowId) {
+                    injected.append(TripTimelineDisplayRow(id: rowId, place: place, hotelTimelineRole: .checkOut))
+                    seenIds.insert(rowId)
+                }
+            }
+        }
+
+        let combined = nativeRows + injected
+        return combined.sorted { lhs, rhs in
+            switch (lhs.timelineSortInstant, rhs.timelineSortInstant) {
+            case let (l?, r?):
+                if l != r { return l < r }
+            case (nil, _?):
+                return false
+            case (_?, nil):
+                return true
+            case (nil, nil):
+                break
+            }
+            if lhs.place.sortOrder != rhs.place.sortOrder {
+                return lhs.place.sortOrder < rhs.place.sortOrder
+            }
+            if lhs.roleOrderingIndex != rhs.roleOrderingIndex {
+                return lhs.roleOrderingIndex < rhs.roleOrderingIndex
+            }
+            return lhs.id < rhs.id
+        }
+    }
+
     func ongoingBookings(for day: ItineraryDay) -> [(place: Place, isFirstAppearance: Bool)] {
         guard let dayDate = day.date else { return [] }
         var ongoing: [(Place, Bool)] = []

@@ -9,14 +9,14 @@
 //  knowledge is which table / bucket / parent column to write.
 //
 //  Pro-gating policy (Wave 4.5 — hard gate):
-//    * Free users: HARD 5 docs / user / trip cap + 25 docs / trip
+//    * Free users: HARD 5 docs / user / trip cap + 15 docs / trip
 //      ceiling. The per-user cap is a paywall trigger; the UI
 //      intercepts the FAB tap and presents the paywall via
 //      `PaywallPresenter`. The service still throws `userQuotaReached`
 //      as a defence-in-depth check in case a caller bypasses the UI
 //      (e.g. resumed background upload from a Pro user who churned
 //      after enqueue).
-//    * Pro users: only the 25 docs / trip ceiling applies. Pro is a
+//    * Pro users: only the 15 docs / trip ceiling applies. Pro is a
 //      "no per-user limit" unlock, not "more storage" — both tiers
 //      share the trip ceiling.
 //    * The service surfaces both numbers via `quotaSnapshot` so the
@@ -117,7 +117,7 @@ enum TripDocumentError: LocalizedError, Sendable {
         case .ceilingReached:
             return String(
                 localized: "This trip already has \(TripDocumentsService.tripCeiling) documents. Delete some to add more.",
-                comment: "Error shown when ANY user (Free or Pro) tries to upload past the per-trip document ceiling. The interpolated value is the ceiling count (currently 25)."
+                comment: "Error shown when ANY user (Free or Pro) tries to upload past the per-trip document ceiling. The interpolated value is the ceiling count (currently 15)."
             )
         case .userQuotaReached:
             return String(
@@ -136,8 +136,10 @@ enum TripDocumentError: LocalizedError, Sendable {
 @MainActor
 @Observable
 final class TripDocumentsService {
-    static let perUserSoftLimit: Int = 5
-    static let tripCeiling: Int = 25
+    nonisolated static let perUserSoftLimit: Int = 5
+    nonisolated static let tripCeiling: Int = 15
+    /// Stricter than global attachment processing (25 MB) to limit storage abuse on trip docs.
+    nonisolated static let maxUploadByteCount: Int = 10 * 1024 * 1024
 
     let tripId: UUID
     let currentUserId: UUID
@@ -303,7 +305,11 @@ final class TripDocumentsService {
             )
             throw TripDocumentError.userQuotaReached
         }
-        try AttachmentValidator.validate(data: bytes, mimeType: mimeType)
+        try AttachmentValidator.validate(
+            data: bytes,
+            mimeType: mimeType,
+            byteLimit: Self.maxUploadByteCount
+        )
         let descriptor = AttachmentUploadDescriptor(
             surface: .tripDocument,
             parentId: tripId,
@@ -344,10 +350,25 @@ final class TripDocumentsService {
         for _ in 0..<600 {
             try? await Task.sleep(nanoseconds: 200_000_000)
             switch pending.status {
-            case .completed: await reload(); return
-            case .failed: return
-            default: continue
+            case .completed:
+                await reloadAfterUpload()
+                return
+            case .failed:
+                return
+            default:
+                continue
             }
         }
     }
+
+    /// Matches `ActivityAttachmentService.reloadAfterUpload`: first fetch can
+    /// miss the new `trip_documents` row (read-after-write / cache); a short
+    /// staggered second pass updates the grid without leaving the screen.
+    private func reloadAfterUpload() async {
+        await reload()
+        try? await Task.sleep(nanoseconds: Self.postUploadListRefreshStaggerNanoseconds)
+        await reload()
+    }
+
+    private static let postUploadListRefreshStaggerNanoseconds: UInt64 = 400_000_000
 }
