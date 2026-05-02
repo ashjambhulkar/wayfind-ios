@@ -1,2 +1,0 @@
-Target dependency graph (1 target)
-Target 'wayfind' in project 'wayfind' (no dependencies)
