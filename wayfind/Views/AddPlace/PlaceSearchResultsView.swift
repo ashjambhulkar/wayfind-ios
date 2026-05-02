@@ -97,3 +97,6 @@ private struct PlaceSearchResultRowView: View {
         .padding(.vertical, AppSpacing.sm)
     }
 }
+
+// =============================================================================
+

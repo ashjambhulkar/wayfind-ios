@@ -74,3 +74,18 @@ struct ParsedBookingCardView: View {
         .shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 3)
     }
 }
+
+// =============================================================================
+
+
+#if DEBUG
+#Preview("Parsed booking card") {
+    ParsedBookingCardView(
+        booking: .preview,
+        onAdd: {},
+        onEdit: {}
+    )
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

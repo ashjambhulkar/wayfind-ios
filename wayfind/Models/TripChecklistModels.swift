@@ -38,3 +38,7 @@ struct TripChecklistItem: Identifiable, Hashable, Sendable {
     var isDone: Bool
     let sortOrder: Int
 }
+
+
+// =============================================================================
+

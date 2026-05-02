@@ -35,6 +35,13 @@ private enum DateFormatters {
         formatter.locale = .autoupdatingCurrent
         return formatter
     }()
+
+    static let monthDayYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        formatter.locale = .autoupdatingCurrent
+        return formatter
+    }()
 }
 
 extension Date {
@@ -42,8 +49,39 @@ extension Date {
         DateFormatters.short.string(from: self)
     }
 
+    func shortFormatted(timeZone: TimeZone) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        f.locale = .autoupdatingCurrent
+        f.timeZone = timeZone
+        return f.string(from: self)
+    }
+
+    /// Note list footer: Today / Yesterday / MMM d (this year) / MMM d, yyyy.
+    var noteListCaption: String {
+        let cal = Calendar.current
+        if cal.isDateInToday(self) {
+            return String(localized: "Today")
+        }
+        if cal.isDateInYesterday(self) {
+            return String(localized: "Yesterday")
+        }
+        if cal.component(.year, from: self) == cal.component(.year, from: Date()) {
+            return DateFormatters.short.string(from: self)
+        }
+        return DateFormatters.monthDayYear.string(from: self)
+    }
+
     var timeFormatted: String {
         DateFormatters.time.string(from: self)
+    }
+
+    func timeFormatted(timeZone: TimeZone) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        f.locale = .autoupdatingCurrent
+        f.timeZone = timeZone
+        return f.string(from: self)
     }
 
     var dayOfWeekFull: String {
@@ -52,6 +90,14 @@ extension Date {
 
     var dayOfWeekShort: String {
         DateFormatters.weekdayShort.string(from: self)
+    }
+
+    func dayOfWeekShort(timeZone: TimeZone) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "EEE"
+        f.locale = .autoupdatingCurrent
+        f.timeZone = timeZone
+        return f.string(from: self)
     }
 
     var relativeDaysText: String {
@@ -79,3 +125,7 @@ extension Date {
         Calendar.current.dateComponents([.day], from: start, to: end).day ?? 0
     }
 }
+
+
+// =============================================================================
+

@@ -70,3 +70,7 @@ enum SupabaseModelMapping {
         inferTripStatus(startDate: startDate, endDate: endDate, now: now, calendar: calendar) == "active"
     }
 }
+
+
+// =============================================================================
+

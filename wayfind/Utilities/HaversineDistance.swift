@@ -55,3 +55,7 @@ enum HaversineDistance {
         return Int((km * mode.multiplier / mode.speedKmh * 60).rounded())
     }
 }
+
+
+// =============================================================================
+

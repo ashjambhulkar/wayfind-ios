@@ -16,8 +16,18 @@ extension Font {
         .system(.title3, design: .rounded).weight(.semibold)
     }
 
+    /// Trip detail cover / hero headline (above date range).
+    static var tripDetailHeroTitle: Font {
+        .system(.title, design: .rounded).weight(.bold)
+    }
+
     static var cardTitle: Font {
         .system(.headline, design: .rounded)
+    }
+
+    /// Primary title on timeline / trip-detail dense list rows — semibold headline (lighter than `.bold`).
+    static var timelineRowTitle: Font {
+        .system(.headline, design: .rounded).weight(.semibold)
     }
 
     static var appBody: Font {
@@ -36,3 +46,7 @@ extension Font {
         .system(.headline, design: .rounded)
     }
 }
+
+
+// =============================================================================
+

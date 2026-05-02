@@ -183,3 +183,6 @@ struct SignUpView: View {
         .animation(AppSpring.smooth, value: authViewModel.successMessage)
     }
 }
+
+// =============================================================================
+

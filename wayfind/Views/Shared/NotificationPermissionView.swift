@@ -48,3 +48,7 @@ struct NotificationPermissionView: View {
         .background(AppColors.appBackground)
     }
 }
+
+
+// =============================================================================
+

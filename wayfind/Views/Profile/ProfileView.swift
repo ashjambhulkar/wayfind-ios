@@ -4,7 +4,8 @@ struct ProfileView: View {
     @Environment(AuthViewModel.self) private var authViewModel
     @Environment(DataService.self) private var dataService
     @Environment(UserPreferencesStore.self) private var userPreferences
-    @Environment(\.openURL) private var openURL
+    @Environment(TabNavigationCoordinator.self) private var coordinator
+    @Environment(ToastManager.self) private var toastManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var profileDetail: UserProfileDetail?
@@ -12,6 +13,9 @@ struct ProfileView: View {
     @State private var aggregateStats = ProfileAggregateStats.empty
     @State private var isLoading = false
     @State private var initialLoadComplete = false
+    @State private var showEditProfile = false
+    @State private var isSavingPreferredCurrency = false
+    @State private var legalDocumentToBrowse: LegalDocumentSelection?
 
     private var spotlight: (trip: Trip, kind: ProfileTripBucketing.SpotlightKind)? {
         ProfileTripBucketing.pickProfileSpotlight(from: trips)
@@ -48,22 +52,21 @@ struct ProfileView: View {
         )
     }
 
-    private var homeAirportRowText: String {
-        let s = profileDetail?.preferredAirport?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return s.isEmpty ? "Choose airport" : s.uppercased()
-    }
-
-    private var homeAirportRowIsPlaceholder: Bool {
-        (profileDetail?.preferredAirport ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var preferredCurrencyRowText: String {
-        let s = profileDetail?.preferredCurrency?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return s.isEmpty ? "Choose currency" : s.uppercased()
+    private var preferredCurrencyMenuLabel: String {
+        PreferredCurrencyFormatting.displayLabel(code: profileDetail?.preferredCurrency)
     }
 
     private var preferredCurrencyRowIsPlaceholder: Bool {
         (profileDetail?.preferredCurrency ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var preferredCurrencyMenuCodes: [String] {
+        var codes = MoneyField.commonCurrencies
+        let trimmed = (profileDetail?.preferredCurrency ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !trimmed.isEmpty, !codes.contains(trimmed) {
+            codes.insert(trimmed, at: 0)
+        }
+        return codes
     }
 
     var body: some View {
@@ -84,58 +87,54 @@ struct ProfileView: View {
 
                     VStack(spacing: 0) {
                         if AppConfig.useRealBackend {
-                            NavigationLink {
-                                EditProfileView()
-                            } label: {
-                                HStack {
-                                    Text("Home airport")
-                                        .font(.cardTitle)
-                                        .foregroundStyle(AppColors.textPrimary)
-                                    Spacer()
-                                    Text(homeAirportRowText)
-                                        .font(.appBody)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(
-                                            homeAirportRowIsPlaceholder ? AppColors.textTertiary : AppColors.textSecondary
-                                        )
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(AppColors.textTertiary)
-                                }
-                                .padding(.horizontal, AppSpacing.lg)
-                                .padding(.vertical, AppSpacing.md)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+                            HStack(alignment: .center, spacing: AppSpacing.md) {
+                                Text("Preferred currency")
+                                    .font(.cardTitle)
+                                    .foregroundStyle(AppColors.textPrimary)
 
-                            Divider()
-                                .background(AppColors.appDivider)
+                                Spacer(minLength: AppSpacing.md)
 
-                            NavigationLink {
-                                EditProfileView()
-                            } label: {
-                                HStack {
-                                    Text("Preferred currency")
-                                        .font(.cardTitle)
-                                        .foregroundStyle(AppColors.textPrimary)
-                                    Spacer()
-                                    Text(preferredCurrencyRowText)
-                                        .font(.appBody)
-                                        .fontWeight(.semibold)
-                                        .foregroundStyle(
-                                            preferredCurrencyRowIsPlaceholder
-                                                ? AppColors.textTertiary
-                                                : AppColors.textSecondary
-                                        )
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(AppColors.textTertiary)
+                                Menu {
+                                    Button(PreferredCurrencyFormatting.displayLabel(code: nil)) {
+                                        Task { await savePreferredCurrency(nil) }
+                                    }
+                                    ForEach(preferredCurrencyMenuCodes, id: \.self) { code in
+                                        Button(code) {
+                                            Task { await savePreferredCurrency(code) }
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: AppSpacing.xs) {
+                                        if isSavingPreferredCurrency {
+                                            ProgressView()
+                                                .scaleEffect(0.9)
+                                        } else {
+                                            Text(preferredCurrencyMenuLabel)
+                                                .font(.appCaption.weight(.semibold))
+                                                .foregroundStyle(
+                                                    preferredCurrencyRowIsPlaceholder
+                                                        ? AppColors.textTertiary
+                                                        : AppColors.textPrimary
+                                                )
+                                            Image(systemName: "chevron.up.chevron.down")
+                                                .font(.appSmall.weight(.semibold))
+                                                .foregroundStyle(AppColors.textSecondary)
+                                        }
+                                    }
+                                    .padding(.horizontal, AppSpacing.sm)
+                                    .padding(.vertical, AppSpacing.xs)
+                                    .background(AppColors.appBackground)
+                                    .clipShape(Capsule())
                                 }
-                                .padding(.horizontal, AppSpacing.lg)
-                                .padding(.vertical, AppSpacing.md)
-                                .contentShape(Rectangle())
+                                .disabled(
+                                    profileDetail == nil
+                                        || !initialLoadComplete
+                                        || isSavingPreferredCurrency
+                                )
+                                .accessibilityLabel("Currency: \(preferredCurrencyMenuLabel)")
                             }
-                            .buttonStyle(.plain)
+                            .padding(.horizontal, AppSpacing.lg)
+                            .padding(.vertical, AppSpacing.md)
 
                             Divider()
                                 .background(AppColors.appDivider)
@@ -231,6 +230,8 @@ struct ProfileView: View {
                     .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
                 }
 
+                ProSubscriptionSection()
+
                 VStack(alignment: .leading, spacing: AppSpacing.md) {
                     Text("ABOUT")
                         .font(.appSmall)
@@ -254,12 +255,12 @@ struct ProfileView: View {
                         Divider()
                             .background(AppColors.appDivider)
 
-                        legalRow(title: "Privacy Policy", urlString: "https://wayfind.city/privacy")
+                        legalRow(selection: .privacyPolicy)
 
                         Divider()
                             .background(AppColors.appDivider)
 
-                        legalRow(title: "Terms of Service", urlString: "https://wayfind.city/terms")
+                        legalRow(selection: .termsOfService)
                     }
                     .background(AppColors.appSurface)
                     .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
@@ -278,13 +279,24 @@ struct ProfileView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if AppConfig.useRealBackend {
-                    NavigationLink {
-                        EditProfileView()
-                    } label: {
-                        Text("Edit")
-                            .fontWeight(.semibold)
+                    Button("Edit") {
+                        showEditProfile = true
                     }
+                    .fontWeight(.semibold)
                 }
+            }
+        }
+        .navigationDestination(isPresented: $showEditProfile) {
+            EditProfileView {
+                Task { await reload() }
+            }
+        }
+        .sheet(item: $legalDocumentToBrowse) { selection in
+            if let url = selection.url {
+                InAppLegalSafariView(url: url) {
+                    legalDocumentToBrowse = nil
+                }
+                .ignoresSafeArea()
             }
         }
         .onAppear {
@@ -297,7 +309,9 @@ struct ProfileView: View {
     private var tripSpotlightSection: some View {
         if initialLoadComplete {
             if let spot = spotlight {
-                NavigationLink(value: spot.trip) {
+                Button {
+                    coordinator.openTrip(spot.trip)
+                } label: {
                     tripSpotlightCard(kind: spot.kind, trip: spot.trip)
                 }
                 .buttonStyle(.plain)
@@ -439,13 +453,12 @@ struct ProfileView: View {
             .padding(.vertical, AppSpacing.md)
     }
 
-    private func legalRow(title: String, urlString: String) -> some View {
+    private func legalRow(selection: LegalDocumentSelection) -> some View {
         Button {
-            guard let url = URL(string: urlString) else { return }
-            openURL(url)
+            legalDocumentToBrowse = selection
         } label: {
             HStack {
-                Text(title)
+                Text(selection.menuTitle)
                     .font(.cardTitle)
                     .foregroundStyle(AppColors.textPrimary)
                 Spacer()
@@ -458,6 +471,7 @@ struct ProfileView: View {
             .padding(.vertical, AppSpacing.md)
         }
         .buttonStyle(.plain)
+        .disabled(selection.url == nil)
     }
 
     private func reload() async {
@@ -473,6 +487,53 @@ struct ProfileView: View {
         profileDetail = d
         trips = t
         aggregateStats = s
+    }
+
+    @MainActor
+    private func savePreferredCurrency(_ rawCode: String?) async {
+        guard let detail = profileDetail else { return }
+        let normalized: String? = rawCode.flatMap { PreferredCurrencyFormatting.normalizeInput($0) }
+        let username = detail.username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !username.isEmpty else {
+            toastManager.show(ToastData(message: "Profile isn’t ready yet. Try again.", type: .error))
+            return
+        }
+
+        let current = (detail.preferredCurrency ?? "").uppercased()
+        let next = (normalized ?? "").uppercased()
+        guard current != next else { return }
+
+        isSavingPreferredCurrency = true
+        defer { isSavingPreferredCurrency = false }
+
+        do {
+            try await dataService.updateUserProfile(
+                displayName: detail.displayName,
+                username: username,
+                bio: detail.bio,
+                preferredAirport: detail.preferredAirport,
+                preferredCurrency: normalized,
+                avatarURL: detail.avatarURLString,
+                venmoUsername: detail.venmoUsername,
+                paypalUsername: detail.paypalUsername
+            )
+            profileDetail = UserProfileDetail(
+                id: detail.id,
+                username: detail.username,
+                displayName: detail.displayName,
+                avatarURLString: detail.avatarURLString,
+                bio: detail.bio,
+                preferredAirport: detail.preferredAirport,
+                preferredCurrency: normalized,
+                createdAt: detail.createdAt,
+                venmoUsername: detail.venmoUsername,
+                paypalUsername: detail.paypalUsername
+            )
+            toastManager.show(ToastData(message: String(localized: "Currency saved"), type: .success))
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            toastManager.show(ToastData(message: message, type: .error))
+        }
     }
 
     private var userCard: some View {
@@ -531,23 +592,8 @@ struct ProfileView: View {
     @ViewBuilder
     private var avatarView: some View {
         if let url = profileDetail?.avatarURL {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .failure:
-                    avatarPlaceholder
-                case .empty:
-                    ZStack {
-                        avatarPlaceholder
-                        ProgressView()
-                            .scaleEffect(0.85)
-                    }
-                @unknown default:
-                    avatarPlaceholder
-                }
+            CachedAvatarImage(url: url, showsProgressWhileLoading: true) {
+                avatarPlaceholder
             }
             .clipShape(Circle())
         } else {
@@ -565,11 +611,40 @@ struct ProfileView: View {
     }
 }
 
+private enum LegalDocumentSelection: String, Identifiable {
+    case privacyPolicy
+    case termsOfService
+
+    var id: String { rawValue }
+
+    var menuTitle: String {
+        switch self {
+        case .privacyPolicy: "Privacy Policy"
+        case .termsOfService: "Terms of Service"
+        }
+    }
+
+    var url: URL? {
+        switch self {
+        case .privacyPolicy:
+            URL(string: "https://wayfind.city/privacy")
+        case .termsOfService:
+            URL(string: "https://wayfind.city/terms")
+        }
+    }
+}
+
 #Preview {
     NavigationStack {
         ProfileView()
             .environment(AuthViewModel())
             .environment(DataService())
             .environment(UserPreferencesStore())
+            .environment(TabNavigationCoordinator())
+            .environment(ToastManager())
     }
 }
+
+
+// =============================================================================
+

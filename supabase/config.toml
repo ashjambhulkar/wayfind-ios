@@ -1,0 +1,90 @@
+# https://supabase.com/docs/guides/functions/function-configuration
+# CLI deploy defaults verify_jwt to true; this function already enforces auth via getUser().
+[functions.places-cache]
+verify_jwt = false
+
+# SendGrid inbound uses HTTP Basic (INBOUND_EMAIL_*), not a Supabase JWT — must disable JWT gate.
+[functions.receive-forwarded-email]
+verify_jwt = false
+
+# JWT is validated inside the function via `auth.getUser()`; disabling the gateway gate avoids 401s from
+# relay/JWT verification quirks while the session token is still valid for Auth API (same pattern as places-cache).
+[functions.extract-booking]
+verify_jwt = false
+
+# Anon client + `getUser()` with `Authorization: Bearer <user_jwt>` (see index.ts). Gateway JWT verify off avoids
+# 401s when the platform relay rejects tokens the Auth API still accepts.
+[functions.itinerary-ai]
+verify_jwt = false
+
+# Validates caller JWT inside the function (same pattern as delete-user / extract-booking).
+[functions.send-invite-email]
+verify_jwt = false
+
+[functions.validate-subscription]
+verify_jwt = false
+
+# Database Webhook calls with X-Wayfind-Collab-Secret (see migration Stage 12).
+[functions.collaboration-notify]
+verify_jwt = false
+
+# pg_cron + pg_net: only x-worker-secret (Vault); see migration city_place_enricher_cron.sql.
+[functions.city-place-enricher]
+verify_jwt = false
+
+[functions.serp-consumer]
+enabled = true
+verify_jwt = true
+import_map = "./functions/serp-consumer/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/serp-consumer/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/serp-consumer/*.html" ]
+
+[functions.ai-consumer]
+enabled = true
+verify_jwt = true
+import_map = "./functions/ai-consumer/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/ai-consumer/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/ai-consumer/*.html" ]
+
+# After user adds a place-backed `trip_activities` row: upsert `city_places` using `matchCityProfile` (same as itinerary-ai).
+[functions.sync-city-place-from-trip]
+verify_jwt = false
+
+# Apple→Google place_id resolver (Phase C of places-cost plan). Validates JWT inside the function via auth.getUser()
+# so it can use the user id for per-user Upstash sliding-window rate limiting.
+[functions.lookup-place-id]
+verify_jwt = false
+
+# Phase F.3 — User-photo moderation pipeline. JWT validated inside the function so the uploader is bound to the
+# request; required for CSAM workflow per docs/csam-ncmec-runbook.md.
+[functions.moderate-place-photo]
+verify_jwt = false
+
+# Phase I.2 — Open-data ingestion (Overpass / Wikidata / Wikivoyage / Commons). Service-role only;
+# guarded by `x-worker-secret` (Vault), same pattern as city-place-enricher.
+[functions.ingest-open-data-for-city]
+verify_jwt = false
+
+# Phase J.2 — Apple-sourced travel leg uploader. JWT validated inside the function so the per-user
+# Upstash sliding-window rate limiter (600/hr) can key off the user id. Same pattern as lookup-place-id.
+[functions.upload-travel-leg]
+verify_jwt = false
+
+# Phase G.1 — Nightly aggregation of `places_usage_events` into `places_usage_daily`. The function
+# itself enforces the bearer check (it rejects anything that isn't the service-role key the cron job
+# mints), so we keep the gateway off; pg_cron talks to it from inside the Supabase network.
+[functions.places-usage-rollup]
+verify_jwt = false
+
+# City cover image pool worker. Called by cron/manual worker with x-worker-secret;
+# uses service-role + UNSPLASH_ACCESS_KEY internally and never trusts client input.
+[functions.city-cover-images]
+verify_jwt = false

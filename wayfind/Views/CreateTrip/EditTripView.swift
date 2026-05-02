@@ -49,119 +49,86 @@ struct EditTripView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                Text("Edit Trip")
-                    .font(.sectionHeader)
-                    .foregroundStyle(AppColors.textPrimary)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppSpacing.xl) {
+                    coverPhotoSection
 
-                coverPhotoSection
-
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text("Title")
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
-                    TextField("Trip title", text: $title)
-                        .font(.appBody)
-                        .padding(.horizontal, AppSpacing.md)
-                        .frame(height: 48)
-                        .background(AppColors.appSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                                .strokeBorder(AppColors.appDivider, lineWidth: 1)
+                    EditTripMapSectionCard(title: "Trip") {
+                        EditTripMapTextRow(
+                            icon: "textformat",
+                            title: "Title",
+                            placeholder: "Trip title",
+                            text: $title
                         )
-                }
 
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text("Destination")
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
-                    TextField("Destination", text: $destination)
-                        .font(.appBody)
-                        .textInputAutocapitalization(.words)
-                        .padding(.horizontal, AppSpacing.md)
-                        .frame(height: 48)
-                        .background(AppColors.appSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                                .strokeBorder(AppColors.appDivider, lineWidth: 1)
+                        EditTripMapDivider()
+
+                        EditTripMapTextRow(
+                            icon: "mappin.circle.fill",
+                            title: "Destination",
+                            placeholder: "Destination",
+                            capitalization: .words,
+                            text: $destination
                         )
-                }
+                    }
 
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text("When")
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
-                    HStack(spacing: AppSpacing.lg) {
-                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                            Text("Start")
-                                .font(.appSmall)
-                                .foregroundStyle(AppColors.textSecondary)
-                            DatePicker("", selection: $startDate, displayedComponents: .date)
-                                .labelsHidden()
-                                .tint(AppColors.appPrimary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    EditTripMapSectionCard(title: "Dates") {
+                        EditTripMapDateRow(
+                            icon: "calendar.badge.plus",
+                            title: "Starts",
+                            selection: $startDate
+                        )
 
-                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                            Text("End")
-                                .font(.appSmall)
-                                .foregroundStyle(AppColors.textSecondary)
-                            DatePicker("", selection: $endDate, displayedComponents: .date)
-                                .labelsHidden()
-                                .tint(AppColors.appPrimary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        EditTripMapDivider()
+
+                        EditTripMapDateRow(
+                            icon: "calendar.badge.minus",
+                            title: "Ends",
+                            selection: $endDate
+                        )
+                    }
+
+                    notesSection
+
+                    if let saveError {
+                        Text(saveError)
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.appError)
                     }
                 }
-
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text("Notes")
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
-                    TextField("Add notes...", text: $notes, axis: .vertical)
-                        .font(.appBody)
-                        .foregroundStyle(AppColors.textPrimary)
-                        .lineLimit(3...8)
-                        .padding(AppSpacing.md)
-                        .background(AppColors.appSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                                .strokeBorder(AppColors.appDivider, lineWidth: 1)
-                        )
+                .padding(AppSpacing.lg)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(AppColors.appBackground)
+            .navigationTitle("Edit Trip")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
                 }
 
-                if let saveError {
-                    Text(saveError)
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.appError)
-                }
-
-                AppButton(title: "Save Changes", style: .primary, isDisabled: !canSave, isLoading: isSaving) {
-                    Task { await saveAsync() }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        Task { await saveAsync() }
+                    }
+                    .disabled(!canSave || isSaving)
                 }
             }
-            .padding(AppSpacing.xl)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(AppColors.appBackground)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-        .task(id: photoPickerItem) {
-            await loadPickedPhoto()
-        }
-        .onChange(of: startDate) { _, newValue in
-            if newValue > endDate {
-                endDate = newValue
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .task(id: photoPickerItem) {
+                await loadPickedPhoto()
             }
-        }
-        .onChange(of: endDate) { _, newValue in
-            if newValue < startDate {
-                startDate = newValue
+            .onChange(of: startDate) { _, newValue in
+                if newValue > endDate {
+                    endDate = newValue
+                }
+            }
+            .onChange(of: endDate) { _, newValue in
+                if newValue < startDate {
+                    startDate = newValue
+                }
             }
         }
     }
@@ -169,9 +136,7 @@ struct EditTripView: View {
     @ViewBuilder
     private var coverPhotoSection: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Cover photo")
-                .font(.appCaption)
-                .foregroundStyle(AppColors.textSecondary)
+            FormSectionTitle("Cover Photo")
 
             Group {
                 if let pickedCoverJPEG, let uiImage = UIImage(data: pickedCoverJPEG) {
@@ -181,7 +146,7 @@ struct EditTripView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: EditTripCoverPhoto.previewHeight)
                         .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
                 } else if let urlString = trip.coverImageUrl, let url = URL(string: urlString) {
                     AsyncImage(url: url) { phase in
                         switch phase {
@@ -202,49 +167,142 @@ struct EditTripView: View {
                             EmptyView()
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
                 } else {
-                    RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
+                    RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
                         .fill(AppColors.appSurface)
                         .frame(height: EditTripCoverPhoto.previewHeight)
                         .overlay {
-                            Image(systemName: "photo")
-                                .font(.title2)
-                                .foregroundStyle(AppColors.textTertiary)
+                            VStack(spacing: AppSpacing.sm) {
+                                MapStyleIcon(
+                                    systemName: "photo",
+                                    size: .large,
+                                    accent: AppColors.appPrimary,
+                                    backgroundStyle: .soft,
+                                    accessibilityLabel: "Cover photo"
+                                )
+                                Text("Add a cover photo")
+                                    .font(.appBody)
+                                    .foregroundStyle(AppColors.textSecondary)
+                            }
                         }
                 }
             }
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            }
 
             if AppConfig.useRealBackend {
-                HStack(spacing: AppSpacing.md) {
+                EditTripMapSectionCard(title: nil) {
                     PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                        Label("Choose photo", systemImage: "photo.on.rectangle.angled")
-                            .font(.appBody)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                            .background(AppColors.appSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
-                                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+                        HStack(spacing: AppSpacing.md) {
+                            MapStyleIcon(
+                                systemName: "photo.on.rectangle.angled",
+                                size: .small,
+                                accent: AppColors.appPrimary,
+                                accessibilityLabel: "Choose photo"
                             )
+
+                            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                                Text("Choose Photo")
+                                    .font(.appBody)
+                                    .foregroundStyle(AppColors.textPrimary)
+                                Text("Use a picture that helps everyone recognize the trip")
+                                    .font(.appSmall)
+                                    .foregroundStyle(AppColors.textSecondary)
+                                    .lineLimit(1)
+                            }
+
+                            Spacer(minLength: AppSpacing.md)
+
+                            Image(systemName: "chevron.right")
+                                .font(.appSmall.weight(.semibold))
+                                .foregroundStyle(AppColors.textTertiary)
+                        }
+                        .padding(.horizontal, AppSpacing.md)
+                        .frame(minHeight: EditTripMapFormMetrics.rowMinHeight)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
                     if pickedCoverJPEG != nil {
-                        Button("Clear") {
+                        EditTripMapDivider()
+
+                        Button(role: .destructive) {
                             photoPickerItem = nil
                             pickedCoverJPEG = nil
+                        } label: {
+                            HStack(spacing: AppSpacing.md) {
+                                MapStyleIcon(
+                                    systemName: "xmark.circle.fill",
+                                    size: .small,
+                                    accent: AppColors.appError,
+                                    accessibilityLabel: "Clear selected photo"
+                                )
+
+                                Text("Clear Selected Photo")
+                                    .font(.appBody)
+                                    .foregroundStyle(AppColors.appError)
+
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, AppSpacing.md)
+                            .frame(minHeight: EditTripMapFormMetrics.rowMinHeight)
+                            .contentShape(Rectangle())
                         }
-                        .font(.appBody)
-                        .foregroundStyle(AppColors.appPrimary)
+                        .buttonStyle(.plain)
                     }
                 }
             } else {
-                Text("Cover upload is available when using the live backend.")
-                    .font(.appCaption)
-                    .foregroundStyle(AppColors.textSecondary)
+                EditTripMapSectionCard(title: nil) {
+                    HStack(spacing: AppSpacing.md) {
+                        MapStyleIcon(
+                            systemName: "icloud.slash.fill",
+                            size: .small,
+                            accent: AppColors.textTertiary,
+                            accessibilityLabel: "Cover upload unavailable"
+                        )
+                        Text("Cover upload is available when using the live backend.")
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
+                    .padding(.horizontal, AppSpacing.md)
+                    .frame(minHeight: EditTripMapFormMetrics.rowMinHeight)
+                }
             }
+        }
+    }
+
+    private var notesSection: some View {
+        EditTripMapSectionCard(title: "Notes") {
+            HStack(alignment: .top, spacing: AppSpacing.md) {
+                MapStyleIcon(
+                    systemName: "note.text",
+                    size: .small,
+                    accent: AppColors.appPrimary,
+                    accessibilityLabel: "Notes"
+                )
+                .padding(.top, AppSpacing.sm)
+
+                ZStack(alignment: .topLeading) {
+                    if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Add planning notes, reminders, or group context")
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textTertiary)
+                            .padding(.top, AppSpacing.sm)
+                            .allowsHitTesting(false)
+                    }
+
+                    TextField("", text: $notes, axis: .vertical)
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textPrimary)
+                        .lineLimit(3...8)
+                }
+            }
+            .padding(.horizontal, AppSpacing.md)
+            .padding(.vertical, AppSpacing.sm)
+            .frame(minHeight: EditTripMapFormMetrics.notesMinHeight, alignment: .top)
         }
     }
 
@@ -315,3 +373,111 @@ struct EditTripView: View {
         dismiss()
     }
 }
+
+private struct EditTripMapSectionCard<Content: View>: View {
+    let title: String?
+    let content: Content
+
+    init(title: String?, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            if let title {
+                FormSectionTitle(title)
+            }
+
+            VStack(spacing: 0) {
+                content
+            }
+            .background(AppColors.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            }
+        }
+    }
+}
+
+private struct EditTripMapTextRow: View {
+    let icon: String
+    let title: String
+    let placeholder: String
+    var capitalization: TextInputAutocapitalization = .sentences
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: AppSpacing.md) {
+            MapStyleIcon(
+                systemName: icon,
+                size: .small,
+                accent: AppColors.appPrimary,
+                accessibilityLabel: title
+            )
+
+            Text(title)
+                .font(.appBody)
+                .foregroundStyle(AppColors.textPrimary)
+
+            Spacer(minLength: AppSpacing.md)
+
+            TextField(placeholder, text: $text)
+                .font(.appBody)
+                .foregroundStyle(AppColors.textPrimary)
+                .multilineTextAlignment(.trailing)
+                .textInputAutocapitalization(capitalization)
+                .autocorrectionDisabled()
+                .frame(minWidth: EditTripMapFormMetrics.trailingFieldMinWidth)
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .frame(minHeight: EditTripMapFormMetrics.rowMinHeight)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct EditTripMapDateRow: View {
+    let icon: String
+    let title: String
+    @Binding var selection: Date
+
+    var body: some View {
+        HStack(spacing: AppSpacing.md) {
+            MapStyleIcon(
+                systemName: icon,
+                size: .small,
+                accent: AppColors.appPrimary,
+                accessibilityLabel: title
+            )
+
+            DatePicker(title, selection: $selection, displayedComponents: .date)
+                .font(.appBody)
+                .datePickerStyle(.compact)
+                .tint(AppColors.appPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .frame(minHeight: EditTripMapFormMetrics.rowMinHeight)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct EditTripMapDivider: View {
+    var body: some View {
+        Divider()
+            .background(AppColors.appDivider)
+            .padding(.leading, AppSpacing.xxxl + AppSpacing.md)
+    }
+}
+
+private enum EditTripMapFormMetrics {
+    static let rowMinHeight: CGFloat = 56
+    static let notesMinHeight: CGFloat = 104
+    static let trailingFieldMinWidth: CGFloat = 140
+}
+
+
+// =============================================================================
+

@@ -1,10 +1,33 @@
-# Xcode
+# macOS
+.DS_Store
+**/.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Xcode — build & indexes
 build/
+Build/
 DerivedData/
+# Project-local custom derived data (e.g. `-derivedDataPath`)
+.derived-data-wayfind/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.bcsymbolmap
+*.xcresult
+*.moved-aside
+*.xcscmblueprint
+*.xcfilelist
+
+# Xcode — user / machine-specific
+xcuserdata/
 *.xcuserstate
 *.xccheckout
-*.xcscmblueprint
-*.moved-aside
+*.xcuserdatad
 *.pbxuser
 !default.pbxuser
 *.mode1v3
@@ -13,20 +36,17 @@ DerivedData/
 !default.mode2v3
 *.perspectivev3
 !default.perspectivev3
-xcuserdata/
-*.hmap
-*.ipa
-*.dSYM.zip
-*.dSYM
 
 # Swift Package Manager
+# Package.resolved is tracked for reproducible dependency resolution.
 .build/
 .swiftpm/config/registries.json
+.swiftpm/configuration/registries.json
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 
-# CocoaPods (uncomment if used)
-# Pods/
+# CocoaPods
+Pods/
 
 # Carthage
 Carthage/Build/
@@ -36,15 +56,52 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+fastlane/.env
+match_version.txt
+*.jks
+*.p12
+*.cer
+*.mobileprovision
 
 # Code Injection
 iOSInjectionProject/
 
-# macOS
-.DS_Store
-**/.DS_Store
+# Accio
+Dependencies/
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# IDEs
+.idea/
+.vscode/
+.cursor/
+*.swp
+*~
+
+# Local tooling (e.g. concatenated "all files" scratch buffer)
+/AllFiles.swift
+
+# App packaging / archives
+*.crash
+
+# Test / coverage
+*.gcda
+*.gcno
+*.gcov
+coverage.xccovreport
+coverage.xccovjson
+
+# Instruments
+*.trace
+
+# Ruby / bundler (if used for fastlane, CocoaPods)
+vendor/bundle
 
 # Environment / secrets (adjust names to match your repo)
 .env
 .env.*
 !.env.example
+
+.sentryclirc

@@ -68,3 +68,14 @@ struct ActiveTripHeroView: View {
         }
     }
 }
+
+// =============================================================================
+
+
+#if DEBUG
+#Preview("Active trip hero") {
+    ActiveTripHeroView(trip: .previewActive, action: {})
+        .padding()
+        .background(AppColors.appBackground)
+}
+#endif

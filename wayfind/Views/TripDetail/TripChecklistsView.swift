@@ -4,12 +4,19 @@ struct TripChecklistsView: View {
     let trip: Trip
 
     @Environment(DataService.self) private var dataService
+    @Environment(CollaborationStore.self) private var collaborationStore
     @State private var rows: [TripChecklistWithItems] = []
     @State private var selectedTab: TripChecklistTemplateKey = .packing
     @State private var isLoading = true
+    @State private var showAddItemAlert = false
+    @State private var newItemTitle = ""
 
     private var activeList: TripChecklistWithItems? {
         rows.first { $0.templateKey == selectedTab.rawValue }
+    }
+
+    private var canAddChecklistItem: Bool {
+        collaborationStore.canEdit && !isLoading && !rows.isEmpty && activeList != nil
     }
 
     var body: some View {
@@ -41,7 +48,9 @@ struct TripChecklistsView: View {
                         EmptyStateView(
                             sfSymbol: "checklist",
                             title: "Nothing here yet",
-                            subtitle: "Add checklist items from Wayfind on the web; they sync here.",
+                            subtitle: collaborationStore.canEdit
+                                ? "Tap + to add an item, or manage lists on the web."
+                                : "When editors add items, they'll show up here.",
                             buttonTitle: nil,
                             buttonAction: nil
                         )
@@ -49,14 +58,34 @@ struct TripChecklistsView: View {
                     } else {
                         List {
                             ForEach(list.items) { item in
-                                Toggle(isOn: binding(for: item)) {
-                                    Text(item.title)
-                                        .font(.appBody)
-                                        .foregroundStyle(AppColors.textPrimary)
-                                        .strikethrough(item.isDone)
+                                ChecklistItemRow(
+                                    title: item.title,
+                                    isDone: isDone(item),
+                                    canDelete: collaborationStore.canEdit
+                                ) {
+                                    Task {
+                                        await setDone(itemId: item.id, isDone: !isDone(item))
+                                    }
                                 }
-                                .tint(AppColors.appPrimary)
                                 .listRowBackground(AppColors.appSurface)
+                                .listRowInsets(EdgeInsets(
+                                    top: 0,
+                                    leading: AppSpacing.lg,
+                                    bottom: 0,
+                                    trailing: AppSpacing.lg
+                                ))
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    if collaborationStore.canEdit {
+                                        Button(role: .destructive) {
+                                            Task { await deleteChecklistItem(item.id) }
+                                        } label: {
+                                            Label(String(localized: "Delete"), systemImage: "trash")
+                                                .foregroundStyle(AppColors.iconOnColoredSurface)
+                                        }
+                                        .tint(AppColors.swipeDestructiveTint)
+                                        .accessibilityLabel(String(localized: "Delete"))
+                                    }
+                                }
                             }
                         }
                         .listStyle(.plain)
@@ -74,22 +103,37 @@ struct TripChecklistsView: View {
         .background(AppColors.appBackground)
         .navigationTitle("Checklists")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if canAddChecklistItem {
+                    Button {
+                        HapticManager.light()
+                        newItemTitle = ""
+                        showAddItemAlert = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .accessibilityLabel(String(localized: "Add new item"))
+                }
+            }
+        }
+        .alert(String(localized: "Add new item"), isPresented: $showAddItemAlert) {
+            TextField(String(localized: "Title"), text: $newItemTitle)
+            Button(String(localized: "Add")) {
+                Task { await addChecklistItemFromAlert() }
+            }
+            .disabled(newItemTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button(String(localized: "Cancel"), role: .cancel) {}
+        }
         .task {
             await load()
         }
     }
 
-    private func binding(for item: TripChecklistItem) -> Binding<Bool> {
-        Binding(
-            get: {
-                rows.flatMap(\.items).first(where: { $0.id == item.id })?.isDone ?? item.isDone
-            },
-            set: { newValue in
-                Task {
-                    await setDone(itemId: item.id, isDone: newValue)
-                }
-            }
-        )
+    private func isDone(_ item: TripChecklistItem) -> Bool {
+        rows.flatMap(\.items).first(where: { $0.id == item.id })?.isDone ?? item.isDone
     }
 
     @MainActor
@@ -113,4 +157,83 @@ struct TripChecklistsView: View {
             selectedTab = key
         }
     }
+
+    @MainActor
+    private func deleteChecklistItem(_ itemId: UUID) async {
+        guard collaborationStore.canEdit else { return }
+        await dataService.deleteChecklistItem(itemId: itemId)
+        for ri in rows.indices {
+            rows[ri].items.removeAll { $0.id == itemId }
+        }
+        HapticManager.light()
+    }
+
+    @MainActor
+    private func addChecklistItemFromAlert() async {
+        let trimmed = newItemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let list = activeList, !trimmed.isEmpty else { return }
+        let nextOrder = (list.items.map(\.sortOrder).max() ?? -1) + 1
+        guard let created = await dataService.addChecklistItem(
+            checklistId: list.id,
+            tripId: trip.id,
+            title: trimmed,
+            sortOrder: nextOrder
+        ) else { return }
+        if let ri = rows.firstIndex(where: { $0.id == list.id }) {
+            rows[ri].items.append(created)
+        }
+        newItemTitle = ""
+        showAddItemAlert = false
+    }
 }
+
+private struct ChecklistItemRow: View {
+    let title: String
+    let isDone: Bool
+    /// When true, VoiceOver hints that a trailing swipe exposes delete (matches `swipeActions` on the row).
+    var canDelete: Bool = false
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: AppSpacing.md) {
+                Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 23, weight: .semibold))
+                    .foregroundStyle(isDone ? AppColors.appPrimary : AppColors.textTertiary)
+                    .symbolRenderingMode(.hierarchical)
+                    .accessibilityHidden(true)
+
+                Text(title)
+                    .font(.appBody)
+                    .foregroundStyle(isDone ? AppColors.textTertiary : AppColors.textPrimary)
+                    .strikethrough(isDone, color: AppColors.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(minHeight: 56)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(ChecklistRowButtonStyle())
+        .accessibilityLabel(title)
+        .accessibilityValue(isDone ? "Completed" : "Not completed")
+        .accessibilityHint(accessibilityHintText)
+    }
+
+    private var accessibilityHintText: String {
+        let toggle = "Double-tap to mark \(isDone ? "incomplete" : "complete")."
+        guard canDelete else { return toggle }
+        return "\(toggle) Swipe left to delete."
+    }
+}
+
+private struct ChecklistRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(AppSpring.snappy, value: configuration.isPressed)
+    }
+}
+
+
+// =============================================================================
+

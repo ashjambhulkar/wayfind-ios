@@ -7,29 +7,199 @@ struct TransportFormView: View {
     @Binding var arrivalStation: String
     @Binding var departureDate: Date
     @Binding var arrivalDate: Date
-    @Binding var seat: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            FormSectionTitle("TRANSPORT DETAILS")
-            FormField(label: "Operator", placeholder: "e.g. Eurostar", text: $operatorName)
-            FormField(label: "Service Number", placeholder: "e.g. 9014", text: $serviceNumber)
+            TransportMapSectionCard(title: "Transport") {
+                TransportMapTextRow(
+                    icon: "tram.fill",
+                    title: "Operator",
+                    placeholder: "Eurostar",
+                    text: $operatorName
+                )
 
-            HStack(alignment: .top, spacing: AppSpacing.md) {
-                FormField(label: "From", placeholder: "Station", text: $departureStation)
-                FormField(label: "To", placeholder: "Station", text: $arrivalStation)
+                TransportMapDivider()
+
+                TransportMapTextRow(
+                    icon: "number",
+                    title: "Service Number",
+                    placeholder: "9014",
+                    capitalization: .characters,
+                    text: $serviceNumber
+                )
             }
 
-            FormDateRow(label: "Departure", selection: $departureDate)
-            FormDateRow(label: "Arrival", selection: $arrivalDate)
+            TransportMapSectionCard(title: "Route") {
+                TransportMapTextRow(
+                    icon: "location.fill",
+                    title: "Departure Station",
+                    placeholder: "Station",
+                    text: $departureStation
+                )
 
-            DisclosureGroup {
-                FormField(label: "Seat", placeholder: "e.g. Car 4, Seat 12", text: $seat)
-                    .padding(.top, AppSpacing.md)
-            } label: {
-                FormSectionTitle("OPTIONAL")
+                TransportMapDivider()
+
+                TransportMapTextRow(
+                    icon: "mappin.circle.fill",
+                    title: "Arrival Station",
+                    placeholder: "Station",
+                    text: $arrivalStation
+                )
             }
-            .tint(AppColors.appPrimary)
+
+            TransportMapSectionCard(title: "Schedule") {
+                TransportMapDateRow(
+                    icon: "tram.fill",
+                    title: "Departs",
+                    selection: $departureDate
+                )
+
+                TransportMapDivider()
+
+                TransportMapDateRow(
+                    icon: "checkmark.circle.fill",
+                    title: "Arrives",
+                    selection: $arrivalDate
+                )
+            }
         }
     }
 }
+
+// =============================================================================
+
+struct TransportOptionalDetailsSection: View {
+    @Binding var seat: String
+
+    var body: some View {
+        DisclosureGroup {
+            TransportMapSectionCard(title: nil) {
+                TransportMapTextRow(
+                    icon: "rectangle.inset.filled.and.person.filled",
+                    title: "Seat",
+                    placeholder: "Car 4, Seat 12",
+                    text: $seat
+                )
+            }
+            .padding(.top, AppSpacing.md)
+        } label: {
+            HStack(spacing: AppSpacing.sm) {
+                MapStyleIcon(
+                    systemName: "ellipsis.circle.fill",
+                    size: .small,
+                    accent: BookingCategory.transport.color,
+                    accessibilityLabel: "Optional transport details"
+                )
+
+                Text("Optional Details")
+                    .font(.appBody.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+            }
+        }
+        .tint(AppColors.appPrimary)
+    }
+}
+
+private struct TransportMapSectionCard<Content: View>: View {
+    let title: String?
+    let content: Content
+
+    init(title: String?, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            if let title {
+                FormSectionTitle(title)
+            }
+
+            VStack(spacing: 0) {
+                content
+            }
+            .background(AppColors.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            }
+        }
+    }
+}
+
+private struct TransportMapTextRow: View {
+    let icon: String
+    let title: String
+    let placeholder: String
+    var capitalization: TextInputAutocapitalization = .words
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: AppSpacing.md) {
+            MapStyleIcon(
+                systemName: icon,
+                size: .small,
+                accent: BookingCategory.transport.color,
+                accessibilityLabel: title
+            )
+
+            Text(title)
+                .font(.appBody)
+                .foregroundStyle(AppColors.textPrimary)
+
+            Spacer(minLength: AppSpacing.md)
+
+            TextField(placeholder, text: $text)
+                .font(.appBody)
+                .foregroundStyle(AppColors.textPrimary)
+                .multilineTextAlignment(.trailing)
+                .textInputAutocapitalization(capitalization)
+                .autocorrectionDisabled()
+                .frame(minWidth: TransportMapFormMetrics.trailingFieldMinWidth)
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .frame(minHeight: TransportMapFormMetrics.rowMinHeight)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct TransportMapDateRow: View {
+    let icon: String
+    let title: String
+    @Binding var selection: Date
+
+    var body: some View {
+        HStack(spacing: AppSpacing.md) {
+            MapStyleIcon(
+                systemName: icon,
+                size: .small,
+                accent: BookingCategory.transport.color,
+                accessibilityLabel: title
+            )
+
+            DatePicker(title, selection: $selection, displayedComponents: [.date, .hourAndMinute])
+                .font(.appBody)
+                .datePickerStyle(.compact)
+                .tint(AppColors.appPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .frame(minHeight: TransportMapFormMetrics.rowMinHeight)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct TransportMapDivider: View {
+    var body: some View {
+        Divider()
+            .background(AppColors.appDivider)
+            .padding(.leading, AppSpacing.xxxl + AppSpacing.md)
+    }
+}
+
+private enum TransportMapFormMetrics {
+    static let rowMinHeight: CGFloat = 56
+    static let trailingFieldMinWidth: CGFloat = 128
+}
+

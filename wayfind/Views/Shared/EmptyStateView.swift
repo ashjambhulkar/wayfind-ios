@@ -23,12 +23,78 @@ struct EmptyStateView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 260)
             if let buttonTitle, let buttonAction {
-                AppButton(title: buttonTitle, style: .outline, action: buttonAction)
-                    .fixedSize(horizontal: true, vertical: false)
+                emptyStateAction(title: buttonTitle, action: buttonAction)
                     .padding(.top, AppSpacing.sm)
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    private func emptyStateAction(title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: AppSpacing.xs) {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .bold))
+                    .accessibilityHidden(true)
+
+                Text(sanitizedActionTitle(title))
+                    .font(.appButton)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, AppSpacing.lg)
+            .frame(minHeight: 46)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(AppColors.appPrimary)
+            )
+            .shadow(color: AppColors.appPrimary.opacity(0.24), radius: 14, x: 0, y: 8)
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(WayfindEmptyStateButtonStyle())
+        .accessibilityLabel(sanitizedActionTitle(title))
+    }
+
+    private func sanitizedActionTitle(_ title: String) -> String {
+        var cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("+") {
+            cleaned.removeFirst()
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return cleaned
+    }
 }
+
+private struct WayfindEmptyStateButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
+            .animation(AppSpring.snappy, value: configuration.isPressed)
+    }
+}
+
+// =============================================================================
+
+
+#if DEBUG
+#Preview("With button") {
+    EmptyStateView(
+        sfSymbol: "map",
+        title: "No places yet",
+        subtitle: "Add your first activity to get started.",
+        buttonTitle: "Add Place",
+        buttonAction: {}
+    )
+    .background(AppColors.appBackground)
+}
+
+#Preview("Without button") {
+    EmptyStateView(
+        sfSymbol: "ticket",
+        title: "No bookings",
+        subtitle: "Your confirmed bookings will appear here."
+    )
+    .background(AppColors.appBackground)
+}
+#endif

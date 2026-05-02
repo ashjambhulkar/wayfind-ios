@@ -26,8 +26,53 @@ struct Place: Identifiable, Codable, Hashable {
     var bookingDetails: BookingDetailUnion?
     var googlePlaceId: String?
 
+    // MARK: – booking monetary fields (drive expense auto-sync)
+    /// Booking total. Used only when `isBooking == true`; round-trips through
+    /// `trip_bookings.amount`. `Decimal` to avoid Double drift on currency.
+    var bookingAmount: Decimal?
+    /// ISO 4217 code that pairs with `bookingAmount`. Falls back to "USD"
+    /// when amount is set but currency is missing.
+    var bookingCurrencyCode: String?
+
+    // MARK: – city_places enrichment (joined via place_id / googlePlaceId)
+    var heroImageUrl: String?          // trip_activities.hero_image_url, else city_places.images[0], else thumbnail_url
+    var rating: Double?                // city_places.rating
+    var userRatingsTotal: Int?         // city_places.user_ratings_total
+    var priceLevel: Int?               // city_places.price_level (1–4)
+    var website: String?               // city_places.website
+    var phoneNumber: String?           // city_places.formatted_phone_number
+    var isOpenNow: Bool?               // derived from city_places.opening_hours
+    var openingHoursText: String?      // e.g. "Open · Closes 10 PM"
+    var aiSummary: String?             // city_places.ai_editorial_summary
+    var aiShortSummary: String?        // city_places.ai_short_summary
+    var whyGo: [String]?               // city_places.ai_why_go
+    var knowBeforeYouGo: [String]?     // city_places.ai_know_before_you_go
+    var reviewsTags: [String]?         // city_places.reviews_tags
+    var durationMinutes: Int?          // city_places.time_spent_min (suggested visit length)
+    var subtypes: [String]?            // city_places.subtypes — e.g. ["Shopping mall", "Tourist attraction"]
+
+    // MARK: – stored travel hop (trip_activities.travel_from_previous_minutes/mode)
+    /// Real, stored travel time **from the previous stop** to this one. When
+    /// present we prefer it over our haversine estimate in `TimelineGapView`.
+    var travelFromPreviousMinutes: Int?
+    /// Stored travel mode for the same hop (e.g. "driving", "walking",
+    /// "transit"). Falls back to the estimator's heuristic when nil.
+    var travelMode: String?
+    /// `city_places.thumbnail_url` when enriched (timeline leading image before category icon).
+    var thumbnailUrl: String? = nil
+
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: lat ?? 0, longitude: lng ?? 0)
+    }
+
+    /// Valid, non-null island coordinate suitable for routing and map pins.
+    var hasUsableCoordinate: Bool {
+        guard let lat, let lng else { return false }
+        let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        return CLLocationCoordinate2DIsValid(coordinate)
+            && abs(lat) <= 90
+            && abs(lng) <= 180
+            && !(lat == 0 && lng == 0)
     }
 
     var categoryEnum: PlaceCategory {
@@ -53,6 +98,25 @@ struct Place: Identifiable, Codable, Hashable {
         }
     }
 
+    /// Human-friendly label for the most specific Google subtype, e.g.
+    /// `"shopping_mall"` → `"Shopping mall"`. Returns `nil` when no subtypes
+    /// are present so callers can fall back to the broader category label.
+    /// We intentionally drop the catch-all buckets (`point_of_interest`,
+    /// `establishment`, `tourist_attraction`) — they read as filler in the UI.
+    var placeKindLabel: String? {
+        guard let subtypes else { return nil }
+        let blacklist: Set<String> = [
+            "point_of_interest", "establishment", "tourist_attraction", "place_of_interest",
+        ]
+        let pick = subtypes.first { !blacklist.contains($0.lowercased()) } ?? subtypes.first
+        guard let raw = pick, !raw.isEmpty else { return nil }
+        let words = raw.replacingOccurrences(of: "_", with: " ").split(separator: " ")
+        guard let first = words.first else { return nil }
+        let head = first.prefix(1).uppercased() + first.dropFirst().lowercased()
+        let tail = words.dropFirst().map { $0.lowercased() }
+        return ([head] + tail).joined(separator: " ")
+    }
+
     var bookingCategoryEnum: BookingCategory? {
         guard let raw = bookingType?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
             return nil
@@ -75,3 +139,7 @@ struct Place: Identifiable, Codable, Hashable {
         }
     }
 }
+
+
+// =============================================================================
+

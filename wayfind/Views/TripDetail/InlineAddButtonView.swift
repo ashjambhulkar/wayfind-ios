@@ -11,9 +11,9 @@ struct InlineAddButtonView: View {
     var body: some View {
         Button(action: onTap) {
             VStack(spacing: AppSpacing.xs) {
-                Text("+ Add to Day \(dayNumber)")
-                    .font(.appCaption)
-                    .foregroundStyle(AppColors.textTertiary)
+                Label("Add Activity to Day \(dayNumber)", systemImage: "plus.circle.fill")
+                    .font(.appBody.weight(.semibold))
+                    .foregroundStyle(AppColors.appPrimary)
 
                 if showForwardingHint {
                     Button {
@@ -44,5 +44,27 @@ struct InlineAddButtonView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Add Activity to Day \(dayNumber)")
+        .accessibilityHint("Opens place search and manual activity options for this day.")
     }
 }
+
+
+// =============================================================================
+
+
+#if DEBUG
+#Preview("Inline add button") {
+    VStack(spacing: 16) {
+        InlineAddButtonView(dayNumber: 1, onTap: {})
+        InlineAddButtonView(
+            dayNumber: 1,
+            showForwardingHint: true,
+            forwardingEmail: "trip@mail.wayfind.app",
+            onTap: {}
+        )
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

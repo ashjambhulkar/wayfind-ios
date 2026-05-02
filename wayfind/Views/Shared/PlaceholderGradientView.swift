@@ -33,3 +33,22 @@ struct PlaceholderGradientView: View {
         }
     }
 }
+
+
+// =============================================================================
+
+
+#if DEBUG
+#Preview("Gradient variants") {
+    VStack(spacing: 8) {
+        PlaceholderGradientView(destinationName: "Paris, France")
+            .frame(height: 120)
+        PlaceholderGradientView(destinationName: "Tokyo, Japan")
+            .frame(height: 120)
+        PlaceholderGradientView(destinationName: "Barcelona, Spain")
+            .frame(height: 120)
+    }
+    .padding()
+    .background(AppColors.appBackground)
+}
+#endif

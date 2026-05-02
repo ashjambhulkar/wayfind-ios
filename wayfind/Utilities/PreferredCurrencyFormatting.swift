@@ -43,3 +43,7 @@ enum PreferredCurrencyFormatting {
         return list[nextIndex]
     }
 }
+
+
+// =============================================================================
+

@@ -21,6 +21,9 @@ final class AuthViewModel {
     var authState: AuthState = .loading
     var currentUserEmail = ""
     var currentUserName = ""
+    /// Public URL from `profiles.avatar_url`; drives list/nav avatars without a separate profile fetch.
+    var currentUserAvatarURLString: String?
+    var currentUserId: UUID?
     var isLoading = false
     var errorMessage: String?
     /// Shown after sign-up when the project requires email confirmation (no session yet).
@@ -28,6 +31,21 @@ final class AuthViewModel {
     var needsDisplayName = false
 
     private var currentNonce: String?
+
+    /// Phase 5 — invoked just before the auth session is dropped on
+    /// `signOut()`. The host (`WayfindApp`) installs a closure here that
+    /// drops the FCM token row, tears down the realtime channel, clears
+    /// the collaboration store, and resets in-memory deep-link state in
+    /// the order specified by the implementation plan:
+    ///   1. clearTokenForCurrentDevice (server-side row deletion needs
+    ///      the auth session to still be alive for RLS)
+    ///   2. realtimeService.unbind
+    ///   3. collaborationStore.clear
+    ///   4. then auth signOut (this method)
+    ///   5. host navigates back to the sign-in surface
+    /// `PendingInviteStorage` is intentionally NOT cleared so a pending
+    /// invite token survives a sign-out → fresh sign-in cycle.
+    var preSignOutCleanup: (() async -> Void)?
 
     init() {
         AuthSessionService.shared.configure()
@@ -66,6 +84,8 @@ final class AuthViewModel {
         authState = .signedOut
         currentUserEmail = ""
         currentUserName = ""
+        currentUserAvatarURLString = nil
+        currentUserId = nil
         needsDisplayName = false
         errorMessage = nil
         successMessage = nil
@@ -174,6 +194,15 @@ final class AuthViewModel {
 
     func signOut() async {
         errorMessage = nil
+        // Run the host-installed cleanup BEFORE we tear down the auth
+        // session — `clearTokenForCurrentDevice` needs RLS to still
+        // pass for the row delete, and the realtime channel close needs
+        // a live websocket. Failure of any individual step is caught
+        // and ignored inside the closure (push token cleanup is a
+        // best-effort concern, not blocking).
+        if let preSignOutCleanup {
+            await preSignOutCleanup()
+        }
         if AppConfig.useRealBackend {
             do {
                 try await AuthSessionService.shared.signOut()
@@ -182,6 +211,19 @@ final class AuthViewModel {
                 return
             }
         }
+        clearLocalSession()
+    }
+
+    func deleteAccount() async throws {
+        errorMessage = nil
+        if let preSignOutCleanup {
+            await preSignOutCleanup()
+        }
+        guard AppConfig.useRealBackend else {
+            clearLocalSession()
+            return
+        }
+        try await AuthSessionService.shared.deleteCurrentUserAccount()
         clearLocalSession()
     }
 
@@ -303,18 +345,19 @@ final class AuthViewModel {
 
     var isSignedIn: Bool { authState == .signedIn }
 
-    var userInitials: String {
-        let parts = currentUserName.split(separator: " ")
-        if parts.count >= 2 {
-            return (String(parts[0].prefix(1)) + String(parts[1].prefix(1))).uppercased()
+    /// Resolved avatar URL for toolbar / list chrome; nil when absent or not a valid URL.
+    var profileAvatarURL: URL? {
+        guard let raw = currentUserAvatarURLString?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
         }
-        let name = currentUserName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !name.isEmpty { return String(name.prefix(2)).uppercased() }
-        let email = currentUserEmail
-        if email.contains("@") {
-            return String(email.prefix(2)).uppercased()
-        }
-        return "?"
+        return URL(string: raw)
+    }
+
+    /// Stable key for `AvatarView` tint and initials fallback.
+    var userAvatarStableID: String {
+        if let currentUserId { return currentUserId.uuidString }
+        let trimmed = currentUserEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "user" : trimmed
     }
 
     private func applySession(
@@ -322,10 +365,12 @@ final class AuthViewModel {
         appleCredential: ASAuthorizationAppleIDCredential?
     ) async throws {
         await AuthSessionService.shared.ensureProfileExists(for: session)
-        let (displayName, email) = try await AuthSessionService.shared.fetchProfile(for: session)
+        let (displayName, email, avatarURLString) = try await AuthSessionService.shared.fetchProfile(for: session)
 
         let sessionEmail = session.user.email ?? email
         currentUserEmail = sessionEmail
+        currentUserId = session.user.id
+        currentUserAvatarURLString = avatarURLString
 
         if let displayName, !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             currentUserName = displayName
@@ -364,3 +409,7 @@ final class AuthViewModel {
         return hash.compactMap { String(format: "%02x", $0) }.joined()
     }
 }
+
+
+// =============================================================================
+

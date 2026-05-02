@@ -12,6 +12,11 @@ struct ItineraryDay: Identifiable, Codable, Hashable {
     var tripId: UUID
     var dayNumber: Int
     var date: Date?
+    /// IANA id from `trip_days.timezone` when the server set it (e.g. `Europe/London`).
+    var timeZoneIdentifier: String? = nil
 
     var isWishlist: Bool { dayNumber == 0 }
 }
+
+// =============================================================================
+
