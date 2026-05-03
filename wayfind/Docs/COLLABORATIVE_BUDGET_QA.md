@@ -19,6 +19,8 @@ Run each row before shipping a change that touches anything in
 `BudgetViewModel.swift`, or any of the SQL triggers in
 `20260501120000_collaborative_budget_v1.sql`.
 
+**Related:** FX / mixed-currency support triage — [`docs/budget-fx-support-runbook.md`](../../docs/budget-fx-support-runbook.md). Product rules — `wayfind/Utilities/BudgetCurrencyProductPolicy.swift`.
+
 Mark each cell ✅ when verified on a real device, ⚠️ when there's a known
 caveat (file an issue and link it), and ❌ when the flow is broken (fix
 before merge).

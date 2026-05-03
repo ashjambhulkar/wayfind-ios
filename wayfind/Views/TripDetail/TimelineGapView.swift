@@ -58,26 +58,26 @@ struct TimelineGapView: View {
     }
 
     private var modeSpineCircle: some View {
-        let circleSide: CGFloat = 30
+        let side = TimelineBetweenStopsMetrics.modeCircleSide
         return ZStack {
             Circle()
                 .fill(AppColors.appBackground)
-                .frame(width: circleSide, height: circleSide)
+                .frame(width: side, height: side)
                 .overlay {
                     Circle()
                         .strokeBorder(
-                            TimelineSpineMetrics.continuousRailColor,
-                            lineWidth: TimelineSpineMetrics.continuousRailLineWidth
+                            TimelineSpineMetrics.continuousRailColor.opacity(0.6),
+                            lineWidth: TimelineBetweenStopsMetrics.modeCircleStrokeWidth
                         )
                 }
 
             if isComputing && !hasAnySummaryToShow {
                 ProgressView()
-                    .controlSize(.small)
+                    .controlSize(.mini)
             } else {
                 Image(systemName: TimelineBetweenStopsPresentation.sfSymbol(for: effectiveMode))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AppColors.textSecondary)
+                    .font(.system(size: TimelineBetweenStopsMetrics.modeIconSize, weight: .regular))
+                    .foregroundStyle(AppColors.textTertiary)
                     .accessibilityHidden(true)
             }
         }

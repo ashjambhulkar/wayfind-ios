@@ -167,7 +167,7 @@ struct TripBudgetTabView: View {
                             expenseToDelete = nil
                         }
                     } message: { expense in
-                        Text("\(expense.title) — \(MoneyFormatter.string(expense.amount, currency: expense.currencyCode)). This can't be undone.")
+                        Text("\(expense.title) — \(MoneyFormatter.string(expense.originalAmount, currency: expense.originalCurrencyCode)). This can't be undone.")
                     }
             } else {
                 loadingPlaceholder
@@ -213,10 +213,15 @@ struct TripBudgetTabView: View {
 
                 if viewModel.isMixedCurrency {
                     MixedCurrencyBanner(
-                        totals: viewModel.totalsByCurrency,
+                        totals: viewModel.rollup.totalsByOriginalCurrency,
                         headlineCurrency: displayedBudgetCurrency
                     )
                     .padding(.horizontal, AppSpacing.lg)
+                }
+
+                if bookingSyncTripCapMismatchExists(viewModel: viewModel) {
+                    BookingSyncTripCapBanner(tripCurrency: displayedBudgetCurrency)
+                        .padding(.horizontal, AppSpacing.lg)
                 }
 
                 summaryCard(for: viewModel)
@@ -224,7 +229,8 @@ struct TripBudgetTabView: View {
 
                 BudgetHomeCurrencyHeader(
                     totalAmount: viewModel.totalsByCurrency[displayedBudgetCurrency.uppercased()] ?? 0,
-                    tripCurrency: displayedBudgetCurrency
+                    tripCurrency: displayedBudgetCurrency,
+                    preferredCurrencyFromProfile: viewModel.profilePreferredCurrencyCode
                 )
                 .padding(.horizontal, AppSpacing.lg)
 
@@ -416,6 +422,7 @@ struct TripBudgetTabView: View {
         } label: {
             BudgetExpenseRow(
                 expense: expense,
+                tripBudgetCurrencyCode: displayedBudgetCurrency,
                 payerName: payerName(for: expense.payerUserId),
                 payerAvatarURL: payerAvatar(for: expense.payerUserId),
                 myShare: shareForCurrentUser(in: expense, viewModel: viewModel)
@@ -456,6 +463,15 @@ struct TripBudgetTabView: View {
         !viewModel.snapshot.expenses.isEmpty
             || !viewModel.snapshot.budgets.isEmpty
             || displayedTotalBudget != nil
+    }
+
+    /// True when at least one `is_auto_synced` expense is still ledgered in a
+    /// currency other than the trip budget cap (pr-2 server parity gap).
+    private func bookingSyncTripCapMismatchExists(viewModel: BudgetViewModel) -> Bool {
+        BudgetLedgerNormalizationPolicy.hasBookingSyncTripCapMismatch(
+            expenses: viewModel.snapshot.expenses,
+            tripBudgetCurrency: displayedBudgetCurrency
+        )
     }
 
     private func plannedCategoryMap(viewModel: BudgetViewModel) -> [ExpenseCategory: Decimal] {
@@ -614,6 +630,29 @@ enum BudgetScope: Hashable {
     case settleUp
 }
 
+private struct BookingSyncTripCapBanner: View {
+    let tripCurrency: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppSpacing.sm) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(AppColors.appPrimary)
+            Text(BudgetLedgerNormalizationPolicy.userFacingBookingSyncTripCapMismatchExplanation(tripBudgetCurrency: tripCurrency))
+                .font(.appSmall)
+                .foregroundStyle(AppColors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .padding(.vertical, AppSpacing.sm)
+        .background(AppColors.appPrimary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            BudgetLedgerNormalizationPolicy.userFacingBookingSyncTripCapMismatchExplanation(tripBudgetCurrency: tripCurrency)
+        )
+    }
+}
+
 private struct MixedCurrencyBanner: View {
     let totals: [String: Decimal]
     let headlineCurrency: String
@@ -639,11 +678,15 @@ private struct MixedCurrencyBanner: View {
     }
 
     private var captionText: String {
+        let head = headlineCurrency.uppercased()
         let others = totals
-            .filter { $0.key.uppercased() != headlineCurrency.uppercased() }
+            .filter { $0.key.uppercased() != head }
             .sorted { $0.key < $1.key }
         let parts = others.map { MoneyFormatter.string($0.value, currency: $0.key) }
-        return "Also tracking " + parts.joined(separator: " · ")
+        if parts.isEmpty {
+            return "Trip totals below are in \(head). Receipts may have been logged in other currencies."
+        }
+        return "Also logged as " + parts.joined(separator: " · ")
     }
 }
 

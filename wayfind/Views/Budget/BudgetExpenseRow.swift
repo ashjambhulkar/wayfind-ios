@@ -13,6 +13,8 @@ import SwiftUI
 
 struct BudgetExpenseRow: View {
     let expense: TripExpense
+    /// Trip headline budget ISO (same as `Trip.budgetCurrencyCode`) for pr-2 disclosure.
+    let tripBudgetCurrencyCode: String
     let payerName: String?
     let payerAvatarURL: String?
     let myShare: Decimal?
@@ -46,15 +48,30 @@ struct BudgetExpenseRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(MoneyFormatter.string(expense.amount, currency: expense.currencyCode))
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-                    .monospacedDigit()
-                if let myShare, myShare != expense.amount {
-                    Text("Your share \(MoneyFormatter.string(myShare, currency: expense.currencyCode))")
+                if expense.isOriginalDistinctFromTripLedger {
+                    Text(MoneyFormatter.string(expense.originalAmount, currency: expense.originalCurrencyCode))
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                        .monospacedDigit()
+                    Text(MoneyFormatter.string(expense.amount, currency: expense.currencyCode))
                         .font(.appSmall)
                         .foregroundStyle(AppColors.textSecondary)
                         .monospacedDigit()
+                } else {
+                    Text(MoneyFormatter.string(expense.amount, currency: expense.currencyCode))
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                        .monospacedDigit()
+                }
+                if let myShare {
+                    let shareTrip = TripExpenseLedgerNormalizer.roundMoney2(myShare)
+                    let totalTrip = TripExpenseLedgerNormalizer.roundMoney2(expense.amount)
+                    if shareTrip != totalTrip {
+                        Text("Your share \(MoneyFormatter.string(myShare, currency: expense.currencyCode))")
+                            .font(.appSmall)
+                            .foregroundStyle(AppColors.textSecondary)
+                            .monospacedDigit()
+                    }
                 }
             }
         }
@@ -96,6 +113,13 @@ struct BudgetExpenseRow: View {
         var pieces: [String] = []
         if let payerName { pieces.append("\(payerName) paid") }
         if expense.isAutoSynced { pieces.append("From booking") }
+        if BudgetLedgerNormalizationPolicy.bookingSyncedLedgerDiffersFromTripBudgetCap(
+            expense: expense,
+            tripBudgetCurrency: tripBudgetCurrencyCode
+        ) {
+            let cap = BudgetCurrencyProductPolicy.normalizedTripBudgetCurrencyCode(tripBudgetCurrencyCode)
+            pieces.append("Not in \(cap) trip total")
+        }
         if expense.splitType != .equal {
             pieces.append(expense.splitType.displayLabel)
         }
@@ -104,7 +128,13 @@ struct BudgetExpenseRow: View {
 
     private var accessibilityLabel: String {
         var label = "\(expense.title.isEmpty ? expense.category.displayLabel : expense.title), "
-        label += MoneyFormatter.string(expense.amount, currency: expense.currencyCode)
+        if expense.isOriginalDistinctFromTripLedger {
+            label += MoneyFormatter.string(expense.originalAmount, currency: expense.originalCurrencyCode)
+            label += ", "
+            label += MoneyFormatter.string(expense.amount, currency: expense.currencyCode)
+        } else {
+            label += MoneyFormatter.string(expense.amount, currency: expense.currencyCode)
+        }
         if let payerName {
             label += ", paid by \(payerName)"
         }
@@ -120,12 +150,14 @@ struct BudgetExpenseRow: View {
     VStack(spacing: 0) {
         BudgetExpenseRow(
             expense: .preview,
+            tripBudgetCurrencyCode: "USD",
             payerName: "Alex Johnson",
             payerAvatarURL: nil,
             myShare: Decimal(160)
         )
         BudgetExpenseRow(
             expense: .preview,
+            tripBudgetCurrencyCode: "USD",
             payerName: nil,
             payerAvatarURL: nil,
             myShare: nil

@@ -69,7 +69,9 @@ final class ExpenseCSVExporterTests: XCTestCase {
             names: [:]
         )
         // Header only + trailing CRLF.
-        XCTAssertTrue(body.hasPrefix("Date,Title,Category,Amount,Currency,Paid by,Split type,Notes\r\n"))
+        XCTAssertTrue(body.hasPrefix(
+            "Date,Title,Category,Ledger amount,Ledger currency,Original amount,Original currency,FX rate (orig→ledger),FX date,Paid by,Split type,Notes\r\n"
+        ))
         XCTAssertTrue(body.hasSuffix("\r\n"))
     }
 
@@ -107,7 +109,7 @@ final class ExpenseCSVExporterTests: XCTestCase {
         // Payer name resolved through the lookup.
         XCTAssertTrue(csv.contains(",Alice,"))
         // Decimal stays dot-separated regardless of host locale.
-        XCTAssertTrue(csv.contains(",82.50,EUR,"))
+        XCTAssertTrue(csv.contains(",82.50,EUR,82.50,EUR,1.00,"))
     }
 
     func testExportWritesUTF8BOM() throws {

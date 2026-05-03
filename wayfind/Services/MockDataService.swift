@@ -194,14 +194,24 @@ final class MockDataService {
     }
 
     @discardableResult
-    func addExpense(_ expense: TripExpense, splits: [ExpenseSplit]) async -> TripExpense {
-        var snapshot = budgetSnapshotsByTripId[expense.tripId] ?? .empty
-        snapshot.expenses.append(expense)
-        snapshot.splits.append(contentsOf: splits.map { split in
+    func addExpense(
+        _ expense: TripExpense,
+        splits: [ExpenseSplit],
+        tripBudgetCurrency: String
+    ) async throws -> TripExpense {
+        let normalized = Self.mockNormalizeUserExpense(
+            userEntry: expense,
+            splits: splits,
+            tripBudgetCurrency: tripBudgetCurrency,
+            previousPersistedRow: nil
+        )
+        var snapshot = budgetSnapshotsByTripId[normalized.ledger.tripId] ?? .empty
+        snapshot.expenses.append(normalized.ledger)
+        snapshot.splits.append(contentsOf: normalized.splits.map { split in
             ExpenseSplit(
                 id: split.id,
-                expenseId: expense.id,
-                tripId: expense.tripId,
+                expenseId: split.expenseId,
+                tripId: split.tripId,
                 userId: split.userId,
                 amount: split.amount,
                 currencyCode: split.currencyCode,
@@ -210,21 +220,32 @@ final class MockDataService {
                 updatedAt: Date()
             )
         })
-        budgetSnapshotsByTripId[expense.tripId] = snapshot
-        return expense
+        budgetSnapshotsByTripId[normalized.ledger.tripId] = snapshot
+        return normalized.ledger
     }
 
-    func updateExpense(_ expense: TripExpense, splits: [ExpenseSplit]) async {
-        guard var snapshot = budgetSnapshotsByTripId[expense.tripId] else { return }
-        if let index = snapshot.expenses.firstIndex(where: { $0.id == expense.id }) {
-            snapshot.expenses[index] = expense
+    func updateExpense(
+        _ expense: TripExpense,
+        splits: [ExpenseSplit],
+        tripBudgetCurrency: String,
+        previousPersistedRow: TripExpense? = nil
+    ) async throws {
+        let normalized = Self.mockNormalizeUserExpense(
+            userEntry: expense,
+            splits: splits,
+            tripBudgetCurrency: tripBudgetCurrency,
+            previousPersistedRow: previousPersistedRow
+        )
+        guard var snapshot = budgetSnapshotsByTripId[normalized.ledger.tripId] else { return }
+        if let index = snapshot.expenses.firstIndex(where: { $0.id == normalized.ledger.id }) {
+            snapshot.expenses[index] = normalized.ledger
         }
-        snapshot.splits.removeAll { $0.expenseId == expense.id }
-        snapshot.splits.append(contentsOf: splits.map { split in
+        snapshot.splits.removeAll { $0.expenseId == normalized.ledger.id }
+        snapshot.splits.append(contentsOf: normalized.splits.map { split in
             ExpenseSplit(
                 id: split.id,
-                expenseId: expense.id,
-                tripId: expense.tripId,
+                expenseId: split.expenseId,
+                tripId: split.tripId,
                 userId: split.userId,
                 amount: split.amount,
                 currencyCode: split.currencyCode,
@@ -233,7 +254,88 @@ final class MockDataService {
                 updatedAt: Date()
             )
         })
-        budgetSnapshotsByTripId[expense.tripId] = snapshot
+        budgetSnapshotsByTripId[normalized.ledger.tripId] = snapshot
+    }
+
+    private struct MockNormalizedPack {
+        let ledger: TripExpense
+        let splits: [ExpenseSplit]
+    }
+
+    /// Offline stand-in for ``BudgetService`` FX: same math with
+    /// `AppConfig.mockBudgetForeignToTripLedgerMultiplier` whenever
+    /// original ≠ trip (DEBUG 1.1 for deterministic tests; Release 1 — pr-11).
+    private static func mockNormalizeUserExpense(
+        userEntry: TripExpense,
+        splits: [ExpenseSplit],
+        tripBudgetCurrency: String,
+        previousPersistedRow: TripExpense?
+    ) -> MockNormalizedPack {
+        let tripCode = BudgetCurrencyProductPolicy.normalizedTripBudgetCurrencyCode(tripBudgetCurrency)
+        let origCode = PreferredCurrencyFormatting.normalizeInput(userEntry.currencyCode) ?? tripCode
+        let originalAmount = userEntry.amount
+
+        let tripAmount: Decimal
+        let fxRate: Decimal
+        let fxDate: Date
+
+        if origCode == tripCode {
+            tripAmount = TripExpenseLedgerNormalizer.roundMoney2(originalAmount)
+            fxRate = 1
+            fxDate = userEntry.expenseDate
+        } else if let previous = previousPersistedRow,
+                  previous.fxRateAtCapture > 0,
+                  BudgetLedgerNormalizationPolicy.shouldPreserveLockedFxQuoteOnManualExpenseUpdate(
+                    persistedRow: previous,
+                    composerEntry: userEntry,
+                    tripBudgetCurrency: tripBudgetCurrency
+                  ) {
+            tripAmount = TripExpenseLedgerNormalizer.roundMoney2(
+                originalAmount * previous.fxRateAtCapture
+            )
+            fxRate = previous.fxRateAtCapture
+            fxDate = previous.fxRateDate
+        } else {
+            let mockMultiplier = AppConfig.mockBudgetForeignToTripLedgerMultiplier
+            let converted = TripExpenseLedgerNormalizer.tripLedgerAmount(
+                originalAmount: originalAmount,
+                originalCurrencyUppercased: origCode,
+                tripBudgetCurrencyUppercased: tripCode,
+                tripUnitsPerOneOriginal: mockMultiplier
+            )
+            tripAmount = converted.tripAmount
+            fxRate = converted.fxRate
+            fxDate = userEntry.expenseDate
+        }
+
+        let tripSplits = TripExpenseLedgerNormalizer.convertSplitsToTripCurrency(
+            splits: splits,
+            originalExpenseTotal: originalAmount,
+            tripExpenseTotal: tripAmount,
+            tripCurrencyCode: tripCode
+        )
+        let ledger = TripExpense(
+            id: userEntry.id,
+            tripId: userEntry.tripId,
+            userId: userEntry.userId,
+            payerUserId: userEntry.payerUserId,
+            bookingId: userEntry.bookingId,
+            title: userEntry.title,
+            amount: tripAmount,
+            currencyCode: tripCode,
+            category: userEntry.category,
+            splitType: userEntry.splitType,
+            expenseDate: userEntry.expenseDate,
+            notes: userEntry.notes,
+            isAutoSynced: userEntry.isAutoSynced,
+            createdAt: userEntry.createdAt,
+            updatedAt: userEntry.updatedAt,
+            originalAmount: originalAmount,
+            originalCurrencyCode: origCode,
+            fxRateAtCapture: fxRate,
+            fxRateDate: fxDate
+        )
+        return MockNormalizedPack(ledger: ledger, splits: tripSplits)
     }
 
     func deleteExpense(id: UUID) async {

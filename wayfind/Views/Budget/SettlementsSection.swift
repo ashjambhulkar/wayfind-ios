@@ -35,7 +35,12 @@ struct SettlementsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            sectionHeader
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                sectionHeader
+                Text("Each amount is in one currency — settle in that currency.")
+                    .font(.caption2)
+                    .foregroundStyle(AppColors.textTertiary)
+            }
 
             if suggestions.isEmpty && recentSettlements.isEmpty {
                 emptyState

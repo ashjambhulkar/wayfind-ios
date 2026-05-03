@@ -25,6 +25,9 @@ final class BudgetViewModel {
     private(set) var tripId: UUID
     let currentUserId: UUID?
 
+    /// Profile `preferred_currency` (normalized ISO), for budget header conversion.
+    private(set) var profilePreferredCurrencyCode: String?
+
     // MARK: - Snapshot + derived state
 
     /// Single source of truth — every derived getter reads from here. The
@@ -72,6 +75,14 @@ final class BudgetViewModel {
         self.dataService = dataService
     }
 
+    /// Loads the signed-in user’s preferred display currency for Pro budget header math.
+    func refreshPreferredDisplayCurrencyFromProfile() async {
+        let detail = await dataService.fetchOwnUserProfileDetail()
+        profilePreferredCurrencyCode = detail?.preferredCurrency.flatMap {
+            PreferredCurrencyFormatting.normalizeInput($0)
+        }
+    }
+
     // MARK: - Reload
 
     /// Refetches the snapshot from the network (or the mock). Safe to call
@@ -89,6 +100,7 @@ final class BudgetViewModel {
         hasLoadedAtLeastOnce = true
         lastFetchFailed = false
         isLoading = false
+        await refreshPreferredDisplayCurrencyFromProfile()
     }
 
     /// Marks the last reload as failed without replacing the snapshot. Wired
@@ -160,18 +172,29 @@ final class BudgetViewModel {
     func addExpense(
         _ expense: TripExpense,
         splits: [ExpenseSplit],
+        tripBudgetCurrency: String,
         onError: ((Error) -> Void)? = nil
     ) async -> Bool {
         let mutationId = UUID()
         pendingMutations[mutationId] = .addExpense(expense, splits)
         snapshot.expenses.insert(expense, at: 0)
         snapshot.splits.append(contentsOf: splits)
-        let created = await dataService.addExpense(expense, splits: splits)
-        pendingMutations.removeValue(forKey: mutationId)
-        if let index = snapshot.expenses.firstIndex(where: { $0.id == expense.id }) {
-            snapshot.expenses[index] = created
+        do {
+            _ = try await dataService.addExpense(
+                expense,
+                splits: splits,
+                tripBudgetCurrency: tripBudgetCurrency
+            )
+            pendingMutations.removeValue(forKey: mutationId)
+            await reload()
+            return true
+        } catch {
+            pendingMutations.removeValue(forKey: mutationId)
+            snapshot.expenses.removeAll { $0.id == expense.id }
+            snapshot.splits.removeAll { $0.expenseId == expense.id }
+            onError?(error)
+            return false
         }
-        return true
     }
 
     /// Updates an expense locally + on the network. Stashes the previous
@@ -181,6 +204,7 @@ final class BudgetViewModel {
     func updateExpense(
         _ expense: TripExpense,
         splits: [ExpenseSplit],
+        tripBudgetCurrency: String,
         onError: ((Error) -> Void)? = nil
     ) async -> Bool {
         guard let previous = snapshot.expenses.first(where: { $0.id == expense.id }) else {
@@ -194,9 +218,26 @@ final class BudgetViewModel {
         }
         snapshot.splits.removeAll { $0.expenseId == expense.id }
         snapshot.splits.append(contentsOf: splits)
-        await dataService.updateExpense(expense, splits: splits)
-        pendingMutations.removeValue(forKey: mutationId)
-        return true
+        do {
+            try await dataService.updateExpense(
+                expense,
+                splits: splits,
+                tripBudgetCurrency: tripBudgetCurrency,
+                previousPersistedRow: previous
+            )
+            pendingMutations.removeValue(forKey: mutationId)
+            await reload()
+            return true
+        } catch {
+            pendingMutations.removeValue(forKey: mutationId)
+            if let index = snapshot.expenses.firstIndex(where: { $0.id == previous.id }) {
+                snapshot.expenses[index] = previous
+            }
+            snapshot.splits.removeAll { $0.expenseId == previous.id }
+            snapshot.splits.append(contentsOf: previousSplits)
+            onError?(error)
+            return false
+        }
     }
 
     /// Deletes an expense locally + on the network.

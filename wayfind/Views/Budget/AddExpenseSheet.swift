@@ -42,6 +42,7 @@ struct AddExpenseSheet: View {
     /// they're flushed to `trip_expense_attachments` via the shared
     /// BackgroundUploader.
     @State private var stagedReceipts: [StagedReceipt] = []
+    @State private var isSaving = false
 
     @FocusState private var amountFieldFocused: Bool
 
@@ -85,7 +86,7 @@ struct AddExpenseSheet: View {
                     Button(editingExpense == nil ? "Save" : "Update") {
                         Task { await save() }
                     }
-                    .disabled(!canSave)
+                    .disabled(!canSave || isSaving)
                 }
             }
             .presentationDetents([.medium, .large], selection: $detent)
@@ -310,8 +311,8 @@ struct AddExpenseSheet: View {
         currency = trip.budgetCurrencyCode
         if let editing = editingExpense {
             title = editing.title
-            amountText = format(amount: editing.amount)
-            currency = editing.currencyCode
+            amountText = format(amount: editing.originalAmount)
+            currency = editing.originalCurrencyCode
             category = editing.category
             date = editing.expenseDate
             notes = editing.notes ?? ""
@@ -358,7 +359,9 @@ struct AddExpenseSheet: View {
     }
 
     private func save() async {
-        guard let amount = parsedAmount else { return }
+        guard !isSaving, let amount = parsedAmount else { return }
+        isSaving = true
+        defer { isSaving = false }
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedTitle = trimmedTitle.isEmpty ? category.displayLabel : trimmedTitle
 
@@ -382,11 +385,24 @@ struct AddExpenseSheet: View {
 
         let resolvedSplits = splits.isEmpty ? defaultEqualSplit(for: expense) : splits.map { rebound(split: $0, to: expense.id) }
 
+        let tripCap = trip.budgetCurrencyCode
         let success: Bool
         if editingExpense == nil {
-            success = await viewModel.addExpense(expense, splits: resolvedSplits)
+            success = await viewModel.addExpense(
+                expense,
+                splits: resolvedSplits,
+                tripBudgetCurrency: tripCap
+            ) { error in
+                toastManager.show(ToastData(message: error.localizedDescription, type: .error))
+            }
         } else {
-            success = await viewModel.updateExpense(expense, splits: resolvedSplits)
+            success = await viewModel.updateExpense(
+                expense,
+                splits: resolvedSplits,
+                tripBudgetCurrency: tripCap
+            ) { error in
+                toastManager.show(ToastData(message: error.localizedDescription, type: .error))
+            }
         }
         if success {
             await flushStagedReceipts(for: expense)

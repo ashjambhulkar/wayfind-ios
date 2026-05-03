@@ -1328,10 +1328,11 @@ struct TripDetailView: View {
             createdAt: nil,
             updatedAt: nil
         )
+        let tripCap = (viewModel?.trip ?? trip).budgetCurrencyCode
         if let budgetVM = budgetViewModel {
-            _ = await budgetVM.addExpense(expense, splits: [split])
+            _ = await budgetVM.addExpense(expense, splits: [split], tripBudgetCurrency: tripCap) { _ in }
         } else {
-            _ = await dataService.addExpense(expense, splits: [split])
+            try? await dataService.addExpense(expense, splits: [split], tripBudgetCurrency: tripCap)
         }
     }
 

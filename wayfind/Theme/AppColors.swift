@@ -89,6 +89,26 @@ enum AppColors {
     static let timelineScheduleFlexibleMuted = wfFlexNodeMuted
     static let timelineScheduleIssueMuted = wfIssueNodeMuted
 
+    // MARK: Timeline category nodes (category-based — see TimelineCategoryChroma)
+    //
+    // Pin fills: deep muted in both modes so white icons stay readable.
+    // Stripe accents: pale tints in light mode, same deep muted in dark mode
+    // so the 4pt card rail is a quiet category hint, not decoration.
+
+    static let timelineCategoryFoodPin    = Color(hex: 0x2F6F55)
+    static let timelineCategoryMarketPin  = Color(hex: 0x7A5A1E)
+    static let timelineCategoryCulturePin = Color(hex: 0x41685A)
+    static let timelineCategoryStayPin    = Color(hex: 0x4C5F8F)
+    static let timelineCategoryNaturePin  = Color(hex: 0x3F6B45)
+    static let timelineCategoryTransitPin = Color(light: Color(hex: 0x5A5A5E), dark: Color(hex: 0x3A3A3C))
+
+    static let timelineCategoryFoodStripe    = Color(light: Color(hex: 0xDDF5EA), dark: Color(hex: 0x2F6F55))
+    static let timelineCategoryMarketStripe  = Color(light: Color(hex: 0xF6E8C8), dark: Color(hex: 0x7A5A1E))
+    static let timelineCategoryCultureStripe = Color(light: Color(hex: 0xE3F0EA), dark: Color(hex: 0x41685A))
+    static let timelineCategoryStayStripe    = Color(light: Color(hex: 0xE4E8F7), dark: Color(hex: 0x4C5F8F))
+    static let timelineCategoryNatureStripe  = Color(light: Color(hex: 0xE0F1DF), dark: Color(hex: 0x3F6B45))
+    static let timelineCategoryTransitStripe = Color(light: Color(hex: 0xEFEFF4), dark: Color(hex: 0x3A3A3C))
+
     static func dayColor(for dayNumber: Int) -> Color {
         let palette = [day1, day2, day3, day4, day5, day6, day7]
         let index = ((dayNumber - 1) % 7 + 7) % 7

@@ -3,8 +3,8 @@
 //  wayfind
 //
 //  Wave 2.2b — auxiliary header surfaced above the budget summary card
-//  whenever the trip currency differs from the user's home currency
-//  (taken from `Locale.current.currency?.identifier`).
+//  whenever the trip currency differs from the user's personal display
+//  currency (``BudgetCurrencyProductPolicy/personalDisplayCurrencyCode``).
 //
 //  Behavior (Wave 4.5 — hard gate):
 //    • Pro user      → tap to toggle between trip-currency and
@@ -23,6 +23,8 @@ import SwiftUI
 struct BudgetHomeCurrencyHeader: View {
     let totalAmount: Decimal
     let tripCurrency: String
+    /// From `profiles.preferred_currency`; when nil, policy falls back to locale.
+    var preferredCurrencyFromProfile: String? = nil
 
     @Environment(DataService.self) private var dataService
 
@@ -36,12 +38,15 @@ struct BudgetHomeCurrencyHeader: View {
         EntitlementService.shared.hasPremiumAccess
     }
 
-    private var homeCurrency: String {
-        Locale.current.currency?.identifier.uppercased() ?? "USD"
+    private var personalDisplayCurrency: String {
+        BudgetCurrencyProductPolicy.personalDisplayCurrencyCode(
+            preferredFromProfile: preferredCurrencyFromProfile,
+            localeCurrencyCode: Locale.current.currency?.identifier
+        )
     }
 
     private var shouldShow: Bool {
-        homeCurrency.uppercased() != tripCurrency.uppercased() && totalAmount > 0
+        personalDisplayCurrency != tripCurrency.uppercased() && totalAmount > 0
     }
 
     var body: some View {
@@ -52,7 +57,7 @@ struct BudgetHomeCurrencyHeader: View {
                 EmptyView()
             }
         }
-        .task(id: "\(totalAmount)|\(tripCurrency)|\(homeCurrency)") {
+        .task(id: "\(totalAmount)|\(tripCurrency)|\(personalDisplayCurrency)|\(preferredCurrencyFromProfile ?? "")") {
             // Wave 4.5 — if a previously-Pro user churned to free
             // we don't want their persisted `preferHomeCurrency=true`
             // to keep silently consuming the converted view. Reset
@@ -80,7 +85,7 @@ struct BudgetHomeCurrencyHeader: View {
                     dataService: dataService,
                     metadata: [
                         "trip_currency": tripCurrency,
-                        "home_currency": homeCurrency,
+                        "home_currency": personalDisplayCurrency,
                         "trigger": "budget_header_toggle",
                     ]
                 )
@@ -135,12 +140,12 @@ struct BudgetHomeCurrencyHeader: View {
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(hasPremiumAccess
-            ? "Switches between trip and home currency."
+            ? "Switches between trip and preferred display currency."
             : "Wayfind Pro required. Opens upgrade screen.")
     }
 
     private var currentDisplayCurrency: String {
-        preferHomeCurrency ? homeCurrency : tripCurrency
+        preferHomeCurrency ? personalDisplayCurrency : tripCurrency
     }
 
     private var formattedAmount: String {
@@ -161,12 +166,12 @@ struct BudgetHomeCurrencyHeader: View {
             return "Rate from \(rateDate)\(suffix)"
         }
         return hasPremiumAccess
-            ? "Tap to view in \(homeCurrency)"
-            : "Tap to unlock \(homeCurrency) view"
+            ? "Tap to view in \(personalDisplayCurrency)"
+            : "Tap to unlock \(personalDisplayCurrency) view"
     }
 
     private var accessibilityLabel: String {
-        let direction = preferHomeCurrency ? "in your home currency" : "in trip currency"
+        let direction = preferHomeCurrency ? "in your preferred display currency" : "in trip currency"
         return "Total budget \(formattedAmount) \(currentDisplayCurrency) \(direction). Tap to switch."
     }
 
@@ -179,7 +184,7 @@ struct BudgetHomeCurrencyHeader: View {
         let result = await CurrencyService.shared.convert(
             amount: totalAmount,
             from: tripCurrency,
-            to: homeCurrency
+            to: personalDisplayCurrency
         )
         if let result {
             converted = result.amount

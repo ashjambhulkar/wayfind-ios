@@ -26,8 +26,20 @@ struct TripExpense: Identifiable, Hashable, Sendable {
     /// expense rather than nuking the user's own ledger.
     let bookingId: UUID?
     let title: String
+    /// Ledger amount in ``currencyCode`` (trip budget ISO). Equals the user’s
+    /// typed total when that currency matches the trip cap; otherwise it is
+    /// the trip-currency equivalent using ``fxRateAtCapture``.
     let amount: Decimal
+    /// ISO 4217 for ``amount`` (normalized trip budget currency on new writes).
     let currencyCode: String
+    /// Amount the user entered, in ``originalCurrencyCode``.
+    let originalAmount: Decimal
+    /// ISO 4217 for ``originalAmount``.
+    let originalCurrencyCode: String
+    /// Locked multiplier: `amount ≈ originalAmount * fxRateAtCapture` (rounded).
+    let fxRateAtCapture: Decimal
+    /// Effective quote date for ``fxRateAtCapture`` (mirrors `fx_rate_date`).
+    let fxRateDate: Date
     let category: ExpenseCategory
     /// `equal | exact | percentage | full`. We store this even for `full`
     /// (paid-by-one) so the editor can distinguish "split equally with one
@@ -62,6 +74,62 @@ struct TripExpense: Identifiable, Hashable, Sendable {
             }
             return match
         }
+    }
+
+    init(
+        id: UUID,
+        tripId: UUID,
+        userId: UUID?,
+        payerUserId: UUID?,
+        bookingId: UUID?,
+        title: String,
+        amount: Decimal,
+        currencyCode: String,
+        category: ExpenseCategory,
+        splitType: SplitType,
+        expenseDate: Date,
+        notes: String?,
+        isAutoSynced: Bool,
+        createdAt: Date?,
+        updatedAt: Date?,
+        originalAmount: Decimal? = nil,
+        originalCurrencyCode: String? = nil,
+        fxRateAtCapture: Decimal? = nil,
+        fxRateDate: Date? = nil
+    ) {
+        self.id = id
+        self.tripId = tripId
+        self.userId = userId
+        self.payerUserId = payerUserId
+        self.bookingId = bookingId
+        self.title = title
+        self.amount = amount
+        let code = currencyCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        self.currencyCode = code.isEmpty ? "USD" : String(code.prefix(PreferredCurrencyFormatting.codeMaxLength))
+        self.category = category
+        self.splitType = splitType
+        self.expenseDate = expenseDate
+        self.notes = notes
+        self.isAutoSynced = isAutoSynced
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+
+        let origAmt = originalAmount ?? amount
+        self.originalAmount = origAmt
+        let origCurRaw = (originalCurrencyCode ?? currencyCode)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        self.originalCurrencyCode = origCurRaw.isEmpty
+            ? self.currencyCode
+            : String(origCurRaw.prefix(PreferredCurrencyFormatting.codeMaxLength))
+        self.fxRateAtCapture = fxRateAtCapture ?? 1
+        self.fxRateDate = fxRateDate ?? expenseDate
+    }
+
+    /// When true, show receipt-line (original) vs trip-ledger in budget rows.
+    var isOriginalDistinctFromTripLedger: Bool {
+        originalCurrencyCode != currencyCode
+            || TripExpenseLedgerNormalizer.roundMoney2(originalAmount) != TripExpenseLedgerNormalizer.roundMoney2(amount)
     }
 }
 

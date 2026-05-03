@@ -9,6 +9,11 @@ enum TimelineBetweenStopsMetrics {
     /// Vertical padding on the full-width travel segment row.
     static let gapRowVerticalPadding: CGFloat = AppSpacing.xs
     static let minRowHeight: CGFloat = 28
+
+    /// Smaller, lower-contrast circle so travel rows read as connectors, not activities.
+    static let modeCircleSide: CGFloat = 22
+    static let modeCircleStrokeWidth: CGFloat = 1.0
+    static let modeIconSize: CGFloat = 9
 }
 
 enum TimelineBetweenStopsPresentation {

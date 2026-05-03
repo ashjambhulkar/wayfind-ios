@@ -6,10 +6,10 @@
 //  UI needs from a `BudgetSnapshot`. Lives outside the view-model so unit
 //  tests don't need to spin up a `@MainActor` actor or stub a `DataService`.
 //
-//  Everything is per-currency: we never collapse mixed currencies into a
-//  single "total" because there's no exchange-rate source the user has
-//  control over. Mixed-currency trips render a banner instead of a fake
-//  conversion.
+//  Ledger totals (`amount` / `currencyCode`) are in the trip’s budget ISO
+//  after normalization on write. Receipt-line totals by original currency
+//  power the mixed-currency banner; FX into profile currency is handled in
+//  the budget header (Pro) via ``CurrencyService``.
 //
 
 import Foundation
@@ -25,8 +25,19 @@ struct CategoryRollup: Hashable, Sendable {
     /// Set of currencies present anywhere in the snapshot. Used to drive the
     /// "mixed currency" banner without re-walking the expense list.
     var currencies: Set<String>
+    /// Receipt-line totals keyed by ``TripExpense/originalCurrencyCode``.
+    var totalsByOriginalCurrency: [String: Decimal]
+    /// Distinct ISO codes from the receipt line (may differ from ledger when
+    /// expenses are normalized to trip budget currency).
+    var originalCurrencies: Set<String>
 
-    static let empty = CategoryRollup(totalsByCurrency: [:], perCategoryByCurrency: [:], currencies: [])
+    static let empty = CategoryRollup(
+        totalsByCurrency: [:],
+        perCategoryByCurrency: [:],
+        currencies: [],
+        totalsByOriginalCurrency: [:],
+        originalCurrencies: []
+    )
 
     /// Builds a rollup from raw expenses. O(n) over expenses; caller should
     /// memoise on `BudgetSnapshot` change rather than recomputing per-frame.
@@ -34,18 +45,26 @@ struct CategoryRollup: Hashable, Sendable {
         var totals: [String: Decimal] = [:]
         var perCategory: [String: [ExpenseCategory: Decimal]] = [:]
         var currencies: Set<String> = []
+        var originalTotals: [String: Decimal] = [:]
+        var originalCodes: Set<String> = []
 
         for expense in expenses {
             let code = expense.currencyCode.uppercased()
             currencies.insert(code)
             totals[code, default: 0] += expense.amount
             perCategory[code, default: [:]][expense.category, default: 0] += expense.amount
+
+            let orig = expense.originalCurrencyCode.uppercased()
+            originalCodes.insert(orig)
+            originalTotals[orig, default: 0] += expense.originalAmount
         }
 
         return CategoryRollup(
             totalsByCurrency: totals,
             perCategoryByCurrency: perCategory,
-            currencies: currencies
+            currencies: currencies,
+            totalsByOriginalCurrency: originalTotals,
+            originalCurrencies: originalCodes
         )
     }
 
@@ -60,9 +79,11 @@ struct CategoryRollup: Hashable, Sendable {
         perCategoryByCurrency[currency.uppercased()]?[category] ?? 0
     }
 
-    /// True when the trip has expenses in two or more distinct currencies.
-    /// Drives the mixed-currency banner copy.
-    var isMixedCurrency: Bool { currencies.count > 1 }
+    /// True when receipt currencies differ **or** ledger rows still span
+    /// multiple ISO codes (legacy data). Drives the mixed-currency banner.
+    var isMixedCurrency: Bool {
+        originalCurrencies.count > 1 || currencies.count > 1
+    }
 }
 
 // MARK: - Per-user balances

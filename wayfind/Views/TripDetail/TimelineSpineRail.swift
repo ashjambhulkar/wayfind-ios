@@ -27,6 +27,12 @@ enum TimelineSpineMetrics {
     static var timePinFrameHeight: CGFloat { 2 * timePinBodyRadius + timePinTailLength + 5 }
     static let timePinColumnTopPadding: CGFloat = 0
 
+    /// Distance from the top of `TimelineSpineTimeColumn` to the circular hub center.
+    /// Used with `alignmentGuide(.center)` so the hub lines up with the card’s vertical center in the row `HStack`.
+    static var timePinHubYFromColumnOrigin: CGFloat {
+        timePinColumnTopPadding + timePinBodyRadius
+    }
+
     /// Bottom padding after each stacked timeline row (day itinerary + Ideas list).
     static let rowBottomSpacing: CGFloat = AppSpacing.sm
 

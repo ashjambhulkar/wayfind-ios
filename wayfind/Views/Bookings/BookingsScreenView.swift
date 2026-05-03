@@ -201,7 +201,7 @@ struct BookingsScreenView: View {
             createdAt: nil,
             updatedAt: nil
         )
-        _ = await dataService.addExpense(expense, splits: [split])
+        try? await dataService.addExpense(expense, splits: [split], tripBudgetCurrency: trip.budgetCurrencyCode)
     }
 
     /// Same toast factory used by `TripDetailView` — surfaces the

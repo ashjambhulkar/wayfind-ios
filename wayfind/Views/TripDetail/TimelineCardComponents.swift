@@ -29,6 +29,12 @@ private enum TimelineSpinePinMetrics {
     static let timeLabelHorizontalInset: CGFloat = AppSpacing.xs
 }
 
+/// Pin chrome (circle + tail + tip dot) rotates toward the card; labels stay upright.
+private enum TimelineSpinePinChromeLayout {
+    /// Half turn so the callout tip extends toward the trailing timeline card (LTR).
+    static let rotationTowardCardDegrees: Double = 270
+}
+
 /// Lower point for an Apple Maps-style callout pin. It is layered under the
 /// circular body so the marker reads as a clean circle with a tucked tail.
 private struct AppleMapsCalloutTailShape: Shape {
@@ -53,6 +59,8 @@ private extension View {
         let bodySide = bodyRadius * 2
         let tailWidth = max(8, bodySide * 0.22)
         let dotSide = max(5, bodySide * 0.16)
+        let chromeHeight = bodySide + tailLength + 5
+        let hubCenterY = bodyRadius
         return self
             .background {
                 ZStack(alignment: .top) {
@@ -70,7 +78,11 @@ private extension View {
                         .fill(fillColor)
                         .frame(width: bodySide, height: bodySide)
                 }
-                .frame(width: bodySide, height: bodySide + tailLength + 5, alignment: .top)
+                .frame(width: bodySide, height: chromeHeight, alignment: .top)
+                .rotationEffect(
+                    .degrees(TimelineSpinePinChromeLayout.rotationTowardCardDegrees),
+                    anchor: UnitPoint(x: 0.5, y: hubCenterY / chromeHeight)
+                )
             }
             .shadow(color: Color.black.opacity(TimelineSpinePinMetrics.shadowOpacityTight), radius: 1, x: 0, y: 1)
             .shadow(
@@ -351,6 +363,9 @@ struct TimelineSpineTimeColumn: View {
         .offset(x: -TimelineSpineMetrics.spineCenterlineNudgeLeft)
         .frame(width: TimelineSpineMetrics.columnWidth, alignment: .center)
         .padding(.top, TimelineSpineMetrics.timePinColumnTopPadding)
+        .alignmentGuide(VerticalAlignment.center) { _ in
+            TimelineSpineMetrics.timePinHubYFromColumnOrigin
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
     }

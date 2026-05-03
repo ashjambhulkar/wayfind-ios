@@ -1,6 +1,10 @@
 import Foundation
 
 enum AppConfig {
+    // Staging / CI: point `supabaseURL` + `supabaseAnonKey` at a non-prod project
+    // (or keep `YOUR_PROJECT` in the URL to force offline mock). Never ship
+    // `service_role` keys in the app target.
+
     /// Must match Expo `readAppScheme()` / Supabase redirect allow-list (`wayfind://auth/callback`).
     static let appURLScheme = "wayfind"
 
@@ -50,6 +54,21 @@ enum AppConfig {
         if isUITestingLaunch { return false }
         #endif
         return !supabaseURL.contains("YOUR_PROJECT")
+    }
+
+    // MARK: - Mock budget FX (pr-11)
+
+    /// When `DataService` uses `MockDataService` and an expense’s original
+    /// currency differs from the trip cap, this value substitutes for a live
+    /// `CurrencyService` quote. **DEBUG** uses `1.1` for deterministic previews
+    /// and unit tests; **Release** uses `1` so an App Store binary never embeds
+    /// a fictional FX rate if it ever runs the offline mock path.
+    static var mockBudgetForeignToTripLedgerMultiplier: Decimal {
+        #if DEBUG
+        Decimal(string: "1.1") ?? 1
+        #else
+        1
+        #endif
     }
 
     // MARK: - Observability

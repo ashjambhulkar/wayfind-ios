@@ -335,21 +335,42 @@ final class DataService {
     }
 
     @discardableResult
-    func addExpense(_ expense: TripExpense, splits: [ExpenseSplit]) async -> TripExpense {
+    func addExpense(
+        _ expense: TripExpense,
+        splits: [ExpenseSplit],
+        tripBudgetCurrency: String
+    ) async throws -> TripExpense {
         if real != nil {
-            if let created = try? await BudgetService.shared.addExpense(expense, splits: splits) {
-                return created
-            }
-            return expense
+            let inserted = try await BudgetService.shared.addExpense(
+                expense,
+                splits: splits,
+                tripBudgetCurrency: tripBudgetCurrency
+            )
+            return inserted.expense
         }
-        return await mock!.addExpense(expense, splits: splits)
+        return try await mock!.addExpense(expense, splits: splits, tripBudgetCurrency: tripBudgetCurrency)
     }
 
-    func updateExpense(_ expense: TripExpense, splits: [ExpenseSplit]) async {
+    func updateExpense(
+        _ expense: TripExpense,
+        splits: [ExpenseSplit],
+        tripBudgetCurrency: String,
+        previousPersistedRow: TripExpense? = nil
+    ) async throws {
         if real != nil {
-            try? await BudgetService.shared.updateExpense(expense, splits: splits)
+            try await BudgetService.shared.updateExpense(
+                expense,
+                splits: splits,
+                tripBudgetCurrency: tripBudgetCurrency,
+                previousPersistedRow: previousPersistedRow
+            )
         } else {
-            await mock!.updateExpense(expense, splits: splits)
+            try await mock!.updateExpense(
+                expense,
+                splits: splits,
+                tripBudgetCurrency: tripBudgetCurrency,
+                previousPersistedRow: previousPersistedRow
+            )
         }
     }
 

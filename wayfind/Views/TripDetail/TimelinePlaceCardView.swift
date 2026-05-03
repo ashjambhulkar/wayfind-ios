@@ -31,19 +31,12 @@ struct TimelinePlaceCardView: View {
     /// Optional in mock-mode where the realtime layer never fires.
     @Environment(TripCollaborationUiStore.self) private var collaborationUi
 
-    /// Strong accent for card stripe and leading tile — driven by **local time of day**, not POI category.
     private var timelineScheduleAccent: Color {
-        TimelineScheduleChroma.accentColor(
-            scheduleInstant: place.startTime,
-            timeZone: timelineDisplayTimeZone
-        )
+        TimelineCategoryChroma.stripeColor(for: place.categoryEnum)
     }
 
     private var timelineSpinePinColor: Color {
-        TimelineScheduleChroma.spinePinColor(
-            scheduleInstant: place.startTime,
-            timeZone: timelineDisplayTimeZone
-        )
+        TimelineCategoryChroma.pinColor(for: place.categoryEnum)
     }
 
     private var inlineIcon: String {
@@ -113,7 +106,7 @@ struct TimelinePlaceCardView: View {
     // MARK: - Card surface
 
     private var cardSurface: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
             titleColumn
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -138,31 +131,43 @@ struct TimelinePlaceCardView: View {
             stripeColor: timelineScheduleAccent,
             showsTopRail: false,
             horizontalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding,
-            verticalContentPadding: TimelineCardLayoutMetrics.contentVerticalPadding
+            verticalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding
         )
+    }
+
+    /// "9:30 AM · Market" — compact first line so the name reads as the headline.
+    private var eyebrowLine: some View {
+        let parts: [String] = [startTimeText, activityTypeLabel].compactMap { $0 }
+        return Text(parts.joined(separator: " · "))
+            .font(.appSmall.weight(.medium))
+            .foregroundStyle(AppColors.textSecondary)
+            .lineLimit(1)
     }
 
     @ViewBuilder
     private var titleColumn: some View {
-        if isRestaurantActivityLayout {
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                titleRow
+        VStack(alignment: .leading, spacing: 2) {
+            eyebrowLine
 
+            Text(TimelinePlaceDisplayName.timelineDisplay(place.name))
+                .font(.timelineRowTitle)
+                .foregroundStyle(Color.primary)
+                .lineLimit(2)
+
+            if isRestaurantActivityLayout {
                 Text(restaurantReservationDetailLine)
                     .font(.footnote)
                     .foregroundStyle(AppColors.textSecondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .minimumScaleFactor(0.85)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                titleRow
-
+            } else if !detailParts.isEmpty || canShowInlinePhotoUploadButton {
                 HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
-                    Text(activitySummaryParts.joined(separator: " · "))
-                        .font(.footnote)
-                        .foregroundStyle(AppColors.textSecondary)
-                        .lineLimit(1)
+                    if !detailParts.isEmpty {
+                        Text(detailParts.joined(separator: " · "))
+                            .font(.footnote)
+                            .foregroundStyle(AppColors.textTertiary)
+                            .lineLimit(1)
+                    }
 
                     if canShowInlinePhotoUploadButton {
                         Button {
@@ -179,25 +184,6 @@ struct TimelinePlaceCardView: View {
                         .accessibilityHint(String(localized: "Opens the photo picker for this activity"))
                     }
                 }
-            }
-        }
-    }
-
-    private var titleRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
-            Text(TimelinePlaceDisplayName.timelineDisplay(place.name))
-                .font(.timelineRowTitle)
-                .foregroundStyle(Color.primary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let startTimeText {
-                Text(startTimeText)
-                    .font(.appSmall.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(AppColors.textSecondary)
-                    .lineLimit(1)
-                    .layoutPriority(1)
             }
         }
     }

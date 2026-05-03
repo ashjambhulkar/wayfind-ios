@@ -1,5 +1,38 @@
 import SwiftUI
 
+// MARK: - Category chroma
+
+/// Muted, category-specific colors for activity node pins and card stripe accents.
+/// Replaces the time-of-day system for place cards so the palette identifies category
+/// at a glance without decorating the whole screen.
+enum TimelineCategoryChroma {
+    /// Deep muted fill for the spine pin circle — white icon stays readable in both modes.
+    static func pinColor(for category: PlaceCategory) -> Color {
+        switch category {
+        case .restaurant, .nightlife: return AppColors.timelineCategoryFoodPin
+        case .shopping:               return AppColors.timelineCategoryMarketPin
+        case .attraction:             return AppColors.timelineCategoryCulturePin
+        case .hotel:                  return AppColors.timelineCategoryStayPin
+        case .nature:                 return AppColors.timelineCategoryNaturePin
+        case .transport, .custom:     return AppColors.timelineCategoryTransitPin
+        }
+    }
+
+    /// Pale tint in light mode, matching deep muted in dark mode — used for the 4pt card stripe rail.
+    static func stripeColor(for category: PlaceCategory) -> Color {
+        switch category {
+        case .restaurant, .nightlife: return AppColors.timelineCategoryFoodStripe
+        case .shopping:               return AppColors.timelineCategoryMarketStripe
+        case .attraction:             return AppColors.timelineCategoryCultureStripe
+        case .hotel:                  return AppColors.timelineCategoryStayStripe
+        case .nature:                 return AppColors.timelineCategoryNatureStripe
+        case .transport, .custom:     return AppColors.timelineCategoryTransitStripe
+        }
+    }
+}
+
+// MARK: - Schedule chroma (time-of-day — used by booking cards)
+
 /// Spine, stripe, and leading accents on the trip timeline encode **local time of day**, not category.
 /// No schedule → neutral (“flexible”); issue is reserved for future conflict/closed-state detection.
 enum TimelineScheduleChroma {

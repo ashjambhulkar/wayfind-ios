@@ -25,6 +25,8 @@ final class CategoryRollupTests: XCTestCase {
         XCTAssertTrue(rollup.totalsByCurrency.isEmpty)
         XCTAssertTrue(rollup.perCategoryByCurrency.isEmpty)
         XCTAssertTrue(rollup.currencies.isEmpty)
+        XCTAssertTrue(rollup.totalsByOriginalCurrency.isEmpty)
+        XCTAssertTrue(rollup.originalCurrencies.isEmpty)
         XCTAssertFalse(rollup.isMixedCurrency)
     }
 
@@ -41,8 +43,8 @@ final class CategoryRollupTests: XCTestCase {
         XCTAssertEqual(rollup.amount(for: "USD", category: .food), Decimal(string: "100.00"))
     }
 
-    /// Two currencies should never net into one number — caller renders a
-    /// mixed-currency banner instead of fake conversion.
+    /// Ledger buckets stay per ISO code; originals mirror the same for
+    /// hand-authored rows where currency matches the typed line.
     func testMixedCurrencyKeepsBucketsSeparate() {
         let expenses: [TripExpense] = [
             makeExpense(amount: 200, currency: "USD", category: .lodging),
@@ -56,7 +58,38 @@ final class CategoryRollupTests: XCTestCase {
         XCTAssertEqual(rollup.amount(for: "USD", category: .food), Decimal(50))
         XCTAssertEqual(rollup.amount(for: "EUR", category: .food), Decimal(150))
         XCTAssertTrue(rollup.isMixedCurrency)
-        XCTAssertEqual(rollup.currencies, ["USD", "EUR"])
+        XCTAssertEqual(Set(rollup.currencies), Set(["USD", "EUR"]))
+        XCTAssertEqual(rollup.totalsByOriginalCurrency["USD"], Decimal(250))
+        XCTAssertEqual(rollup.totalsByOriginalCurrency["EUR"], Decimal(150))
+    }
+
+    /// Normalized ledger (single ISO) can still surface mixed receipt currencies.
+    func testOriginalCurrencyTotalsWhenLedgerNormalized() {
+        let expense = TripExpense(
+            id: UUID(),
+            tripId: trip,
+            userId: alice,
+            payerUserId: alice,
+            bookingId: nil,
+            title: "Cafe",
+            amount: Decimal(string: "11.00")!,
+            currencyCode: "USD",
+            category: .food,
+            splitType: .equal,
+            expenseDate: Date(),
+            notes: nil,
+            isAutoSynced: false,
+            createdAt: nil,
+            updatedAt: nil,
+            originalAmount: Decimal(10),
+            originalCurrencyCode: "EUR",
+            fxRateAtCapture: Decimal(string: "1.1")!,
+            fxRateDate: Date()
+        )
+        let rollup = CategoryRollup.compute(from: [expense])
+        XCTAssertEqual(rollup.total(for: "USD"), Decimal(string: "11.00"))
+        XCTAssertEqual(rollup.totalsByOriginalCurrency["EUR"], Decimal(10))
+        XCTAssertTrue(rollup.isMixedCurrency)
     }
 
     /// Currency codes are normalised to uppercase so the lookup keys match
@@ -69,7 +102,7 @@ final class CategoryRollupTests: XCTestCase {
         let rollup = CategoryRollup.compute(from: expenses)
         XCTAssertEqual(rollup.total(for: "USD"), Decimal(30))
         XCTAssertEqual(rollup.total(for: "usd"), Decimal(30))
-        XCTAssertEqual(rollup.currencies, ["USD"])
+        XCTAssertEqual(rollup.currencies, Set(["USD"]))
     }
 
     /// Many small additions must not introduce drift — guard against any

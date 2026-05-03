@@ -22,6 +22,15 @@ struct EditTripBudgetSheet: View {
 
     @State private var amountText: String = ""
     @State private var currency: String = "USD"
+    /// Trip cap ISO when the sheet opened — used for pr-3 currency-change confirmation.
+    @State private var baselineTripCapCurrency: String = ""
+    @State private var showTripCapCurrencyConfirm = false
+    private enum PendingTripBudgetWrite: Equatable {
+        case save(Decimal)
+        case clear
+    }
+
+    @State private var pendingTripBudgetWrite: PendingTripBudgetWrite?
 
     var body: some View {
         NavigationStack {
@@ -88,7 +97,29 @@ struct EditTripBudgetSheet: View {
                     .disabled(parsedAmount == nil)
                 }
             }
-            .onAppear { seedFromInputs() }
+            .onAppear {
+                seedFromInputs()
+                baselineTripCapCurrency = trip.budgetCurrencyCode
+            }
+            .confirmationDialog(
+                "Change trip budget currency?",
+                isPresented: $showTripCapCurrencyConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Continue") {
+                    Task { await executePendingTripBudgetWrite() }
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingTripBudgetWrite = nil
+                }
+            } message: {
+                Text(
+                    BudgetLedgerNormalizationPolicy.userFacingTripCapCurrencyChangeConfirmationDetail(
+                        previousCapCurrency: baselineTripCapCurrency,
+                        nextCapCurrency: currency
+                    )
+                )
+            }
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
         }
@@ -107,13 +138,50 @@ struct EditTripBudgetSheet: View {
 
     private func save() async {
         guard let amount = parsedAmount else { return }
+        if BudgetLedgerNormalizationPolicy.shouldConfirmTripCapCurrencyChange(
+            previousCapCurrency: baselineTripCapCurrency,
+            nextCapCurrency: currency,
+            existingExpenseCount: viewModel.snapshot.expenses.count
+        ) {
+            pendingTripBudgetWrite = .save(amount)
+            showTripCapCurrencyConfirm = true
+            return
+        }
+        await persistSave(amount: amount)
+    }
+
+    private func clear() async {
+        if BudgetLedgerNormalizationPolicy.shouldConfirmTripCapCurrencyChange(
+            previousCapCurrency: baselineTripCapCurrency,
+            nextCapCurrency: currency,
+            existingExpenseCount: viewModel.snapshot.expenses.count
+        ) {
+            pendingTripBudgetWrite = .clear
+            showTripCapCurrencyConfirm = true
+            return
+        }
+        await persistClear()
+    }
+
+    private func executePendingTripBudgetWrite() async {
+        guard let pending = pendingTripBudgetWrite else { return }
+        pendingTripBudgetWrite = nil
+        switch pending {
+        case .save(let amount):
+            await persistSave(amount: amount)
+        case .clear:
+            await persistClear()
+        }
+    }
+
+    private func persistSave(amount: Decimal) async {
         await viewModel.updateTripTotalBudget(totalBudget: amount, currency: currency.uppercased())
         onSaved?(amount, currency.uppercased())
         toastManager.show(ToastData(message: "Budget saved", type: .success))
         dismiss()
     }
 
-    private func clear() async {
+    private func persistClear() async {
         await viewModel.updateTripTotalBudget(totalBudget: nil, currency: currency.uppercased())
         onSaved?(nil, currency.uppercased())
         toastManager.show(ToastData(message: "Budget cleared", type: .success))

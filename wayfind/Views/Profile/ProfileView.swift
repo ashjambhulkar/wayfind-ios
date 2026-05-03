@@ -261,6 +261,11 @@ struct ProfileView: View {
                             .background(AppColors.appDivider)
 
                         legalRow(selection: .termsOfService)
+
+                        Divider()
+                            .background(AppColors.appDivider)
+
+                        legalRow(selection: .exchangeRateData)
                     }
                     .background(AppColors.appSurface)
                     .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
@@ -292,7 +297,11 @@ struct ProfileView: View {
             }
         }
         .sheet(item: $legalDocumentToBrowse) { selection in
-            if let url = selection.url {
+            if selection.usesAttributionSheet {
+                NavigationStack {
+                    ExchangeRateAttributionSheet()
+                }
+            } else if let url = selection.url {
                 InAppLegalSafariView(url: url) {
                     legalDocumentToBrowse = nil
                 }
@@ -471,7 +480,7 @@ struct ProfileView: View {
             .padding(.vertical, AppSpacing.md)
         }
         .buttonStyle(.plain)
-        .disabled(selection.url == nil)
+        .disabled(!selection.canOpen)
     }
 
     private func reload() async {
@@ -614,6 +623,7 @@ struct ProfileView: View {
 private enum LegalDocumentSelection: String, Identifiable {
     case privacyPolicy
     case termsOfService
+    case exchangeRateData
 
     var id: String { rawValue }
 
@@ -621,6 +631,7 @@ private enum LegalDocumentSelection: String, Identifiable {
         switch self {
         case .privacyPolicy: "Privacy Policy"
         case .termsOfService: "Terms of Service"
+        case .exchangeRateData: "Exchange rate data"
         }
     }
 
@@ -630,7 +641,17 @@ private enum LegalDocumentSelection: String, Identifiable {
             URL(string: "https://wayfind.city/privacy")
         case .termsOfService:
             URL(string: "https://wayfind.city/terms")
+        case .exchangeRateData:
+            nil
         }
+    }
+
+    var usesAttributionSheet: Bool {
+        self == .exchangeRateData
+    }
+
+    var canOpen: Bool {
+        usesAttributionSheet || url != nil
     }
 }
 

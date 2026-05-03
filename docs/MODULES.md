@@ -49,8 +49,13 @@ Primary files:
 - `wayfind/ViewModels/BudgetViewModel.swift`
 - `wayfind/Services/BudgetService.swift`
 - `wayfind/Services/CategoryRollup.swift`
+- `wayfind/Services/CurrencyService.swift`
+- `wayfind/Utilities/TripExpenseLedgerNormalizer.swift`
+- `wayfind/Utilities/BudgetLedgerNormalizationPolicy.swift`
 
 Owns collaborative expenses, category budgets, home-currency summaries, split editing, settlements, receipt attachments, and CSV export. `BudgetService` is the backend owner; `BudgetViewModel` owns UI snapshot, derived rollups, and optimistic mutations.
+
+**Multi-currency / FX:** product contract in `wayfind/Utilities/BudgetCurrencyProductPolicy.swift`; support triage in `docs/budget-fx-support-runbook.md`; manual QA matrix in `wayfind/Docs/COLLABORATIVE_BUDGET_QA.md`.
 
 ## Collaboration And Invites
 

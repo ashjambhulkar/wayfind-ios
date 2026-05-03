@@ -27,6 +27,13 @@
 //
 // On total failure (both providers down) returns 502 with `{ error }`
 // so the iOS layer knows to fall back to its yesterday-cache.
+//
+// Client attribution (pr-7): iOS shows Profile → "Exchange rate data" with
+// links to frankfurter.app and exchangerate.host / APILayer terms.
+//
+// pr-8 Ops — Edge volume: wire Supabase Log Drains / metrics alerts on this
+// function’s request rate (e.g. sustained > N rpm vs baseline). iOS dedupes
+// identical in-flight quotes and caps concurrent FX sessions to limit spikes.
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 

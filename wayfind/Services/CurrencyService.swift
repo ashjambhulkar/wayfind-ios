@@ -5,11 +5,12 @@
 //  Wave 2.2b — exchange-rate fetcher + cache for the budget views.
 //
 //  Plan tags:
-//    §2.2  CurrencyService (Frankfurter primary, daily on-disk cache,
-//          yesterday-fallback if today not yet published)
-//    §2.2a When Frankfurter doesn't list a code (AED today) we delegate
+//    S2.2  CurrencyService (Frankfurter primary, daily on-disk cache,
+//          yesterday-fallback if today not yet published; pr-5 retries)
+//    S2.2a When Frankfurter doesn't list a code (AED today) we delegate
 //          to the `currency-rates` Edge Function which fans out to
-//          exchangerate.host as backup.
+//          exchangerate.host as backup. In-app provider disclosure: Profile
+//          → Exchange rate data (`ExchangeRateAttributionSheet`, pr-7).
 //
 //  Caching strategy:
 //    • One JSON blob on disk per (base, date), pruned to the last 30 days.
@@ -23,6 +24,14 @@
 //  Pro-gating: the SERVICE itself is unrestricted (we want every user
 //  to be able to convert at least one currency for receipts). What's
 //  Pro is the *multi-currency budget header*, gated at the call site.
+//
+//  Resilience (pr-5): each network day fetch retries transient failures
+//  with bounded backoff before falling back to yesterday / disk cache.
+//
+//  Cost (pr-8): identical in-flight network requests share one `Task`
+//  (`CurrencyRateFetchDedupeKey`); at most two FX network sessions run
+//  concurrently app-wide (permits). Supabase Edge volume: see
+//  `currency-rates/index.ts` ops comment.
 //
 
 import Foundation
@@ -53,6 +62,14 @@ enum CurrencyServiceError: LocalizedError, Sendable {
     }
 }
 
+private struct CurrencyNetworkFetchOutcome: Sendable {
+    let snapshot: CurrencyRateSnapshot
+    let provider: BudgetFxTelemetry.QuoteProvider
+    let latencyMs: Int
+    let succeededOnAttempt: Int
+    let frankfurterHadPayloadBeforeEdge: Bool
+}
+
 @MainActor
 @Observable
 final class CurrencyService {
@@ -63,8 +80,17 @@ final class CurrencyService {
     private let cacheDir: URL
     private let session: URLSession
 
+    /// pr-8 — coalesce concurrent identical network fetches (see `CurrencyRateFetchDedupeKey`).
+    private var networkInflight: [String: Task<CurrencyNetworkFetchOutcome?, Never>] = [:]
+
+    /// pr-8 — counting semaphore for concurrent FX network stacks (Frankfurter + Edge).
+    private var fxNetworkPermitsAvailable: Int = CurrencyService.maxConcurrentFXNetworkFetches
+    private var fxNetworkWaiters: [CheckedContinuation<Void, Never>] = []
+
     /// Flip this to false in tests to bypass the network entirely.
     var allowNetwork: Bool = true
+
+    private static let maxConcurrentFXNetworkFetches = 2
 
     private init() {
         let base = FileManager.default
@@ -99,6 +125,12 @@ final class CurrencyService {
         // 1. In-memory snapshot for today.
         if let inMemory = snapshots["\(baseUpper)|\(todayKey)"],
            symbolsUpper.allSatisfy({ inMemory.rates[$0] != nil }) {
+            BudgetFxTelemetry.recordCacheHit(
+                layer: .memory,
+                base: baseUpper,
+                quoteDate: inMemory.date,
+                symbolsCount: symbolsUpper.count
+            )
             return inMemory
         }
 
@@ -106,21 +138,61 @@ final class CurrencyService {
         if let disk = readSnapshot(base: baseUpper, dateKey: todayKey),
            symbolsUpper.allSatisfy({ disk.rates[$0] != nil }) {
             snapshots["\(baseUpper)|\(todayKey)"] = disk
+            BudgetFxTelemetry.recordCacheHit(
+                layer: .disk,
+                base: baseUpper,
+                quoteDate: disk.date,
+                symbolsCount: symbolsUpper.count
+            )
             return disk
         }
 
         // 3. Network — today.
         if allowNetwork {
-            if let fresh = try? await fetch(base: baseUpper, symbols: symbolsUpper, dateKey: todayKey) {
-                writeSnapshot(fresh)
-                snapshots["\(baseUpper)|\(todayKey)"] = fresh
-                return fresh
+            if let outcome = await fetchSnapshotWithRetries(
+                base: baseUpper,
+                symbols: symbolsUpper,
+                dateKey: todayKey
+            ) {
+                writeSnapshot(outcome.snapshot)
+                snapshots["\(baseUpper)|\(todayKey)"] = outcome.snapshot
+                BudgetFxTelemetry.recordNetworkFetchSuccess(
+                    day: .today,
+                    provider: outcome.provider,
+                    latencyMs: outcome.latencyMs,
+                    base: baseUpper,
+                    quoteDate: outcome.snapshot.date,
+                    symbolsCount: symbolsUpper.count,
+                    succeededOnAttempt: outcome.succeededOnAttempt,
+                    frankfurterHadPayloadBeforeEdge: outcome.frankfurterHadPayloadBeforeEdge
+                )
+                return outcome.snapshot
             }
             // 4. Network — yesterday.
-            if let fresh = try? await fetch(base: baseUpper, symbols: symbolsUpper, dateKey: yesterdayKey) {
-                writeSnapshot(fresh)
-                snapshots["\(baseUpper)|\(yesterdayKey)"] = fresh
-                return fresh
+            if let outcome = await fetchSnapshotWithRetries(
+                base: baseUpper,
+                symbols: symbolsUpper,
+                dateKey: yesterdayKey
+            ) {
+                writeSnapshot(outcome.snapshot)
+                snapshots["\(baseUpper)|\(yesterdayKey)"] = outcome.snapshot
+                BudgetFxTelemetry.recordFetchFallback(
+                    kind: .networkTodayToYesterday,
+                    base: baseUpper,
+                    quoteDate: outcome.snapshot.date,
+                    symbolsCount: symbolsUpper.count
+                )
+                BudgetFxTelemetry.recordNetworkFetchSuccess(
+                    day: .yesterday,
+                    provider: outcome.provider,
+                    latencyMs: outcome.latencyMs,
+                    base: baseUpper,
+                    quoteDate: outcome.snapshot.date,
+                    symbolsCount: symbolsUpper.count,
+                    succeededOnAttempt: outcome.succeededOnAttempt,
+                    frankfurterHadPayloadBeforeEdge: outcome.frankfurterHadPayloadBeforeEdge
+                )
+                return outcome.snapshot
             }
         }
 
@@ -128,6 +200,18 @@ final class CurrencyService {
         if let yesterday = readSnapshot(base: baseUpper, dateKey: yesterdayKey),
            symbolsUpper.allSatisfy({ yesterday.rates[$0] != nil }) {
             snapshots["\(baseUpper)|\(yesterdayKey)"] = yesterday
+            BudgetFxTelemetry.recordFetchFallback(
+                kind: .diskYesterdayAfterNetworkMiss,
+                base: baseUpper,
+                quoteDate: yesterday.date,
+                symbolsCount: symbolsUpper.count
+            )
+            BudgetFxTelemetry.recordCacheHit(
+                layer: .disk,
+                base: baseUpper,
+                quoteDate: yesterday.date,
+                symbolsCount: symbolsUpper.count
+            )
             return yesterday
         }
 
@@ -157,20 +241,104 @@ final class CurrencyService {
 
     // MARK: - Network
 
-    private func fetch(
+    /// Coalesces concurrent callers on the same dedupe key, then runs
+    /// `fetchSnapshotWithRetriesPerformingNetwork` under a global FX
+    /// concurrency cap (pr-8).
+    private func fetchSnapshotWithRetries(
         base: String,
         symbols: [String],
         dateKey: String
-    ) async throws -> CurrencyRateSnapshot {
+    ) async -> CurrencyNetworkFetchOutcome? {
+        let dedupeKey = CurrencyRateFetchDedupeKey.make(base: base, symbols: symbols, dateKey: dateKey)
+        if let existing = networkInflight[dedupeKey] {
+            return await existing.value
+        }
+        let task = Task { [dedupeKey] in
+            defer { self.networkInflight.removeValue(forKey: dedupeKey) }
+            return await self.fetchSnapshotWithRetriesPerformingNetwork(
+                base: base,
+                symbols: symbols,
+                dateKey: dateKey
+            )
+        }
+        networkInflight[dedupeKey] = task
+        return await task.value
+    }
+
+    /// Retries the private `fetchWithMeta` entry point with backoff for flaky Wi‑Fi / cold DNS.
+    private func fetchSnapshotWithRetriesPerformingNetwork(
+        base: String,
+        symbols: [String],
+        dateKey: String
+    ) async -> CurrencyNetworkFetchOutcome? {
+        await acquireFXNetworkSlot()
+        defer { releaseFXNetworkSlot() }
+        let maxAttempts = CurrencyRateFetchRetryPolicy.maxAttempts
+        for attempt in 0..<maxAttempts {
+            let delay = CurrencyRateFetchRetryPolicy.preAttemptDelayNanoseconds(attemptIndex: attempt)
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: delay)
+            }
+            let started = Date()
+            guard let packed = try? await fetchWithMeta(base: base, symbols: symbols, dateKey: dateKey) else {
+                continue
+            }
+            let rawLatencyMs = Date().timeIntervalSince(started) * 1000
+            let latencyMs: Int
+            if rawLatencyMs.isFinite, rawLatencyMs >= 0 {
+                latencyMs = min(Int(rawLatencyMs), 300_000)
+            } else {
+                latencyMs = 0
+            }
+            return CurrencyNetworkFetchOutcome(
+                snapshot: packed.snapshot,
+                provider: packed.provider,
+                latencyMs: max(0, latencyMs),
+                succeededOnAttempt: attempt + 1,
+                frankfurterHadPayloadBeforeEdge: packed.frankfurterHadPayloadBeforeEdge
+            )
+        }
+        return nil
+    }
+
+    private func acquireFXNetworkSlot() async {
+        if fxNetworkPermitsAvailable > 0 {
+            fxNetworkPermitsAvailable -= 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            fxNetworkWaiters.append(continuation)
+        }
+    }
+
+    private func releaseFXNetworkSlot() {
+        if let next = fxNetworkWaiters.first {
+            fxNetworkWaiters.removeFirst()
+            next.resume()
+        } else {
+            fxNetworkPermitsAvailable += 1
+        }
+    }
+
+    private func fetchWithMeta(
+        base: String,
+        symbols: [String],
+        dateKey: String
+    ) async throws -> (
+        snapshot: CurrencyRateSnapshot,
+        provider: BudgetFxTelemetry.QuoteProvider,
+        frankfurterHadPayloadBeforeEdge: Bool
+    ) {
         // Try Frankfurter directly first because (a) we don't pay for
         // Edge Function invocations and (b) it's faster from European
         // POPs. Only fall back to our currency-rates function when we
         // detect a missing symbol.
-        if let direct = try await fetchFrankfurter(base: base, symbols: symbols, dateKey: dateKey),
-           symbols.allSatisfy({ direct.rates[$0] != nil }) {
-            return direct
+        let frank = try await fetchFrankfurter(base: base, symbols: symbols, dateKey: dateKey)
+        if let frank, symbols.allSatisfy({ frank.rates[$0] != nil }) {
+            return (frank, .frankfurter, false)
         }
-        return try await fetchEdgeFunction(base: base, symbols: symbols, dateKey: dateKey)
+        let edgeSnap = try await fetchEdgeFunction(base: base, symbols: symbols, dateKey: dateKey)
+        return (edgeSnap, .edge, frank != nil)
     }
 
     private func fetchFrankfurter(
@@ -306,6 +474,21 @@ final class CurrencyService {
             if let mtime = attrs?.contentModificationDate, mtime < cutoff {
                 try? FileManager.default.removeItem(at: file)
             }
+        }
+    }
+}
+
+// MARK: - Fetch retry (pr-5)
+
+private enum CurrencyRateFetchRetryPolicy {
+    static let maxAttempts = 3
+
+    /// Delay **before** this zero-based attempt (0 = no sleep).
+    static func preAttemptDelayNanoseconds(attemptIndex: Int) -> UInt64 {
+        switch attemptIndex {
+        case 0: return 0
+        case 1: return 250_000_000
+        default: return 750_000_000
         }
     }
 }
