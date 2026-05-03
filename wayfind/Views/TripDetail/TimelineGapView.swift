@@ -1,9 +1,7 @@
 import CoreLocation
-import MapKit
 import SwiftUI
 
-/// Connector between two consecutive itinerary rows: route summary, optional
-/// multi-mode picker, and a control to open system Maps directions A → B.
+/// Connector between two consecutive itinerary rows: route summary (time + distance), optional multi-mode picker, and Maps directions A → B.
 struct TimelineGapView: View {
     let tripId: UUID
     let cityProfileId: UUID?
@@ -43,8 +41,7 @@ struct TimelineGapView: View {
 
     private var collapsedRow: some View {
         HStack(alignment: .center, spacing: AppSpacing.sm) {
-            Spacer()
-                .frame(width: TimelineBetweenStopsMetrics.timePinGutterWidth)
+            modeSpineCircle
 
             summaryCluster
 
@@ -56,13 +53,39 @@ struct TimelineGapView: View {
             }
 
             Spacer(minLength: AppSpacing.xs)
-
-            mapsGlyphButton
         }
         .frame(minHeight: TimelineBetweenStopsMetrics.minRowHeight)
     }
 
-    /// Icon + ETA line; tap expands inline mode pills when multiple modes exist.
+    private var modeSpineCircle: some View {
+        let circleSide: CGFloat = 30
+        return ZStack {
+            Circle()
+                .fill(AppColors.appBackground)
+                .frame(width: circleSide, height: circleSide)
+                .overlay {
+                    Circle()
+                        .strokeBorder(
+                            TimelineSpineMetrics.continuousRailColor,
+                            lineWidth: TimelineSpineMetrics.continuousRailLineWidth
+                        )
+                }
+
+            if isComputing && !hasAnySummaryToShow {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: TimelineBetweenStopsPresentation.sfSymbol(for: effectiveMode))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .accessibilityHidden(true)
+            }
+        }
+        .offset(x: -TimelineSpineMetrics.spineCenterlineNudgeLeft)
+        .frame(width: TimelineBetweenStopsMetrics.timePinGutterWidth, alignment: .center)
+        .accessibilityHidden(true)
+    }
+
     @ViewBuilder
     private var summaryCluster: some View {
         let label = summaryClusterLabel
@@ -90,15 +113,6 @@ struct TimelineGapView: View {
 
     private var summaryClusterLabel: some View {
         HStack(spacing: AppSpacing.xs) {
-            if isComputing && !hasAnySummaryToShow {
-                ProgressView()
-                    .controlSize(.small)
-            }
-            Image(systemName: TimelineBetweenStopsPresentation.sfSymbol(for: effectiveMode))
-                .font(.appCaption.weight(.medium))
-                .foregroundStyle(AppColors.textTertiary)
-                .accessibilityHidden(true)
-
             Text(summaryLine)
                 .font(.appCaption)
                 .foregroundStyle(AppColors.textTertiary)
@@ -117,7 +131,6 @@ struct TimelineGapView: View {
         }
     }
 
-    /// Compact mode picks when multiple routes exist: icon + duration (`1h 30m`); tap selects and collapses.
     private var inlineModeChips: some View {
         HStack(spacing: AppSpacing.xs) {
             ForEach(modesForExpansion, id: \.self) { mode in
@@ -127,8 +140,8 @@ struct TimelineGapView: View {
     }
 
     private func inlineModeChip(_ mode: AppleTravelTimesService.Mode) -> some View {
-        let isSelected = (effectiveMode == mode)
-        let durationText = expansionRowMinutes(for: mode).map { TimelineBetweenStopsPresentation.compactTravelDuration(minutes: $0) }
+        let isSelected = effectiveMode == mode
+        let durationText = expansionRowMinutes(for: mode).map { TimelineBetweenStopsPresentation.spineTravelDuration(minutes: $0) }
 
         return Button {
             userPickedMode = mode
@@ -166,24 +179,7 @@ struct TimelineGapView: View {
     private func inlineModeChipAccessibilityLabel(mode: AppleTravelTimesService.Mode, durationMinutes: Int?) -> String {
         let modeName = TimelineBetweenStopsPresentation.accessibilityLabel(for: mode)
         guard let m = durationMinutes, m >= 0 else { return modeName }
-        return "\(modeName), \(TimelineBetweenStopsPresentation.compactTravelDuration(minutes: m))"
-    }
-
-    private var mapsGlyphButton: some View {
-        Button {
-            openDirectionsInMaps()
-            HapticManager.light()
-        } label: {
-            Image(systemName: "arrow.up.forward")
-                .font(.appCaption.weight(.semibold))
-                .foregroundStyle(AppColors.textTertiary)
-                .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, AppSpacing.xs)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(String(localized: "Directions"))
-        .accessibilityHint(String(localized: "Opens Maps with directions between these stops"))
+        return "\(modeName), \(TimelineBetweenStopsPresentation.spineTravelDuration(minutes: m))"
     }
 
     // MARK: - Leg data
@@ -195,7 +191,6 @@ struct TimelineGapView: View {
         return heuristicFallbackMode
     }
 
-    /// Among modes with a cached Apple ETA, pick minimum minutes (tie-break: walking, driving, transit).
     private var fastestCachedAppleMode: AppleTravelTimesService.Mode? {
         let pairs: [(AppleTravelTimesService.Mode, Int)] = AppleTravelTimesService.Mode.allCases.compactMap { mode in
             guard let minutes = appleMinutes(for: mode) else { return nil }
@@ -231,7 +226,7 @@ struct TimelineGapView: View {
     private var summaryLine: String {
         let minutes = resolvedMinutesForSummary
         let distanceText = resolvedDistanceText
-        let minutesText = minutes.map { TimelineBetweenStopsPresentation.compactTravelDuration(minutes: $0) } ?? "—"
+        let minutesText = minutes.map { TimelineBetweenStopsPresentation.spineTravelDuration(minutes: $0) } ?? "—"
         return TimelineBetweenStopsPresentation.summaryLine(minutesText: minutesText, distanceText: distanceText)
     }
 
@@ -252,7 +247,6 @@ struct TimelineGapView: View {
         return TimelineBetweenStopsPresentation.formatDistance(meters: Int((km * 1_000).rounded()))
     }
 
-    /// Route distance for `mode` from MapKit (per-mode) or server aggregate when per-mode is absent.
     private func appleRouteDistanceMeters(for mode: AppleTravelTimesService.Mode) -> Int? {
         let svc = AppleTravelTimesService.shared
         let fp = TimelineBetweenStopsPresentation.normalizedGooglePlaceId(fromPlace.googlePlaceId)
@@ -360,41 +354,6 @@ struct TimelineGapView: View {
         )
     }
 
-    private func openDirectionsInMaps() {
-        let origin = fromCoordinate
-        let dest = toCoordinate
-        let fromLabel = fromPlace.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let toLabel = toPlace.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let mode = effectiveMode
-        Self.openDirectionsWithMapKit(
-            from: origin,
-            to: dest,
-            fromName: fromLabel.isEmpty ? nil : fromLabel,
-            toName: toLabel.isEmpty ? nil : toLabel,
-            mode: mode
-        )
-    }
-
-    private static func openDirectionsWithMapKit(
-        from origin: CLLocationCoordinate2D,
-        to dest: CLLocationCoordinate2D,
-        fromName: String?,
-        toName: String?,
-        mode: AppleTravelTimesService.Mode
-    ) {
-        let source = MKMapItem(placemark: MKPlacemark(coordinate: origin))
-        source.name = fromName
-        let destination = MKMapItem(placemark: MKPlacemark(coordinate: dest))
-        destination.name = toName
-        MKMapItem.openMaps(
-            with: [source, destination],
-            launchOptions: [
-                MKLaunchOptionsDirectionsModeKey: TimelineBetweenStopsPresentation.mkLaunchDirectionsMode(for: mode),
-            ]
-        )
-    }
-
-    /// Planner / DB hint for travel **into** `toPlace` from the previous stop.
     private func storedTravelModeHint() -> AppleTravelTimesService.Mode? {
         let normalized = toPlace.travelMode?
             .trimmingCharacters(in: .whitespacesAndNewlines)

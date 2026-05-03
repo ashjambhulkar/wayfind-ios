@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{ "command": ".cursor/hooks/run_metric_hook.sh sessionStart" }],
+    "sessionEnd": [{ "command": ".cursor/hooks/run_metric_hook.sh sessionEnd" }],
+    "beforeSubmitPrompt": [
+      {
+        "command": ".cursor/hooks/run_metric_hook.sh beforeSubmitPrompt",
+        "matcher": "UserPromptSubmit"
+      }
+    ],
+    "afterAgentResponse": [
+      {
+        "command": ".cursor/hooks/run_metric_hook.sh afterAgentResponse",
+        "matcher": "AgentResponse"
+      }
+    ]
+  }
+}

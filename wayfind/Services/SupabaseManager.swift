@@ -484,15 +484,15 @@ final class SupabaseManager {
             placesByDayId[dayId, default: []].append(place)
         }
 
-        // Sort each day's merged list: scheduled first (by startTime), then
-        // unscheduled (by sortOrder) — mirrors web buildDayTimelineEntries.
+        // Sort each day's merged list by the same spine instant the UI shows
+        // (`startTime`, else booking-type fallbacks), then `sortOrder`.
         for dayId in placesByDayId.keys {
             placesByDayId[dayId]?.sort { a, b in
-                switch (a.startTime, b.startTime) {
+                switch (a.timelineSpineSortInstant(hotelTimelineRole: nil), b.timelineSpineSortInstant(hotelTimelineRole: nil)) {
                 case let (l?, r?): return l < r
-                case (nil, _?):    return false
-                case (_?, nil):    return true
-                case (nil, nil):   return a.sortOrder < b.sortOrder
+                case (nil, _?): return false
+                case (_?, nil): return true
+                case (nil, nil): return a.sortOrder < b.sortOrder
                 }
             }
         }
@@ -717,10 +717,13 @@ final class SupabaseManager {
                 return existing
             })
         } catch is CancellationError {
-            // Task was cancelled (tab switch, sheet dismissed, view torn down).
-            // Enrichment is non-essential; return no enrichment rather than
-            // surfacing a debug fatal while the timeline itself can still render.
-            return [:]
+            // Propagate cancellation so callers see a clean failure instead
+            // of silently receiving an empty enrichment map. Swallowing it
+            // previously let `fetchTripTimeline` return Place structs stripped
+            // of subtypes/rating/thumbnails, which the view model committed —
+            // causing the timeline subtitle and spine icon to shuffle between
+            // enriched and unenriched values on every debounce cancellation.
+            throw CancellationError()
         } catch {
             // Enrichment is non-essential — print in DEBUG so the data-quality
             // issue stays visible, but never trap. The timeline must still

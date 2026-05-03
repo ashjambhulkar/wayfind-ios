@@ -60,35 +60,34 @@ struct TimelineBookingCardView: View {
         self.onFlightBadgeTap = onFlightBadgeTap
     }
 
-    private var bookingColor: Color {
-        place.bookingCategoryEnum?.color ?? AppColors.appPrimary
-    }
-
     private var bookingCategory: BookingCategory {
         place.bookingCategoryEnum ?? .activity
+    }
+
+    /// Strong accent for booking card chrome from **local time of day**, not booking category (`TimelineScheduleChroma`).
+    private var timelineScheduleAccent: Color {
+        TimelineScheduleChroma.accentColor(
+            scheduleInstant: spineStartTime,
+            timeZone: timelineDisplayTimeZone
+        )
+    }
+
+    private var timelineSpinePinColor: Color {
+        TimelineScheduleChroma.spinePinColor(
+            scheduleInstant: spineStartTime,
+            timeZone: timelineDisplayTimeZone
+        )
     }
 
     /// Wall-clock instant shown on the spine (start of the row); falls back to
     /// category-specific primary times when `place.startTime` is unset.
     private var spineStartTime: Date? {
-        if let start = place.startTime { return start }
-        switch place.bookingDetails {
-        case .flight(let details):
+        if place.bookingCategoryEnum == .flight,
+           case .flight(let details) = place.bookingDetails {
+            if let start = place.startTime { return start }
             return flightDepartureTime(details)
-        case .hotel(let hotel):
-            if hotelTimelineRole == .checkOut {
-                return hotel.checkOutDate
-            }
-            return hotel.checkInDate
-        case .restaurant(let restaurant):
-            return restaurant.reservationTime
-        case .carRental(let rental):
-            return rental.pickupTime
-        case .transport(let transport):
-            return transport.departureTime
-        case .activity, nil:
-            return nil
         }
+        return place.timelineSpineSortInstant(hotelTimelineRole: hotelTimelineRole)
     }
 
     private var spineAccessibilityLabel: String {
@@ -99,10 +98,11 @@ struct TimelineBookingCardView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: TimelineSpineMetrics.pinColumnToCardSpacing) {
+        HStack(alignment: .center, spacing: TimelineSpineMetrics.pinColumnToCardSpacing) {
             TimelineSpineTimeColumn(
                 startTime: spineStartTime,
-                accentColor: bookingColor,
+                accentColor: timelineSpinePinColor,
+                symbol: bookingCategory.sfSymbol,
                 timeZone: timelineDisplayTimeZone,
                 accessibilityLabel: spineAccessibilityLabel
             )
@@ -134,6 +134,7 @@ struct TimelineBookingCardView: View {
                 departureTime: flightDepartureTime(details),
                 arrivalTime: flightArrivalTime(details),
                 duration: flightDuration(details),
+                scheduleAccent: timelineScheduleAccent,
                 statusText: flightStatusText ?? "Flight",
                 showFlightStatusBadge: shouldShowFlightBadge,
                 flightStatus: flightStatus,
@@ -146,6 +147,7 @@ struct TimelineBookingCardView: View {
         } else {
             TimelineBookingPassCard(
                 category: bookingCategory,
+                stripeAccent: timelineScheduleAccent,
                 eyebrow: passEyebrow,
                 title: passTitle,
                 subtitle: passSubtitle,
@@ -524,24 +526,28 @@ struct TimelineBookingCardView: View {
     // MARK: - Accessibility
 
     private var accessibilityDescription: String {
+        let scheduling = TimelineScheduleChroma.accessibilitySchedulingBucket(
+            scheduleInstant: spineStartTime,
+            timeZone: timelineDisplayTimeZone
+        )
         let label = place.bookingCategoryEnum?.label ?? "Booking"
         if case .hotel = place.bookingDetails {
             let nightsPart = passTitleTrailingText ?? String(localized: "Nights not set")
             let addr = hotelTimelineAddressFootnote.map { ", \($0)" } ?? ""
-            return "\(label): \(passTitle), \(nightsPart), \(passSubtitle)\(addr)"
+            return "\(label): \(passTitle), \(nightsPart), \(passSubtitle)\(addr), \(scheduling)"
         }
         if case .carRental = place.bookingDetails {
             let schedule = passTitleTrailingText ?? String(localized: "Pickup TBD")
-            return "\(label): \(passTitle), \(schedule), \(passSubtitle)"
+            return "\(label): \(passTitle), \(schedule), \(passSubtitle), \(scheduling)"
         }
         if case .transport = place.bookingDetails {
             let schedule = passTitleTrailingText ?? String(localized: "Time TBD")
-            return "\(label): \(passTitle), \(schedule), \(passSubtitle)"
+            return "\(label): \(passTitle), \(schedule), \(passSubtitle), \(scheduling)"
         }
         if case .activity = place.bookingDetails {
             let timePart = place.startTime.map { $0.timeFormatted(timeZone: timelineDisplayTimeZone) }
                 ?? String(localized: "Time TBD")
-            return "\(label): \(place.name), \(timePart), \(passSubtitle)"
+            return "\(label): \(place.name), \(timePart), \(passSubtitle), \(scheduling)"
         }
         var pieces: [String] = []
         pieces.append("\(label): \(place.name)")
@@ -558,6 +564,7 @@ struct TimelineBookingCardView: View {
         if let conf = place.confirmationNumber, !conf.isEmpty {
             pieces.append("confirmation \(conf)")
         }
+        pieces.append(scheduling)
         return pieces.joined(separator: ", ")
     }
 }
@@ -576,6 +583,8 @@ private struct TimelineBookingPassMetric: Identifiable {
 
 private struct TimelineBookingPassCard: View {
     let category: BookingCategory
+    /// Left stripe + schedule chrome — time-of-day, not booking category.
+    let stripeAccent: Color
     let eyebrow: String
     let title: String
     let subtitle: String
@@ -721,7 +730,7 @@ private struct TimelineBookingPassCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .timelineCardChassis(
-            stripeColor: category.color,
+            stripeColor: stripeAccent,
             showsTopRail: false,
             horizontalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding,
             verticalContentPadding: TimelineCardLayoutMetrics.contentVerticalPadding
@@ -786,6 +795,8 @@ private struct TimelineFlightBookingPassCard: View {
     let departureTime: Date?
     let arrivalTime: Date?
     let duration: String?
+    /// Route / plane glyph tint aligned with spine (local departure time bucket).
+    let scheduleAccent: Color
     /// Supplementary summary for the card-level VoiceOver label when the
     /// status badge is hidden (e.g. Pro user before tracking).
     let statusText: String
@@ -809,7 +820,12 @@ private struct TimelineFlightBookingPassCard: View {
                 RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
                     .strokeBorder(AppColors.appDivider, lineWidth: 0.6)
             }
-            .shadow(color: .black.opacity(0.07), radius: 8, y: 4)
+            .shadow(
+                color: Color.black.opacity(TimelineCardLayoutMetrics.cardShadowOpacity),
+                radius: TimelineCardLayoutMetrics.cardShadowRadius,
+                x: 0,
+                y: TimelineCardLayoutMetrics.cardShadowYOffset
+            )
             .accessibilityElement(children: .combine)
             .accessibilityLabel(accessibilitySummary)
     }
@@ -869,7 +885,7 @@ private struct TimelineFlightBookingPassCard: View {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "airplane.departure")
                     .font(.appCaption.weight(.semibold))
-                    .foregroundStyle(BookingCategory.flight.color)
+                    .foregroundStyle(scheduleAccent)
                 Text(departureTime?.timeFormatted ?? "Time TBD")
                     .font(.appSmall.weight(.semibold))
                     .monospacedDigit()
@@ -879,7 +895,7 @@ private struct TimelineFlightBookingPassCard: View {
 
             Image(systemName: "airplane")
                 .font(.appCaption.weight(.semibold))
-                .foregroundStyle(BookingCategory.flight.color)
+                .foregroundStyle(scheduleAccent)
                 .frame(width: LayoutMetrics.centerRouteColumnWidth, alignment: .center)
 
             HStack(spacing: AppSpacing.xs) {
@@ -889,7 +905,7 @@ private struct TimelineFlightBookingPassCard: View {
                     .foregroundStyle(AppColors.textSecondary)
                 Image(systemName: "airplane.arrival")
                     .font(.appCaption.weight(.semibold))
-                    .foregroundStyle(BookingCategory.flight.color)
+                    .foregroundStyle(scheduleAccent)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -942,7 +958,7 @@ private struct TimelineFlightBookingPassCard: View {
 
     private var routeArcStroke: some View {
         TimelineFlightRouteArc()
-            .stroke(BookingCategory.flight.color.opacity(0.42), style: Self.flightRouteStrokeStyle)
+            .stroke(scheduleAccent.opacity(0.42), style: Self.flightRouteStrokeStyle)
     }
 }
 

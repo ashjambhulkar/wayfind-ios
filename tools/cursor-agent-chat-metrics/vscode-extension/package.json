@@ -1,0 +1,93 @@
+{
+  "name": "cursor-agent-chat-metrics",
+  "displayName": "Cursor Agent Chat Metrics",
+  "description": "Live tab (top strip), sidebar, status bar; per-chat model from hooks; session picker.",
+  "version": "0.3.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["*"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cursor-agent-metrics",
+          "title": "Agent metrics",
+          "icon": "media/sidebar.svg"
+        }
+      ]
+    },
+    "views": {
+      "cursor-agent-metrics": [
+        {
+          "type": "webview",
+          "id": "cursorAgentMetrics.panel",
+          "name": "This chat",
+          "contextualTitle": "Agent chat metrics"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "cursorAgentMetrics.openState",
+        "title": "Open state folder"
+      },
+      {
+        "command": "cursorAgentMetrics.showJson",
+        "title": "Open current.json"
+      },
+      {
+        "command": "cursorAgentMetrics.focusPanel",
+        "title": "Focus sidebar panel"
+      },
+      {
+        "command": "cursorAgentMetrics.openLiveTab",
+        "title": "Open live metrics tab"
+      },
+      {
+        "command": "cursorAgentMetrics.refreshLiveTab",
+        "title": "Refresh live metrics tab"
+      },
+      {
+        "command": "cursorAgentMetrics.pickSession",
+        "title": "Pick chat session…"
+      }
+    ],
+    "menus": {
+      "menubar/AgentMetrics": [
+        {
+          "command": "cursorAgentMetrics.openLiveTab",
+          "group": "1_nav"
+        },
+        {
+          "command": "cursorAgentMetrics.pickSession",
+          "group": "1_nav"
+        },
+        {
+          "command": "cursorAgentMetrics.refreshLiveTab",
+          "group": "2_edit"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "cursorAgentMetrics.refreshLiveTab",
+          "when": "resourceScheme == cursor-agent-metrics",
+          "group": "navigation@9"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}

@@ -34,7 +34,7 @@ struct ActivityPhotosSheetTarget: Identifiable, Hashable {
 struct ActivityFeedPhotoStackView: View {
     let items: [ActivityFeedPhotoStackItem]
     var maxVisible: Int = 3
-    /// Default matches recent-activity rows; timeline matches `TimelineCardLeadingIconMetrics.solidSquareSideLength`.
+    /// Default matches recent-activity rows; callers can pass a larger size for timeline-style previews.
     var tileSize: CGFloat = 38
     var tileCornerRadius: CGFloat = AppCornerRadius.small
     enum Arrangement {

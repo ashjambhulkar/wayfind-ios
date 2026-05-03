@@ -1054,7 +1054,7 @@ struct TripDetailView: View {
         }
     }
 
-    /// `TimelineGapView` is laid out after this row; full `rowBottomSpacing` leaves a tall band above the travel segment.
+    /// `TimelineGapView` follows this row; use a tighter bottom inset when it’s the slim spine cue.
     private func timelineRowBottomSpacing(afterIndex index: Int, rows: [TripTimelineDisplayRow]) -> CGFloat {
         guard index < rows.count - 1 else { return TimelineSpineMetrics.rowBottomSpacing }
         let from = rows[index].place

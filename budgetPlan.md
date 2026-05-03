@@ -21,29 +21,33 @@
 
 ### Database (Already Deployed in Supabase)
 
-| Table | Status | Key Fields |
-|---|---|---|
-| `trip_expenses` | Deployed | trip_id, booking_id (FK), title, amount, currency, category (8 types), split_type (equal/exact/percentage/full), expense_date, payer_user_id, notes |
-| `expense_splits` | Deployed | expense_id (FK), user_id, owed_amount |
-| `trip_budgets` | Deployed | trip_id, user_id, category, planned_amount, spent_amount, currency |
-| `trip_collaborators` | Deployed | trip_id, user_id, role (viewer/editor), status, permissions including `can_see_budget` (via app model) |
+
+| Table                | Status   | Key Fields                                                                                                                                          |
+| -------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trip_expenses`      | Deployed | trip_id, booking_id (FK), title, amount, currency, category (8 types), split_type (equal/exact/percentage/full), expense_date, payer_user_id, notes |
+| `expense_splits`     | Deployed | expense_id (FK), user_id, owed_amount                                                                                                               |
+| `trip_budgets`       | Deployed | trip_id, user_id, category, planned_amount, spent_amount, currency                                                                                  |
+| `trip_collaborators` | Deployed | trip_id, user_id, role (viewer/editor), status, permissions including `can_see_budget` (via app model)                                              |
+
 
 ### iOS App (Prototype UI Exists)
 
-| Component | File | Status |
-|---|---|---|
-| `BudgetScreenView` | `Views/Prototype/V2/Organizers/BudgetScreenView.swift` | Prototype — uses DummyData, has summary card, category breakdown, expense list, add expense form |
-| `ExpenseSplittingView` | `Views/Prototype/V4/Budget/ExpenseSplittingView.swift` | Prototype — has "Who Owes Who" settlements, split expense breakdown |
-| `AddExpenseSheetView` | Inside BudgetScreenView.swift | Basic form — title, amount, category picker, date. No receipt photo, no split, no currency picker |
-| Budget pill | `Views/TripDetail/PillsRowView.swift` | Gated behind `.budget` feature flag (V2+), shows "Soon" label in V1 |
-| `Expense` model | `Models/DemoModels.swift` | Has `receiptPhotoUrl: String?` field (unused in UI) |
-| `CollaboratorPermissions` | `Models/DemoModels.swift` | Has `canSeeBudget: Bool` (already modeled) |
+
+| Component                 | File                                                   | Status                                                                                            |
+| ------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `BudgetScreenView`        | `Views/Prototype/V2/Organizers/BudgetScreenView.swift` | Prototype — uses DummyData, has summary card, category breakdown, expense list, add expense form  |
+| `ExpenseSplittingView`    | `Views/Prototype/V4/Budget/ExpenseSplittingView.swift` | Prototype — has "Who Owes Who" settlements, split expense breakdown                               |
+| `AddExpenseSheetView`     | Inside BudgetScreenView.swift                          | Basic form — title, amount, category picker, date. No receipt photo, no split, no currency picker |
+| Budget pill               | `Views/TripDetail/PillsRowView.swift`                  | Gated behind `.budget` feature flag (V2+), shows "Soon" label in V1                               |
+| `Expense` model           | `Models/DemoModels.swift`                              | Has `receiptPhotoUrl: String?` field (unused in UI)                                               |
+| `CollaboratorPermissions` | `Models/DemoModels.swift`                              | Has `canSeeBudget: Bool` (already modeled)                                                        |
+
 
 ### Backend Infrastructure Available
 
 - **Supabase Storage** — can store receipt photos
 - **Edge Functions** — can host OCR/AI processing
-- **`extract-booking` Edge Function** — existing pattern for GPT-4o vision API calls
+- `**extract-booking` Edge Function** — existing pattern for GPT-4o vision API calls
 - **Supabase Realtime** — for collaborative budget sync
 - **FCM notifications** — for expense alerts
 
@@ -68,6 +72,7 @@
 **The best expense is one the user never had to enter.**
 
 Priority stack:
+
 1. **Automatic** — system creates the expense with zero user input
 2. **Capture** — user points camera, system does the rest
 3. **Quick** — 2-3 taps maximum for manual entry
@@ -83,14 +88,17 @@ Priority stack:
 
 When a booking is added to the trip (via any method), automatically create a corresponding expense entry.
 
-| Booking Source | Auto-Created Expense |
-|---|---|
-| Email forwarding (AI parsed) | Flight $342, Hotel $189/night, etc. |
-| Manual booking entry | Uses the price fields from the booking form |
-| Screenshot-to-booking scan | Uses extracted price |
-| AI Trip Generator | If price estimates included |
+
+| Booking Source               | Auto-Created Expense                        |
+| ---------------------------- | ------------------------------------------- |
+| Email forwarding (AI parsed) | Flight $342, Hotel $189/night, etc.         |
+| Manual booking entry         | Uses the price fields from the booking form |
+| Screenshot-to-booking scan   | Uses extracted price                        |
+| AI Trip Generator            | If price estimates included                 |
+
 
 **How it works:**
+
 - Booking saved → `trip_expenses` row auto-inserted with `booking_id` FK
 - Category auto-mapped: flight booking → "flight" expense, hotel → "lodging", etc.
 - Amount comes from booking's price field
@@ -100,6 +108,7 @@ When a booking is added to the trip (via any method), automatically create a cor
 **Why this is #1:** User is already entering booking info. Double-entry is waste. The booking IS the expense — just link them.
 
 **Multi-day bookings (hotels, car rentals):**
+
 - Option A: Single expense for total amount (simpler)
 - Option B: Daily expense spread across trip days (better for daily spending analysis)
 - **Recommendation:** Single expense, but show per-night cost in the budget breakdown view
@@ -115,12 +124,14 @@ User takes a photo of a receipt. GPT-4o vision extracts all relevant data.
 See [Section 4](#4-receipt-photo-scanning--deep-dive) for full technical deep dive.
 
 **Entry points for receipt scan:**
+
 - Speed Dial FAB → "Scan Receipt" (camera icon)
 - Budget screen → "+" button → "Scan Receipt" option
 - Share Extension → share receipt image from Photos/Files
 - Notification action → "Snap a receipt" quick action
 
 **What gets extracted:**
+
 - Total amount (including tip if applicable)
 - Merchant/vendor name → becomes expense title
 - Date/time
@@ -129,6 +140,7 @@ See [Section 4](#4-receipt-photo-scanning--deep-dive) for full technical deep di
 - Individual items (optional breakdown)
 
 **Review flow (same pattern as screenshot-to-booking):**
+
 - Parsed fields shown with confidence indicators (✅ Verified / ⚠️ Check)
 - User confirms or edits
 - One-tap save
@@ -142,12 +154,14 @@ See [Section 4](#4-receipt-photo-scanning--deep-dive) for full technical deep di
 A hyper-minimal expense entry that prioritizes speed over completeness.
 
 **UX Flow:**
+
 1. User taps "+" (from Speed Dial, Budget screen, or widget)
 2. **Numpad appears first** — user types amount (e.g., "45.50")
 3. **Category grid** — 6 large icon buttons (Transport, Food, Activities, Accommodation, Shopping, Other)
 4. Tap a category → expense saved immediately with smart defaults
 
 **Smart defaults applied automatically:**
+
 - Date: today
 - Currency: trip destination currency (or last-used currency)
 - Title: "{Category} - {Date}" (e.g., "Food - Apr 24")
@@ -164,12 +178,14 @@ A hyper-minimal expense entry that prioritizes speed over completeness.
 Users receive digital receipts everywhere — email, WhatsApp, banking apps, Uber, DoorDash. Instead of opening TripWeave and manually entering, they share directly.
 
 **iOS Share Extension:**
+
 - Register TripWeave in the system share sheet for images and text
 - User shares receipt image from Photos, email, or messaging app
 - Extension shows: trip selector → auto-parsed preview → confirm
 - Works without opening the full app
 
 **What can be shared:**
+
 - Receipt photos/screenshots
 - Text snippets (amount + description from banking app)
 - URLs (confirmation pages — parse the page content)
@@ -182,14 +198,17 @@ Users receive digital receipts everywhere — email, WhatsApp, banking apps, Ube
 
 Don't wait for the user to remember. Remind them at the right moments.
 
-| Trigger | Notification | Action |
-|---|---|---|
-| End of each trip day (e.g., 9 PM) | "How much did you spend today in Paris?" | Tap → Quick Add with today pre-filled |
-| After a booking time passes | "How was lunch at Trattoria? Log expense?" | Tap → Pre-filled with booking venue + estimated cost |
-| Trip just ended | "Trip complete! Review your expenses?" | Tap → Budget summary with any gaps highlighted |
-| Collaborator added expense | "Sarah added $85 dinner. You owe $42.50" | Tap → View split detail |
+
+| Trigger                           | Notification                               | Action                                               |
+| --------------------------------- | ------------------------------------------ | ---------------------------------------------------- |
+| End of each trip day (e.g., 9 PM) | "How much did you spend today in Paris?"   | Tap → Quick Add with today pre-filled                |
+| After a booking time passes       | "How was lunch at Trattoria? Log expense?" | Tap → Pre-filled with booking venue + estimated cost |
+| Trip just ended                   | "Trip complete! Review your expenses?"     | Tap → Budget summary with any gaps highlighted       |
+| Collaborator added expense        | "Sarah added $85 dinner. You owe $42.50"   | Tap → View split detail                              |
+
 
 **Smart cadence:**
+
 - Max 1 budget notification per day (don't nag)
 - Skip if user already logged expenses today
 - Disable if user turns off budget reminders
@@ -201,12 +220,14 @@ Don't wait for the user to remember. Remind them at the right moments.
 **Friction level: Set once → auto-populates daily**
 
 Many travel expenses repeat daily:
+
 - Hotel: same nightly rate for duration of stay
 - Car rental: daily rate
 - Parking: daily rate
 - Transit pass: daily cost
 
 **How it works:**
+
 - When adding a hotel booking (or manually), option to "Repeat daily"
 - System auto-creates expense entries for each day of the trip
 - Shows in budget breakdown per day
@@ -220,13 +241,16 @@ Many travel expenses repeat daily:
 
 After a few days, spending patterns emerge. Surface them.
 
-| Template | Based On |
-|---|---|
-| "Coffee" — $4.50, Food | Logged 3 times this trip |
-| "Uber" — ~$15, Transport | Logged twice |
-| "Museum entry" — $20, Activities | Common at destination |
+
+| Template                         | Based On                 |
+| -------------------------------- | ------------------------ |
+| "Coffee" — $4.50, Food           | Logged 3 times this trip |
+| "Uber" — ~$15, Transport         | Logged twice             |
+| "Museum entry" — $20, Activities | Common at destination    |
+
 
 **How it works:**
+
 - After 2+ similar expenses, offer "Quick add: Coffee again?" at top of budget screen
 - Templates are per-trip, auto-generated
 - Tap → pre-fills everything, user just confirms or adjusts amount
@@ -240,14 +264,17 @@ After a few days, spending patterns emerge. Surface them.
 WidgetKit widget for the active trip:
 
 **Small widget (2x2):**
+
 - Shows: Total spent / Budget remaining
 - Tap → opens Quick Add
 
 **Medium widget (4x2):**
+
 - Shows: Total spent, today's spending, top category
 - Tap → opens Budget screen
 
 **Large widget (4x4):**
+
 - Shows: Category breakdown bars + recent expenses
 - Quick entry buttons for top 3 categories
 
@@ -260,6 +287,7 @@ WidgetKit widget for the active trip:
 "Hey Siri, log 45 euros for lunch in TripWeave"
 
 **Implementation:** Siri Shortcuts (App Intents framework)
+
 - Define intents: LogExpense(amount, category, currency)
 - Siri extracts parameters from natural speech
 - Confirms: "Logging €45 food expense for Italy Trip. Correct?"
@@ -275,6 +303,7 @@ WidgetKit widget for the active trip:
 Detect purchases made near trip destination and offer to log them.
 
 **Options:**
+
 - **Plaid API** — connect bank account, auto-detect transactions at destination
 - **Apple Pay receipts** — (no public API currently, may change)
 - **Manual bank CSV import** — user exports from banking app, TripWeave parses
@@ -285,18 +314,20 @@ Detect purchases made near trip destination and offer to log them.
 
 ### Summary: Friction Spectrum
 
-| Method | Friction | User Effort | Version |
-|---|---|---|---|
-| Auto from bookings | None | 0 taps | V2a |
-| Receipt scan | Very Low | Point camera + confirm | V2a |
-| Quick add | Low | 3 taps (amount + category + save) | V2a |
-| Share extension | Low | Share from other app + confirm | V2b |
-| Smart notifications | Low | Respond to notification | V2a |
-| Recurring expenses | Low | Set once | V2a |
-| Expense templates | Very Low | Tap template + adjust | V2c |
-| Widget | Low | Tap widget + quick add | V5 (WidgetKit) |
-| Siri voice | Very Low | Speak | V5 |
-| Bank integration | None | Connect once | V5+ |
+
+| Method              | Friction | User Effort                       | Version        |
+| ------------------- | -------- | --------------------------------- | -------------- |
+| Auto from bookings  | None     | 0 taps                            | V2a            |
+| Receipt scan        | Very Low | Point camera + confirm            | V2a            |
+| Quick add           | Low      | 3 taps (amount + category + save) | V2a            |
+| Share extension     | Low      | Share from other app + confirm    | V2b            |
+| Smart notifications | Low      | Respond to notification           | V2a            |
+| Recurring expenses  | Low      | Set once                          | V2a            |
+| Expense templates   | Very Low | Tap template + adjust             | V2c            |
+| Widget              | Low      | Tap widget + quick add            | V5 (WidgetKit) |
+| Siri voice          | Very Low | Speak                             | V5             |
+| Bank integration    | None     | Connect once                      | V5+            |
+
 
 ---
 
@@ -346,6 +377,7 @@ Expense saved + receipt photo stored permanently
 ### Edge Function: `scan-receipt`
 
 **New Edge Function needed** (or extend `extract-booking`):
+
 - Input: image URL (from Supabase Storage)
 - Processing: GPT-4o vision with structured output
 - Prompt engineering: extract total, merchant, date, currency, line items, tip
@@ -358,6 +390,7 @@ Expense saved + receipt photo stored permanently
 **Scenario:** User has 5 receipts from today. Don't make them scan one by one.
 
 **Batch mode:**
+
 - User selects multiple photos from library
 - System processes them in parallel
 - Shows a list of parsed receipts
@@ -366,25 +399,29 @@ Expense saved + receipt photo stored permanently
 
 ### Supported Receipt Types
 
-| Type | Source | Parsing Difficulty |
-|---|---|---|
-| Paper receipts (photo) | Camera | Medium — varying formats, languages, print quality |
-| Digital receipts (screenshot) | Photos/Share | Easy — clean text, standard layouts |
-| Email receipts (forwarded) | Email parsing pipeline | Easy — already structured HTML |
-| Banking app screenshots | Photos/Share | Easy — amounts clearly shown |
-| Ride-hailing (Uber/Lyft) | Screenshot/Share | Easy — standard format |
-| Food delivery (DoorDash, etc.) | Screenshot/Share | Easy — standard format |
+
+| Type                           | Source                 | Parsing Difficulty                                 |
+| ------------------------------ | ---------------------- | -------------------------------------------------- |
+| Paper receipts (photo)         | Camera                 | Medium — varying formats, languages, print quality |
+| Digital receipts (screenshot)  | Photos/Share           | Easy — clean text, standard layouts                |
+| Email receipts (forwarded)     | Email parsing pipeline | Easy — already structured HTML                     |
+| Banking app screenshots        | Photos/Share           | Easy — amounts clearly shown                       |
+| Ride-hailing (Uber/Lyft)       | Screenshot/Share       | Easy — standard format                             |
+| Food delivery (DoorDash, etc.) | Screenshot/Share       | Easy — standard format                             |
+
 
 ### Handling Edge Cases
 
-| Edge Case | Solution |
-|---|---|
-| Receipt in foreign language | GPT-4o handles multilingual — extract amounts regardless of language |
-| Tip included vs. separate | Show both "subtotal" and "total with tip" — user chooses which to track |
-| Multiple currencies on one receipt | Default to the larger amount's currency |
-| Blurry/damaged receipt | Low confidence score → flag fields for manual entry |
-| Group receipt | Scan total → then apply split method (equal/exact) |
-| Tax-inclusive vs. exclusive | Default to total (tax-inclusive); user can adjust |
+
+| Edge Case                          | Solution                                                                |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| Receipt in foreign language        | GPT-4o handles multilingual — extract amounts regardless of language    |
+| Tip included vs. separate          | Show both "subtotal" and "total with tip" — user chooses which to track |
+| Multiple currencies on one receipt | Default to the larger amount's currency                                 |
+| Blurry/damaged receipt             | Low confidence score → flag fields for manual entry                     |
+| Group receipt                      | Scan total → then apply split method (equal/exact)                      |
+| Tax-inclusive vs. exclusive        | Default to total (tax-inclusive); user can adjust                       |
+
 
 ---
 
@@ -458,23 +495,27 @@ When a collaborator adds an expense, they choose how it's split:
 
 #### Split Types (Already in Schema)
 
-| Split Type | How It Works | Example |
-|---|---|---|
-| **Equal** | Divide total by number of people | $90 dinner ÷ 3 = $30 each |
-| **Exact** | Specify each person's share | Alice: $45, Bob: $30, Carol: $15 |
-| **Percentage** | Each person's percentage | Alice: 50%, Bob: 30%, Carol: 20% |
-| **Full** | One person covers it all (no split) | Alice pays $90, no one owes anything |
+
+| Split Type     | How It Works                        | Example                              |
+| -------------- | ----------------------------------- | ------------------------------------ |
+| **Equal**      | Divide total by number of people    | $90 dinner ÷ 3 = $30 each            |
+| **Exact**      | Specify each person's share         | Alice: $45, Bob: $30, Carol: $15     |
+| **Percentage** | Each person's percentage            | Alice: 50%, Bob: 30%, Carol: 20%     |
+| **Full**       | One person covers it all (no split) | Alice pays $90, no one owes anything |
+
 
 #### Smart Split UX
 
 **Default split:** Equal among all trip collaborators (most common case).
 
 **Quick toggles:**
+
 - "Just me" — marks as personal (full, payer only)
 - "Split equally" — divides among all collaborators
 - "Custom" — opens person picker with amount/percentage fields
 
 **Who's included?**
+
 - By default, ALL accepted collaborators are included in splits
 - User can uncheck individuals ("Carol didn't eat dinner")
 - System remembers per-trip defaults
@@ -500,25 +541,30 @@ Example:
 
 #### Settlement Actions
 
-| Action | How |
-|---|---|
-| Mark as paid | Tap "Mark Settled" on a debt row |
-| Request payment | Send push notification to debtor |
-| Pay via Venmo | Deep link: `venmo://paycharge?txn=pay&amount=66.67&recipients=alice` |
-| Pay via PayPal | Deep link: `paypal://send?amount=66.67&recipient=alice@email.com` |
-| Pay via Apple Pay | If both users have Apple Pay set up |
+
+| Action            | How                                                                  |
+| ----------------- | -------------------------------------------------------------------- |
+| Mark as paid      | Tap "Mark Settled" on a debt row                                     |
+| Request payment   | Send push notification to debtor                                     |
+| Pay via Venmo     | Deep link: `venmo://paycharge?txn=pay&amount=66.67&recipients=alice` |
+| Pay via PayPal    | Deep link: `paypal://send?amount=66.67&recipient=alice@email.com`    |
+| Pay via Apple Pay | If both users have Apple Pay set up                                  |
+
 
 ### Permission Model for Budget
 
 Using existing `CollaboratorPermissions.canSeeBudget`:
 
-| Role | Can See Budget | Can Add Expenses | Can Edit Others' Expenses | Can Set Budget |
-|---|---|---|---|---|
-| Owner | Always | Yes | Yes | Yes |
-| Editor | If `canSeeBudget = true` | Yes | No (only their own) | No |
-| Viewer | If `canSeeBudget = true` | No | No | No |
+
+| Role   | Can See Budget           | Can Add Expenses | Can Edit Others' Expenses | Can Set Budget |
+| ------ | ------------------------ | ---------------- | ------------------------- | -------------- |
+| Owner  | Always                   | Yes              | Yes                       | Yes            |
+| Editor | If `canSeeBudget = true` | Yes              | No (only their own)       | No             |
+| Viewer | If `canSeeBudget = true` | No               | No                        | No             |
+
 
 **Privacy considerations:**
+
 - Some collaborators may not want others to see their personal spending
 - "Personal" expenses are only visible to the spender + owner
 - "Shared" expenses are visible to all with budget permission
@@ -526,6 +572,7 @@ Using existing `CollaboratorPermissions.canSeeBudget`:
 ### Real-Time Sync
 
 When a collaborator adds/edits an expense:
+
 1. Supabase Realtime broadcasts the change
 2. All connected collaborators see the update instantly
 3. Budget totals and category breakdowns update live
@@ -589,6 +636,7 @@ Budget Screen (Main Hub)
 ```
 
 **Smart insights on the summary card:**
+
 - "Remaining: $2,800 · 7 days left → Suggested daily: $400"
 - "You're 15% under budget — on track!"
 - "Warning: At this pace, you'll exceed budget by $340"
@@ -632,6 +680,7 @@ Category Budgets (optional)
 ### The Problem
 
 A user on a European trip hits 3 currencies in one week (EUR, GBP, CHF). They need:
+
 - To enter amounts in the local currency (what's on the receipt)
 - To see their total in their home currency (what it actually costs them)
 - To not think about conversion rates
@@ -639,22 +688,26 @@ A user on a European trip hits 3 currencies in one week (EUR, GBP, CHF). They ne
 ### Solution: Auto-Currency with Smart Defaults
 
 **Trip creation:**
+
 - User sets "Home currency" in profile (USD, EUR, GBP, etc.) — set once, remembered forever
 - Trip destination auto-detects local currency (Paris → EUR)
 - Multi-destination trips store an array of currencies
 
 **Expense entry:**
+
 - Default currency = trip destination currency (not home currency)
 - User can switch currency with one tap (flag icon + currency code)
 - Conversion happens automatically using live rates at time of entry
 - Both amounts stored: `amount` (original) + `converted_amount` (home currency)
 
 **Display:**
+
 - Budget screen shows totals in home currency
 - Individual expenses show: "€45.50 → $49.20"
 - Exchange rate shown on tap for transparency
 
 **Rate source:**
+
 - Free tier: Daily rates from ExchangeRate-API or Open Exchange Rates (free for 1,000 req/month)
 - Cache rates for 24 hours (travel rates don't change frequently enough to matter minute-by-minute)
 - Store the rate used with each expense for historical accuracy
@@ -675,12 +728,14 @@ ALTER TABLE trip_expenses ADD COLUMN exchange_rate numeric;
 
 ### What's Already There (No Changes Needed)
 
-| Table | Ready? | Notes |
-|---|---|---|
-| `trip_expenses` | Yes | All core fields present: amount, currency, category, split_type, payer_user_id, booking_id FK |
-| `expense_splits` | Yes | Per-person split tracking with owed_amount |
-| `trip_budgets` | Yes | Per-category planned vs. spent amounts |
-| `trip_collaborators` | Yes | Roles, permissions, status — all needed for budget sharing |
+
+| Table                | Ready? | Notes                                                                                         |
+| -------------------- | ------ | --------------------------------------------------------------------------------------------- |
+| `trip_expenses`      | Yes    | All core fields present: amount, currency, category, split_type, payer_user_id, booking_id FK |
+| `expense_splits`     | Yes    | Per-person split tracking with owed_amount                                                    |
+| `trip_budgets`       | Yes    | Per-category planned vs. spent amounts                                                        |
+| `trip_collaborators` | Yes    | Roles, permissions, status — all needed for budget sharing                                    |
+
 
 ### Schema Additions Needed
 
@@ -754,19 +809,21 @@ Cost: ~$0.007 per scan
 
 **Goal:** Make budget tracking work beautifully for solo trips. Set the UX foundation.
 
-| Feature | Complexity | Priority |
-|---|---|---|
-| Budget screen with summary card + category breakdown | Medium | P0 |
-| Quick Add expense (numpad-first, 3-tap flow) | Medium | P0 |
-| Per-category budget setting | Low | P0 |
-| Auto-create expense from bookings | Low | P0 |
-| Receipt photo scan (camera + GPT-4o vision) | Medium | P1 |
-| Smart defaults (today's date, trip currency, auto-category) | Low | P0 |
-| Progress bar (spent vs. budget) | Low | P0 |
-| Smart insights ("At this pace, you'll exceed by $X") | Low | P1 |
-| Daily spending breakdown | Medium | P1 |
-| End-of-day reminder notification | Low | P2 |
-| Recurring expenses (hotel per-night) | Low | P2 |
+
+| Feature                                                     | Complexity | Priority |
+| ----------------------------------------------------------- | ---------- | -------- |
+| Budget screen with summary card + category breakdown        | Medium     | P0       |
+| Quick Add expense (numpad-first, 3-tap flow)                | Medium     | P0       |
+| Per-category budget setting                                 | Low        | P0       |
+| Auto-create expense from bookings                           | Low        | P0       |
+| Receipt photo scan (camera + GPT-4o vision)                 | Medium     | P1       |
+| Smart defaults (today's date, trip currency, auto-category) | Low        | P0       |
+| Progress bar (spent vs. budget)                             | Low        | P0       |
+| Smart insights ("At this pace, you'll exceed by $X")        | Low        | P1       |
+| Daily spending breakdown                                    | Medium     | P1       |
+| End-of-day reminder notification                            | Low        | P2       |
+| Recurring expenses (hotel per-night)                        | Low        | P2       |
+
 
 **What's NOT in V2a:** Splitting, settlements, collaborator budget, multi-currency.
 
@@ -774,38 +831,44 @@ Cost: ~$0.007 per scan
 
 **Goal:** Make expense splitting painless for group trips.
 
-| Feature | Complexity | Priority |
-|---|---|---|
-| Split type selection on expense (equal/exact/percentage/full) | Medium | P0 |
-| "Who paid" selector (collaborator picker) | Low | P0 |
-| Expense splitting view (who owes who) | Medium | P0 |
-| Settlement tracking (mark as paid) | Medium | P0 |
-| Budget view toggle (Everyone / My Spending / Splits) | Medium | P0 |
-| Real-time expense sync via Supabase Realtime | Medium | P1 |
-| "Someone owes you" push notification | Low | P1 |
-| Activity feed entries for expenses | Low | P1 |
-| Collaborator budget visibility permissions | Low | P1 |
-| Personal vs. shared expense toggle | Low | P2 |
+
+| Feature                                                       | Complexity | Priority |
+| ------------------------------------------------------------- | ---------- | -------- |
+| Split type selection on expense (equal/exact/percentage/full) | Medium     | P0       |
+| "Who paid" selector (collaborator picker)                     | Low        | P0       |
+| Expense splitting view (who owes who)                         | Medium     | P0       |
+| Settlement tracking (mark as paid)                            | Medium     | P0       |
+| Budget view toggle (Everyone / My Spending / Splits)          | Medium     | P0       |
+| Real-time expense sync via Supabase Realtime                  | Medium     | P1       |
+| "Someone owes you" push notification                          | Low        | P1       |
+| Activity feed entries for expenses                            | Low        | P1       |
+| Collaborator budget visibility permissions                    | Low        | P1       |
+| Personal vs. shared expense toggle                            | Low        | P2       |
+
 
 ### V3 — Commerce Integration
 
-| Feature | Complexity | Priority |
-|---|---|---|
-| Share Extension for receipts | Medium | P1 |
-| Multi-currency with live rates | Medium | P1 |
-| Expense analytics dashboard (Pro) | Medium | P2 |
-| Expense templates (auto-suggested patterns) | Low | P2 |
-| Data export (expenses CSV/PDF) | Low | P2 |
+
+| Feature                                     | Complexity | Priority |
+| ------------------------------------------- | ---------- | -------- |
+| Share Extension for receipts                | Medium     | P1       |
+| Multi-currency with live rates              | Medium     | P1       |
+| Expense analytics dashboard (Pro)           | Medium     | P2       |
+| Expense templates (auto-suggested patterns) | Low        | P2       |
+| Data export (expenses CSV/PDF)              | Low        | P2       |
+
 
 ### V4+ — Full Platform
 
-| Feature | Complexity | Priority |
-|---|---|---|
-| Venmo/PayPal/Apple Pay deep links for settlements | Medium | P1 |
-| iOS Widget for quick expense entry | Medium | P2 |
-| Siri Shortcuts ("Log $45 lunch") | Medium | P2 |
-| Bank integration via Plaid (passive tracking) | Very High | P3 |
-| Per-person budget allocation within group | Medium | P2 |
+
+| Feature                                           | Complexity | Priority |
+| ------------------------------------------------- | ---------- | -------- |
+| Venmo/PayPal/Apple Pay deep links for settlements | Medium     | P1       |
+| iOS Widget for quick expense entry                | Medium     | P2       |
+| Siri Shortcuts ("Log $45 lunch")                  | Medium     | P2       |
+| Bank integration via Plaid (passive tracking)     | Very High  | P3       |
+| Per-person budget allocation within group         | Medium     | P2       |
+
 
 ---
 
@@ -852,26 +915,24 @@ These differentiate TripWeave's budget from competitors:
 
 ### How Competitors Handle Budget
 
-| App | Budget Approach | Weakness |
-|---|---|---|
-| **Splitwise** | Expense splitting only, no trip context | No trip timeline integration, no budgeting, no receipt scan |
-| **Tricount** | Group expense splitting | No travel features, no budget tracking, basic UI |
-| **TravelSpend** | Personal expense tracking | No collaboration, no receipt scan, no booking integration |
-| **Trail Wallet** | Daily budget tracker | No splitting, no collaboration, manual-only entry |
-| **Wanderlog** | Basic expense log | No receipt scan, no splitting, bolted-on feel |
-| **TripIt** | No budget feature | Completely missing |
-| **Google Trips** | Discontinued | — |
+
+| App              | Budget Approach                         | Weakness                                                    |
+| ---------------- | --------------------------------------- | ----------------------------------------------------------- |
+| **Splitwise**    | Expense splitting only, no trip context | No trip timeline integration, no budgeting, no receipt scan |
+| **Tricount**     | Group expense splitting                 | No travel features, no budget tracking, basic UI            |
+| **TravelSpend**  | Personal expense tracking               | No collaboration, no receipt scan, no booking integration   |
+| **Trail Wallet** | Daily budget tracker                    | No splitting, no collaboration, manual-only entry           |
+| **Wanderlog**    | Basic expense log                       | No receipt scan, no splitting, bolted-on feel               |
+| **TripIt**       | No budget feature                       | Completely missing                                          |
+| **Google Trips** | Discontinued                            | —                                                           |
+
 
 ### TripWeave's Differentiators
 
 1. **Budget lives INSIDE the trip timeline** — not a separate app. Your flight booking IS your flight expense. Context is automatic.
-
 2. **Receipt scan reuses existing AI pipeline** — same GPT-4o vision infrastructure as screenshot-to-booking. Zero new backend architecture.
-
 3. **Auto-create from bookings** — no competitor does this. When an email-parsed booking arrives, the expense is already logged.
-
 4. **Collaborative by default** — 60-70% of trips are group trips. Budget splitting is native, not an afterthought.
-
 5. **Smart defaults eliminate form-filling** — currency from destination, date from today, category from context. Quick Add is genuinely 3 taps.
 
 ---
@@ -880,24 +941,28 @@ These differentiate TripWeave's budget from competitors:
 
 ### UX Decisions Needed
 
-| # | Question | Options | Recommendation |
-|---|---|---|---|
-| 1 | Should budget be required to use the app? | A) Optional (default off) B) Optional (default on) C) Required | **B) Optional, default on** — show the budget pill but don't force expense entry. Empty state shows "Start tracking your spending" |
-| 2 | Multi-day bookings (hotel 5 nights) | A) Single expense for total B) Split into nightly expenses | **A) Single expense** with per-night display in breakdown — simpler for users |
-| 3 | Default split type for group trips | A) Equal B) Full (no split) C) Ask each time | **A) Equal** among all collaborators — user can change per expense |
-| 4 | Receipt scanning tier | A) Free unlimited B) Free limited + Pro unlimited C) Pro only | **B) 3 scans/month free, unlimited Pro** — matches screenshot-to-booking pattern |
-| 5 | When to show splits tab | A) Always B) Only for collaborative trips C) Only when split expenses exist | **B) Only for collaborative trips** — hide complexity for solo travelers |
-| 6 | Budget notifications | A) Default on B) Default off C) Ask during setup | **C) Ask during trip creation** — "Want daily spending reminders?" |
-| 7 | Where to surface "Add Expense" | A) Budget screen only B) Budget + Speed Dial C) Budget + Speed Dial + Timeline | **B) Budget screen + Speed Dial FAB** — accessible but not cluttering timeline |
+
+| #   | Question                                  | Options                                                                        | Recommendation                                                                                                                     |
+| --- | ----------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Should budget be required to use the app? | A) Optional (default off) B) Optional (default on) C) Required                 | **B) Optional, default on** — show the budget pill but don't force expense entry. Empty state shows "Start tracking your spending" |
+| 2   | Multi-day bookings (hotel 5 nights)       | A) Single expense for total B) Split into nightly expenses                     | **A) Single expense** with per-night display in breakdown — simpler for users                                                      |
+| 3   | Default split type for group trips        | A) Equal B) Full (no split) C) Ask each time                                   | **A) Equal** among all collaborators — user can change per expense                                                                 |
+| 4   | Receipt scanning tier                     | A) Free unlimited B) Free limited + Pro unlimited C) Pro only                  | **B) 3 scans/month free, unlimited Pro** — matches screenshot-to-booking pattern                                                   |
+| 5   | When to show splits tab                   | A) Always B) Only for collaborative trips C) Only when split expenses exist    | **B) Only for collaborative trips** — hide complexity for solo travelers                                                           |
+| 6   | Budget notifications                      | A) Default on B) Default off C) Ask during setup                               | **C) Ask during trip creation** — "Want daily spending reminders?"                                                                 |
+| 7   | Where to surface "Add Expense"            | A) Budget screen only B) Budget + Speed Dial C) Budget + Speed Dial + Timeline | **B) Budget screen + Speed Dial FAB** — accessible but not cluttering timeline                                                     |
+
 
 ### Technical Decisions Needed
 
-| # | Question | Options | Recommendation |
-|---|---|---|---|
-| 1 | Receipt scan processing | A) Client-side (Core ML) B) Server-side (Edge Function + GPT-4o) C) Hybrid | **B) Server-side** — consistent quality, same pattern as existing AI features, ~$0.007/scan |
-| 2 | Exchange rates API | A) ExchangeRate-API (free tier) B) Open Exchange Rates C) Fixer.io | **A) ExchangeRate-API** — free for 1,500 req/month, more than enough |
-| 3 | Settlement calculation | A) Client-side (Swift) B) Server-side (Edge Function) | **A) Client-side** — small data set, fast calculation, no latency |
-| 4 | Expense data sync | A) Polling B) Supabase Realtime C) Push notifications | **B) Supabase Realtime** — already used for trip collaboration |
+
+| #   | Question                | Options                                                                    | Recommendation                                                                              |
+| --- | ----------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 1   | Receipt scan processing | A) Client-side (Core ML) B) Server-side (Edge Function + GPT-4o) C) Hybrid | **B) Server-side** — consistent quality, same pattern as existing AI features, ~$0.007/scan |
+| 2   | Exchange rates API      | A) ExchangeRate-API (free tier) B) Open Exchange Rates C) Fixer.io         | **A) ExchangeRate-API** — free for 1,500 req/month, more than enough                        |
+| 3   | Settlement calculation  | A) Client-side (Swift) B) Server-side (Edge Function)                      | **A) Client-side** — small data set, fast calculation, no latency                           |
+| 4   | Expense data sync       | A) Polling B) Supabase Realtime C) Push notifications                      | **B) Supabase Realtime** — already used for trip collaboration                              |
+
 
 ---
 
@@ -974,3 +1039,4 @@ If a field is not visible or readable, set it to null with confidence "check".
 
 Return ONLY valid JSON, no markdown formatting.
 ```
+

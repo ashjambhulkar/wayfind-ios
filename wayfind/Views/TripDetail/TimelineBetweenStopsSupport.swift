@@ -4,11 +4,11 @@ import SwiftUI
 
 enum TimelineBetweenStopsMetrics {
     static let shortWalkThresholdKm: Double = 1.0
-    /// Matches `TimelineSpineMetrics.columnWidth` so travel gaps align with card time-pin column.
+    /// Matches `TimelineSpineMetrics.columnWidth` so travel rows align with the time-pin column.
     static var timePinGutterWidth: CGFloat { TimelineSpineMetrics.columnWidth }
-    /// Tight vertical rhythm between itinerary cards; `TimelineGapView` applies this above/below the segment row.
-    static let gapRowVerticalPadding: CGFloat = 0
-    static let minRowHeight: CGFloat = 32
+    /// Vertical padding on the full-width travel segment row.
+    static let gapRowVerticalPadding: CGFloat = AppSpacing.xs
+    static let minRowHeight: CGFloat = 28
 }
 
 enum TimelineBetweenStopsPresentation {
@@ -24,23 +24,6 @@ enum TimelineBetweenStopsPresentation {
         switch mode {
         case .walking: return String(localized: "Walking")
         case .driving: return String(localized: "Driving")
-        case .transit: return String(localized: "Transit")
-        }
-    }
-
-    static func title(for mode: AppleTravelTimesService.Mode) -> String {
-        switch mode {
-        case .walking: return String(localized: "Walking")
-        case .driving: return String(localized: "Driving")
-        case .transit: return String(localized: "Transit")
-        }
-    }
-
-    /// Compact label for inline timeline mode chips.
-    static func shortLabel(for mode: AppleTravelTimesService.Mode) -> String {
-        switch mode {
-        case .walking: return String(localized: "Walk")
-        case .driving: return String(localized: "Drive")
         case .transit: return String(localized: "Transit")
         }
     }
@@ -81,13 +64,37 @@ enum TimelineBetweenStopsPresentation {
         String(format: String(localized: "Timeline travel duration and distance"), minutesText, distanceText)
     }
 
-    /// E.g. `45m`, `1h`, `1h 30m` — for timeline travel rows (not spelled-out units).
-    static func compactTravelDuration(minutes: Int) -> String {
+    private static let minutesPerHour = 60
+    private static let minutesPerDay = minutesPerHour * 24
+
+    /// Spine-only travel ETA: **`1h 20m`** under 24h; **`1d 2h`** (and optional **`…m`** when needed) across day boundaries.
+    static func spineTravelDuration(minutes: Int) -> String {
         let total = max(0, minutes)
-        let hours = total / 60
-        let mins = total % 60
+        if total == 0 { return "0m" }
+        if total < minutesPerDay {
+            return spineTravelUnderOneDay(total)
+        }
+        return spineTravelOneDayAndUp(total)
+    }
+
+    private static func spineTravelUnderOneDay(_ total: Int) -> String {
+        let hours = total / minutesPerHour
+        let mins = total % minutesPerHour
         if hours == 0 { return "\(mins)m" }
         if mins == 0 { return "\(hours)h" }
         return "\(hours)h \(mins)m"
+    }
+
+    private static func spineTravelOneDayAndUp(_ total: Int) -> String {
+        let days = total / minutesPerDay
+        let remainder = total % minutesPerDay
+        let hours = remainder / minutesPerHour
+        let mins = remainder % minutesPerHour
+
+        var parts: [String] = []
+        parts.append("\(days)d")
+        if hours > 0 { parts.append("\(hours)h") }
+        if mins > 0 { parts.append("\(mins)m") }
+        return parts.joined(separator: " ")
     }
 }

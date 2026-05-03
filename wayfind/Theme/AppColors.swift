@@ -59,6 +59,36 @@ enum AppColors {
     static let day6 = Color(light: Color(hex: 0xEC4899), dark: Color(hex: 0xEC4899))
     static let day7 = Color(light: Color(hex: 0x06B6D4), dark: Color(hex: 0x06B6D4))
 
+    // MARK: Timeline schedule nodes (time of day — see TimelineScheduleChroma)
+
+    static let wfMorningNode = Color(light: Color(hex: 0xD9A441), dark: Color(hex: 0xF2C14E).opacity(0.92))
+    static let wfAfternoonNode = Color(light: Color(hex: 0x2F9D68), dark: Color(hex: 0x4CC38A).opacity(0.9))
+    static let wfEveningNode = Color(light: Color(hex: 0xC56A45), dark: Color(hex: 0xE07A52).opacity(0.92))
+    static let wfNightNode = Color(light: Color(hex: 0x5B5FC7), dark: Color(hex: 0x7B7FF0).opacity(0.9))
+    static let wfFlexNode = Color(light: Color(hex: 0xF7F2EA), dark: Color(hex: 0x2A2A2D))
+    static let wfIssueNode = Color(light: Color(hex: 0xD92D20), dark: Color(hex: 0xFF6B5F).opacity(0.92))
+
+    static let wfMorningNodeMuted = Color(light: Color(hex: 0xF6E7B3), dark: Color(hex: 0x5A4520))
+    static let wfAfternoonNodeMuted = Color(light: Color(hex: 0xCFE8D8), dark: Color(hex: 0x214B38))
+    static let wfEveningNodeMuted = Color(light: Color(hex: 0xF3D1C2), dark: Color(hex: 0x5A3328))
+    static let wfNightNodeMuted = Color(light: Color(hex: 0xD8DAF2), dark: Color(hex: 0x30315F))
+    static let wfFlexNodeMuted = Color(light: Color(hex: 0xE7E5E4), dark: Color(hex: 0x3A3A3C))
+    static let wfIssueNodeMuted = Color(light: Color(hex: 0xF1C7C2), dark: Color(hex: 0x5A2723))
+
+    static let timelineScheduleMorning = wfMorningNode
+    static let timelineScheduleAfternoon = wfAfternoonNode
+    static let timelineScheduleEvening = wfEveningNode
+    static let timelineScheduleNight = wfNightNode
+    static let timelineScheduleFlexible = wfFlexNode
+    static let timelineScheduleIssue = wfIssueNode
+
+    static let timelineScheduleMorningMuted = wfMorningNodeMuted
+    static let timelineScheduleAfternoonMuted = wfAfternoonNodeMuted
+    static let timelineScheduleEveningMuted = wfEveningNodeMuted
+    static let timelineScheduleNightMuted = wfNightNodeMuted
+    static let timelineScheduleFlexibleMuted = wfFlexNodeMuted
+    static let timelineScheduleIssueMuted = wfIssueNodeMuted
+
     static func dayColor(for dayNumber: Int) -> Color {
         let palette = [day1, day2, day3, day4, day5, day6, day7]
         let index = ((dayNumber - 1) % 7 + 7) % 7

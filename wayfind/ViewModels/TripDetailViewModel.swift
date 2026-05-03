@@ -109,6 +109,17 @@ final class TripDetailViewModel {
         // fetchTripTimelineEnriched + tripDetailStore booking fetch pattern.
         let (days, fetched) = await dataService.fetchTripTimeline(for: trip.id)
         guard generation == timelineLoadGeneration else { return }
+
+        // The realtime debounce mechanism cancels in-flight tasks when a newer
+        // event arrives. If cancellation lands mid-fetch, the enrichment query
+        // (`city_places`) catches CancellationError and returns empty, so the
+        // Place structs come back stripped of subtypes / rating / thumbnails.
+        // Committing that degraded data causes the subtitle label and spine
+        // icon to flip between enriched and unenriched values on every other
+        // refresh. Bailing here preserves the last-known good state; the
+        // replacement debounce task will fetch everything cleanly.
+        guard !Task.isCancelled else { return }
+
         let sorted = days.sorted { $0.dayNumber < $1.dayNumber }
 
         // `DataService` intentionally soft-fails network errors to empty
@@ -263,7 +274,9 @@ final class TripDetailViewModel {
 
         let combined = nativeRows + injected
         return combined.sorted { lhs, rhs in
-            switch (lhs.timelineSortInstant, rhs.timelineSortInstant) {
+            let lhsClockSeconds = lhs.timelineSortClockSeconds(timeZone: timelineTimeZone)
+            let rhsClockSeconds = rhs.timelineSortClockSeconds(timeZone: timelineTimeZone)
+            switch (lhsClockSeconds, rhsClockSeconds) {
             case let (l?, r?):
                 if l != r { return l < r }
             case (nil, _?):

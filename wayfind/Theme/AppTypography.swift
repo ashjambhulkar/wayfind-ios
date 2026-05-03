@@ -42,6 +42,11 @@ extension Font {
         .system(.caption2, design: .rounded).weight(.medium)
     }
 
+    /// 12-hour spine teardrop — “AM/PM” under the clock digits (smaller than the `appSmall` time line).
+    static var timelinePinMeridiem: Font {
+        .system(size: 6, design: .rounded).weight(.medium)
+    }
+
     static var appButton: Font {
         .system(.headline, design: .rounded)
     }

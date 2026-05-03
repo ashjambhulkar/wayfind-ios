@@ -18,16 +18,19 @@ struct TripTimelineDisplayRow: Identifiable {
 
     /// Sort key for ordering mixed native + injected rows within a day.
     var timelineSortInstant: Date? {
-        switch hotelTimelineRole {
-        case .checkIn:
-            if case .hotel(let h) = place.bookingDetails { return h.checkInDate ?? place.startTime }
-            return place.startTime
-        case .checkOut:
-            if case .hotel(let h) = place.bookingDetails { return h.checkOutDate ?? place.startTime }
-            return place.startTime
-        case nil:
-            return place.startTime
-        }
+        place.timelineSpineSortInstant(hotelTimelineRole: hotelTimelineRole)
+    }
+
+    /// Sort key for ordering rows by the clock time shown inside a specific
+    /// itinerary day, independent of the date component stored on the instant.
+    func timelineSortClockSeconds(timeZone: TimeZone) -> Int? {
+        guard let instant = timelineSortInstant else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let components = calendar.dateComponents([.hour, .minute, .second], from: instant)
+        return ((components.hour ?? 0) * 3_600)
+            + ((components.minute ?? 0) * 60)
+            + (components.second ?? 0)
     }
 
     /// Tie-break check-in before check-out when instants are equal.

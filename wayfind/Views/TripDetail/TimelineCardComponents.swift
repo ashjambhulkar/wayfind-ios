@@ -11,10 +11,10 @@
 
 import SwiftUI
 
-// MARK: - Apple Maps–style double teardrop (timeline spine)
+// MARK: - Timeline spine marker
 
-/// Visual constants for map-pin style chips on the itinerary spine (circle + top/bottom tails).
-private enum MapsStyleTimelinePinMetrics {
+/// Visual constants for circular chips on the itinerary spine.
+private enum TimelineSpinePinMetrics {
     static let shadowOpacityTight: Double = 0.07
     static let shadowOpacitySoft: Double = 0.14
     static let shadowRadiusSoft: CGFloat = 10
@@ -25,107 +25,59 @@ private enum MapsStyleTimelinePinMetrics {
     static var pinFrameWidth: CGFloat { TimelineSpineMetrics.timePinFrameWidth }
     static var pinFrameHeight: CGFloat { TimelineSpineMetrics.timePinFrameHeight }
 
-    /// Horizontal inset for clock / “Flex” label inside the teardrop body.
+    /// Horizontal inset for clock / “Flex” fallback labels inside the circle.
     static let timeLabelHorizontalInset: CGFloat = AppSpacing.xs
 }
 
-/// Circular body with symmetric top + bottom tangent tails (spine rail).
-/// Tail tips are slightly blunt so their width never drops below the spine stroke — avoids hairline seams.
-private struct DoubleTeardropSpinePinShape: InsettableShape {
-    var bodyRadius: CGFloat
-    var tailLength: CGFloat
-    /// Horizontal half-width of the flat at each tail tip (`TimelineSpineMetrics.teardropTailTipHalfWidth`).
-    var tailTipHalfWidth: CGFloat
-    var insetAmount: CGFloat = 0
-
+/// Lower point for an Apple Maps-style callout pin. It is layered under the
+/// circular body so the marker reads as a clean circle with a tucked tail.
+private struct AppleMapsCalloutTailShape: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let box = rect.insetBy(dx: insetAmount, dy: insetAmount)
-        guard box.width > 4, box.height > 4, bodyRadius >= 1, tailLength >= 0 else { return path }
-
-        let cx = box.midX
-        let cy = box.midY
-        let r = bodyRadius
-        let vtl = tailLength
-        let tipHW = max(0, tailTipHalfWidth)
-        let distV = r + vtl
-        let cosGammaV = min(1, max(-1, r / distV))
-        let gammaV = CGFloat(acos(Double(cosGammaV)))
-
-        let yTop = cy - r - vtl
-        let yBottom = cy + r + vtl
-
-        func pointOnCircle(_ angle: CGFloat) -> CGPoint {
-            CGPoint(x: cx + r * cos(angle), y: cy + r * sin(angle))
-        }
-
-        let upperRight = -CGFloat.pi / 2 + gammaV
-        let lowerRight = CGFloat.pi / 2 - gammaV
-        let lowerLeft = CGFloat.pi / 2 + gammaV
-        let upperLeft = -CGFloat.pi / 2 - gammaV
-
-        path.move(to: CGPoint(x: cx - tipHW, y: yTop))
-        path.addLine(to: CGPoint(x: cx + tipHW, y: yTop))
-        path.addLine(to: pointOnCircle(upperRight))
-        path.addArc(
-            center: CGPoint(x: cx, y: cy),
-            radius: r,
-            startAngle: Angle(radians: Double(upperRight)),
-            endAngle: Angle(radians: Double(lowerRight)),
-            clockwise: true
-        )
-        path.addLine(to: CGPoint(x: cx + tipHW, y: yBottom))
-        path.addLine(to: CGPoint(x: cx - tipHW, y: yBottom))
-        path.addLine(to: pointOnCircle(lowerLeft))
-        path.addArc(
-            center: CGPoint(x: cx, y: cy),
-            radius: r,
-            startAngle: Angle(radians: Double(lowerLeft)),
-            endAngle: Angle(radians: Double(upperLeft)),
-            clockwise: false
-        )
-        path.addLine(to: CGPoint(x: cx - tipHW, y: yTop))
+        path.move(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
         path.closeSubpath()
         return path
-    }
-
-    func inset(by amount: CGFloat) -> DoubleTeardropSpinePinShape {
-        var copy = self
-        copy.insetAmount += amount
-        return copy
     }
 }
 
 private extension View {
-    /// Teardrop shell (spine tails only) filled with the row accent; layered shadow.
-    func mapsStyleTimelineDoubleTeardropPinChrome(
+    /// Apple Maps-style pin shell filled with the row accent; layered shadow.
+    func timelineCalloutPinChrome(
         bodyRadius: CGFloat,
         tailLength: CGFloat,
         bodyAccent: Color?
     ) -> some View {
-        let shape = DoubleTeardropSpinePinShape(
-            bodyRadius: bodyRadius,
-            tailLength: tailLength,
-            tailTipHalfWidth: TimelineSpineMetrics.teardropTailTipHalfWidth
-        )
         let fillColor = bodyAccent ?? AppColors.appSurface
+        let bodySide = bodyRadius * 2
+        let tailWidth = max(8, bodySide * 0.22)
+        let dotSide = max(5, bodySide * 0.16)
         return self
             .background {
-                ZStack {
-                    // Underfill guarantees the clock “hub” stays solid even if the teardrop path
-                    // winding ever fails to cover the disc after path tweaks (blunt tails, etc.).
+                ZStack(alignment: .top) {
+                    AppleMapsCalloutTailShape()
+                        .fill(fillColor)
+                        .frame(width: tailWidth, height: tailLength + 3)
+                        .offset(y: bodySide * 0.72)
+
                     Circle()
                         .fill(fillColor)
-                        .frame(width: bodyRadius * 2, height: bodyRadius * 2)
-                    shape.fill(fillColor)
+                        .frame(width: dotSide, height: dotSide)
+                        .offset(y: bodySide + tailLength - 5)
+
+                    Circle()
+                        .fill(fillColor)
+                        .frame(width: bodySide, height: bodySide)
                 }
+                .frame(width: bodySide, height: bodySide + tailLength + 5, alignment: .top)
             }
-            .shadow(color: Color.black.opacity(MapsStyleTimelinePinMetrics.shadowOpacityTight), radius: 1, x: 0, y: 1)
+            .shadow(color: Color.black.opacity(TimelineSpinePinMetrics.shadowOpacityTight), radius: 1, x: 0, y: 1)
             .shadow(
-                color: Color.black.opacity(MapsStyleTimelinePinMetrics.shadowOpacitySoft),
-                radius: MapsStyleTimelinePinMetrics.shadowRadiusSoft,
+                color: Color.black.opacity(TimelineSpinePinMetrics.shadowOpacitySoft),
+                radius: TimelineSpinePinMetrics.shadowRadiusSoft,
                 x: 0,
-                y: MapsStyleTimelinePinMetrics.shadowYOffsetSoft
+                y: TimelineSpinePinMetrics.shadowYOffsetSoft
             )
     }
 }
@@ -157,74 +109,96 @@ private enum TimePinClockFormatting {
     }
 }
 
-/// Map-style spine pin with 12-hour clock and meridiem stacked in the body; geometry follows `TimelineSpineMetrics`.
-/// The teardrop fill matches the row’s category/booking tint; labels use light type for contrast on the accent.
+/// Circular spine pin. Activity/booking rows pass a category symbol; legacy
+/// callers without a symbol fall back to the previous clock label.
 struct TimePinView: View {
     let time: Date
     let tint: Color
+    var symbol: String?
     var timeZone: TimeZone = .current
 
-    private var pinWidth: CGFloat { MapsStyleTimelinePinMetrics.pinFrameWidth }
-    private var pinHeight: CGFloat { MapsStyleTimelinePinMetrics.pinFrameHeight }
-    private var bodyRadius: CGFloat { MapsStyleTimelinePinMetrics.bodyRadius }
-    private var tailLength: CGFloat { MapsStyleTimelinePinMetrics.tailLength }
+    private var pinWidth: CGFloat { TimelineSpinePinMetrics.pinFrameWidth }
+    private var pinHeight: CGFloat { TimelineSpinePinMetrics.pinFrameHeight }
+    private var bodyRadius: CGFloat { TimelineSpinePinMetrics.bodyRadius }
+    private var tailLength: CGFloat { TimelineSpinePinMetrics.tailLength }
+    private var iconCenterYOffset: CGFloat { bodyRadius - pinHeight / 2 }
 
     var body: some View {
         ZStack {
             Color.clear
                 .frame(width: pinWidth, height: pinHeight)
-                .mapsStyleTimelineDoubleTeardropPinChrome(
+                .timelineCalloutPinChrome(
                     bodyRadius: bodyRadius,
                     tailLength: tailLength,
                     bodyAccent: tint
                 )
-            VStack(spacing: 0) {
-                Text(TimePinClockFormatting.hourMinuteString(time, timeZone: timeZone))
-                    .font(.appSmall.weight(.semibold))
-                    .monospacedDigit()
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.appCaption.weight(.bold))
+                    .symbolRenderingMode(.monochrome)
                     .foregroundStyle(AppColors.iconOnColoredSurface)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.68)
-                Text(TimePinClockFormatting.meridiemString(time, timeZone: timeZone))
-                    .font(.appSmall.weight(.regular))
-                    .foregroundStyle(AppColors.iconOnColoredSurface.opacity(0.88))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                    .accessibilityHidden(true)
+                    .offset(y: iconCenterYOffset)
+            } else {
+                VStack(spacing: 0) {
+                    Text(TimePinClockFormatting.hourMinuteString(time, timeZone: timeZone))
+                        .font(.appSmall.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(AppColors.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                    Text(TimePinClockFormatting.meridiemString(time, timeZone: timeZone))
+                        .font(.timelinePinMeridiem)
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.78))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, TimelineSpinePinMetrics.timeLabelHorizontalInset)
+                .offset(y: iconCenterYOffset)
             }
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, MapsStyleTimelinePinMetrics.timeLabelHorizontalInset)
-            .shadow(color: .black.opacity(0.22), radius: 0, x: 0, y: 0.5)
         }
         .frame(width: pinWidth, height: pinHeight)
     }
 }
 
-/// Flex marker — same silhouette as `TimePinView` (label only, no icon).
+/// Flex marker — same circular silhouette as `TimePinView`.
 struct UnscheduledMarkerView: View {
     let tint: Color
+    var symbol: String?
 
-    private var pinWidth: CGFloat { MapsStyleTimelinePinMetrics.pinFrameWidth }
-    private var pinHeight: CGFloat { MapsStyleTimelinePinMetrics.pinFrameHeight }
-    private var bodyRadius: CGFloat { MapsStyleTimelinePinMetrics.bodyRadius }
-    private var tailLength: CGFloat { MapsStyleTimelinePinMetrics.tailLength }
+    private var pinWidth: CGFloat { TimelineSpinePinMetrics.pinFrameWidth }
+    private var pinHeight: CGFloat { TimelineSpinePinMetrics.pinFrameHeight }
+    private var bodyRadius: CGFloat { TimelineSpinePinMetrics.bodyRadius }
+    private var tailLength: CGFloat { TimelineSpinePinMetrics.tailLength }
+    private var iconCenterYOffset: CGFloat { bodyRadius - pinHeight / 2 }
 
     var body: some View {
         ZStack {
             Color.clear
                 .frame(width: pinWidth, height: pinHeight)
-                .mapsStyleTimelineDoubleTeardropPinChrome(
+                .timelineCalloutPinChrome(
                     bodyRadius: bodyRadius,
                     tailLength: tailLength,
                     bodyAccent: tint
                 )
-            Text(String(localized: "Flex"))
-                .font(.appSmall.weight(.medium))
-                .foregroundStyle(AppColors.iconOnColoredSurface.opacity(0.95))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, MapsStyleTimelinePinMetrics.timeLabelHorizontalInset)
-                .shadow(color: .black.opacity(0.22), radius: 0, x: 0, y: 0.5)
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.appCaption.weight(.bold))
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(AppColors.iconOnColoredSurface)
+                    .accessibilityHidden(true)
+                    .offset(y: iconCenterYOffset)
+            } else {
+                Text(String(localized: "Flex"))
+                    .font(.appSmall.weight(.medium))
+                    .foregroundStyle(AppColors.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, TimelineSpinePinMetrics.timeLabelHorizontalInset)
+                    .offset(y: iconCenterYOffset)
+            }
         }
         .frame(width: pinWidth, height: pinHeight)
         .accessibilityLabel(String(localized: "Flex"))
@@ -235,8 +209,13 @@ struct UnscheduledMarkerView: View {
 
 /// Shared timeline row layout tokens (activity + booking pass bodies).
 enum TimelineCardLayoutMetrics {
-    static let contentHorizontalPadding: CGFloat = AppSpacing.md
-    static let contentVerticalPadding: CGFloat = AppSpacing.md
+    static let contentHorizontalPadding: CGFloat = AppSpacing.sm
+    static let contentVerticalPadding: CGFloat = AppSpacing.sm
+
+    /// Raised timeline cards — soften shadow footprint so stacks read closer than before.
+    static let cardShadowOpacity: Double = 0.048
+    static let cardShadowRadius: CGFloat = 5
+    static let cardShadowYOffset: CGFloat = 2
 }
 
 /// Wraps timeline card content in the shared chassis: a slim family-tinted
@@ -269,7 +248,12 @@ private struct TimelineCardChassisModifier: ViewModifier {
             RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
                 .strokeBorder(AppColors.appDivider, lineWidth: 0.6)
         }
-        .shadow(color: Color.black.opacity(0.07), radius: 8, x: 0, y: 4)
+        .shadow(
+            color: Color.black.opacity(TimelineCardLayoutMetrics.cardShadowOpacity),
+            radius: TimelineCardLayoutMetrics.cardShadowRadius,
+            x: 0,
+            y: TimelineCardLayoutMetrics.cardShadowYOffset
+        )
     }
 }
 
@@ -347,20 +331,21 @@ struct TimelineCardTimeText: View {
     }
 }
 
-/// Start-time pin (`TimePinView`) or Flex marker — symmetric teardrop on the spine rail,
+/// Start-time pin (`TimePinView`) or Flex marker — circular stop on the spine rail,
 /// aligned with `timelineSpineContinuousRail()` for a continuous “rail + stops” read.
 struct TimelineSpineTimeColumn: View {
     let startTime: Date?
     let accentColor: Color
+    var symbol: String?
     var timeZone: TimeZone = .current
     let accessibilityLabel: String
 
     var body: some View {
         VStack(alignment: .center, spacing: 0) {
             if let startTime {
-                TimePinView(time: startTime, tint: accentColor, timeZone: timeZone)
+                TimePinView(time: startTime, tint: accentColor, symbol: symbol, timeZone: timeZone)
             } else {
-                UnscheduledMarkerView(tint: accentColor)
+                UnscheduledMarkerView(tint: accentColor, symbol: symbol)
             }
         }
         .offset(x: -TimelineSpineMetrics.spineCenterlineNudgeLeft)
@@ -371,43 +356,14 @@ struct TimelineSpineTimeColumn: View {
     }
 }
 
-enum TimelineCardLeadingIconMetrics {
-    private static let solidSquareSideLengthValue: CGFloat = 64
-
-    /// Typography / symbol scale tier for glyphs inside the leading square (follows `solidSquareSideLength`).
-    static var solidSquareSize: MapStyleIconSize {
-        MapStyleIconSize.suggestedThumbnailGlyphBucket(side: solidSquareSideLengthValue)
-    }
-
-    /// Leading square — activity / booking category tile, catalog thumbnail, photo-stack tiles, and flight logo tile.
-    static var solidSquareSideLength: CGFloat { solidSquareSideLengthValue }
-    private static let solidSquareSymbolScale: CGFloat = 0.92
-
-    /// Suggested-places style: flat category fill, white glyph, rounded square.
-    @ViewBuilder
-    static func categoryBadge(symbol: String, accent: Color, accessibilityLabel: String) -> some View {
-        MapStyleIcon(
-            systemName: symbol,
-            size: solidSquareSize,
-            accent: accent,
-            backgroundStyle: .solidAccent,
-            shape: .roundedRectangle,
-            frameSide: solidSquareSideLength,
-            symbolScale: solidSquareSymbolScale,
-            accessibilityLabel: accessibilityLabel
-        )
-    }
-}
-
-
 // =============================================================================
 
 #if DEBUG
-#Preview("Time pin — double teardrop") {
+#Preview("Time pin — circle") {
     VStack(spacing: 12) {
-        TimePinView(time: Date(), tint: .blue)
+        TimePinView(time: Date(), tint: .blue, symbol: "star.fill")
         TimePinView(time: Date(), tint: .orange)
-        UnscheduledMarkerView(tint: .purple)
+        UnscheduledMarkerView(tint: .purple, symbol: "fork.knife")
     }
     .padding()
     .background(AppColors.appBackground)
