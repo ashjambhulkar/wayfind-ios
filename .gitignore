@@ -83,6 +83,9 @@ playground.xcworkspace
 # Local tooling (e.g. concatenated "all files" scratch buffer)
 /AllFiles.swift
 
+# Static HTML mocks / design references (local only)
+/demo/
+
 # App packaging / archives
 *.crash
 
