@@ -371,6 +371,7 @@ struct TripDetailView: View {
                 place: place,
                 previousPlace: selectedPlacePrevious,
                 tripId: viewModel?.trip.id ?? trip.id,
+                injectedDisplayTimeZone: tripTimelineGeocodedTimeZone,
                 onEdit: { placeToEdit = place },
                 onMove: { placeToMove = place },
                 onDelete: {
@@ -432,7 +433,8 @@ struct TripDetailView: View {
                             return true
                         },
                         targetDayId: place.itineraryDayId,
-                        showsCloseButton: true
+                        showsCloseButton: true,
+                        displayTimeZone: tripTimelineGeocodedTimeZone
                     )
                 }
             } else {
@@ -541,7 +543,8 @@ struct TripDetailView: View {
                             return true
                         },
                         targetDayId: targetDayId,
-                        showsCloseButton: true
+                        showsCloseButton: true,
+                        displayTimeZone: tripTimelineGeocodedTimeZone
                     )
                 }
             }
@@ -1138,7 +1141,8 @@ struct TripDetailView: View {
                                         isFlightStale: flightStaleness(for: place),
                                         flightTint: flightTint(for: place),
                                         isProUser: isProUserForFlightTracking,
-                                        onUpgradeTap: { presentFlightPaywall() }
+                                        onUpgradeTap: { presentFlightPaywall() },
+                                        isOutsideTripDates: viewModel.isBookingOutsideTripDates(place, timelineTimeZone: dayTZ)
                                     )
                                     .onTapGesture {
                                         selectedPlacePrevious = index > 0 ? timelineRows[index - 1].place : nil

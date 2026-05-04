@@ -41,11 +41,25 @@ final class MockDataService {
 
     /// Mock equivalent of `SupabaseManager.fetchTripTimeline` — reuses the
     /// per-day fetch so the mock stays authoritative without duplicating data.
+    /// Applies the same `timelineSpineSortInstant`-based sort as production so
+    /// that booking timestamps (reservation times, flight departures, hotel
+    /// check-ins) interleave correctly with activity `startTime` values.
     func fetchTripTimeline(for tripId: UUID) async -> (days: [ItineraryDay], placesByDayId: [UUID: [Place]]) {
         let days = await fetchDays(for: tripId)
         var placesByDayId: [UUID: [Place]] = [:]
         for day in days {
-            placesByDayId[day.id] = await fetchPlaces(for: day.id)
+            let places = await fetchPlaces(for: day.id)
+            placesByDayId[day.id] = places.sorted { a, b in
+                switch (
+                    a.timelineSpineSortInstant(hotelTimelineRole: nil),
+                    b.timelineSpineSortInstant(hotelTimelineRole: nil)
+                ) {
+                case let (l?, r?): return l < r
+                case (nil, _?): return false
+                case (_?, nil): return true
+                case (nil, nil): return a.sortOrder < b.sortOrder
+                }
+            }
         }
         return (days, placesByDayId)
     }

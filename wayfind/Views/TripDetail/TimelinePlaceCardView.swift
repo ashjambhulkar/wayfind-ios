@@ -135,13 +135,28 @@ struct TimelinePlaceCardView: View {
         )
     }
 
-    /// "9:30 AM · Market" — compact first line so the name reads as the headline.
+    /// "Market · 9:30 AM" — category label tinted to match the spine pin, time in grey.
     private var eyebrowLine: some View {
-        let parts: [String] = [startTimeText, activityTypeLabel].compactMap { $0 }
-        return Text(parts.joined(separator: " · "))
-            .font(.appSmall.weight(.medium))
-            .foregroundStyle(AppColors.textSecondary)
-            .lineLimit(1)
+        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+            Text(activityTypeLabel)
+                .font(.appSmall.weight(.semibold))
+                .foregroundStyle(timelineSpinePinColor)
+                .lineLimit(1)
+
+            if let time = startTimeText {
+                Text("·")
+                    .font(.appSmall)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .accessibilityHidden(true)
+                Text(time)
+                    .font(.appSmall.weight(.medium))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
     }
 
     @ViewBuilder

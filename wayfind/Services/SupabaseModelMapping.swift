@@ -19,6 +19,14 @@ enum SupabaseModelMapping {
 
     static func calendarDateOnlyString(from date: Date, calendar: Calendar = .current) -> String {
         let start = calendar.startOfDay(for: date)
+        if calendar.timeZone != dateOnlyFormatter.timeZone {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = calendar.timeZone
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.string(from: start)
+        }
         return dateOnlyFormatter.string(from: start)
     }
 
@@ -26,10 +34,23 @@ enum SupabaseModelMapping {
         let startDay = calendar.startOfDay(for: start)
         let endDay = calendar.startOfDay(for: end)
         guard startDay <= endDay else { return [] }
+
+        let formatter: DateFormatter
+        if calendar.timeZone != dateOnlyFormatter.timeZone {
+            let f = DateFormatter()
+            f.calendar = Calendar(identifier: .gregorian)
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = calendar.timeZone
+            f.dateFormat = "yyyy-MM-dd"
+            formatter = f
+        } else {
+            formatter = dateOnlyFormatter
+        }
+
         var dates: [String] = []
         var cursor = startDay
         while cursor <= endDay {
-            dates.append(dateOnlyFormatter.string(from: cursor))
+            dates.append(formatter.string(from: cursor))
             guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
             cursor = next
         }

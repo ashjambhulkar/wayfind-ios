@@ -1,3 +1,4 @@
+import CoreLocation
 import SwiftUI
 
 private struct AddBookingRoute: Identifiable, Hashable {
@@ -27,11 +28,27 @@ struct BookingsScreenView: View {
     @State private var undoTask: Task<Void, Never>?
     @State private var addBookingRoute: AddBookingRoute?
     @State private var flightTracking = FlightTrackingService()
+    /// Trip destination timezone — every visible booking date/time on this screen
+    /// is rendered in this TZ so the traveler reads the itinerary in destination-local
+    /// terms. Resolved via reverse-geocoding the trip's lat/lng, mirroring `TripDetailView`.
+    @State private var tripDisplayTimeZone: TimeZone = .current
 
     private var groupedBookings: [(category: BookingCategory, places: [Place])] {
         BookingCategory.allCases.compactMap { category in
             let items = allBookings.filter { resolvedCategory(for: $0) == category }
-            return items.isEmpty ? nil : (category, items.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
+            guard !items.isEmpty else { return nil }
+            let sorted = items.sorted { a, b in
+                let aDate = a.timelineSpineSortInstant(hotelTimelineRole: nil)
+                let bDate = b.timelineSpineSortInstant(hotelTimelineRole: nil)
+                switch (aDate, bDate) {
+                case let (l?, r?): return l < r
+                case (nil, _?): return false
+                case (_?, nil): return true
+                case (nil, nil):
+                    return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+                }
+            }
+            return (category, sorted)
         }
     }
 
@@ -68,6 +85,7 @@ struct BookingsScreenView: View {
                                         BookingListRow(
                                             place: place,
                                             category: group.category,
+                                            displayTimeZone: tripDisplayTimeZone,
                                             flightStatus: flightTracking.statusesByBookingId[place.id],
                                             isFlightStale: flightStaleness(for: place),
                                             flightTint: flightTint(for: place)
@@ -120,6 +138,7 @@ struct BookingsScreenView: View {
         .animation(AppSpring.smooth, value: pendingUndo != nil)
         .task {
             await loadBookings()
+            await refreshTripDisplayTimeZone()
             await flightTracking.bind(tripId: trip.id)
         }
         .onDisappear {
@@ -140,7 +159,8 @@ struct BookingsScreenView: View {
                         return true
                     },
                     targetDayId: route.targetDayId,
-                    showsCloseButton: true
+                    showsCloseButton: true,
+                    displayTimeZone: tripDisplayTimeZone
                 )
             }
         }
@@ -159,7 +179,8 @@ struct BookingsScreenView: View {
                         return true
                     },
                     targetDayId: place.itineraryDayId,
-                    showsCloseButton: true
+                    showsCloseButton: true,
+                    displayTimeZone: tripDisplayTimeZone
                 )
             }
         }
@@ -278,6 +299,24 @@ struct BookingsScreenView: View {
         allBookings = bookings
     }
 
+    /// Reverse-geocodes the trip's lat/lng to get the destination timezone, falling
+    /// back to the device timezone if no coordinates are available. Same algorithm
+    /// as `TripDetailView.refreshTripTimelineGeocodedTimeZone` so both surfaces agree.
+    private func refreshTripDisplayTimeZone() async {
+        guard let lat = trip.lat, let lng = trip.lng, !lat.isNaN, !lng.isNaN else {
+            await MainActor.run { tripDisplayTimeZone = .current }
+            return
+        }
+        let geocoder = CLGeocoder()
+        do {
+            let marks = try await geocoder.reverseGeocodeLocation(CLLocation(latitude: lat, longitude: lng))
+            let tz = marks.first?.timeZone ?? .current
+            await MainActor.run { tripDisplayTimeZone = tz }
+        } catch {
+            await MainActor.run { tripDisplayTimeZone = .current }
+        }
+    }
+
     @MainActor
     private func openAddBooking(for category: BookingCategory) async {
         guard let targetDayId = await resolvedAddBookingTargetDayId() else {
@@ -334,27 +373,33 @@ struct BookingsScreenView: View {
 private struct BookingListRow: View {
     let place: Place
     let category: BookingCategory
+    /// Trip destination timezone — every visible date/time is rendered in this TZ.
+    var displayTimeZone: TimeZone = .current
     var flightStatus: FlightStatus?
     var isFlightStale = false
     var flightTint: FlightStatus.DisplayState.Tint = .neutral
 
     private var dateLine: String {
+        let tz = displayTimeZone
         switch (place.startTime, place.endTime) {
         case let (s?, e?):
-            if Calendar.current.isDate(s, inSameDayAs: e) {
-                return "\(s.shortFormatted) · \(s.timeFormatted) – \(e.timeFormatted)"
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = tz
+            if calendar.isDate(s, inSameDayAs: e) {
+                return "\(s.shortFormatted(timeZone: tz)) · \(s.timeFormatted(timeZone: tz)) – \(e.timeFormatted(timeZone: tz))"
             }
-            return "\(s.shortFormatted) \(s.timeFormatted) – \(e.shortFormatted) \(e.timeFormatted)"
+            return "\(s.shortFormatted(timeZone: tz)) \(s.timeFormatted(timeZone: tz)) – \(e.shortFormatted(timeZone: tz)) \(e.timeFormatted(timeZone: tz))"
         case let (s?, nil):
-            return "\(s.shortFormatted) · \(s.timeFormatted)"
+            return "\(s.shortFormatted(timeZone: tz)) · \(s.timeFormatted(timeZone: tz))"
         case let (nil, e?):
-            return "\(e.shortFormatted) · \(e.timeFormatted)"
+            return "\(e.shortFormatted(timeZone: tz)) · \(e.timeFormatted(timeZone: tz))"
         default:
             return "Date TBD"
         }
     }
 
     var body: some View {
+        let tz = displayTimeZone
         switch place.bookingDetails {
         case .flight(let flightDetails):
             FlightBookingPassCard(
@@ -362,7 +407,8 @@ private struct BookingListRow: View {
                 details: flightDetails,
                 status: flightStatus,
                 isStale: isFlightStale,
-                tint: flightTint
+                tint: flightTint,
+                displayTimeZone: tz
             )
         case .hotel(let details):
             BookingPassCard(
@@ -373,8 +419,8 @@ private struct BookingListRow: View {
                 subtitle: hotelStaySubtitle(details),
                 statusText: hotelStayStatus(details),
                 metrics: [
-                    BookingPassMetric(title: "Check-in", value: details.checkInDate?.shortFormatted ?? "TBD"),
-                    BookingPassMetric(title: "Check-out", value: details.checkOutDate?.shortFormatted ?? "TBD"),
+                    BookingPassMetric(title: "Check-in", value: details.checkInDate?.shortFormatted(timeZone: tz) ?? "TBD"),
+                    BookingPassMetric(title: "Check-out", value: details.checkOutDate?.shortFormatted(timeZone: tz) ?? "TBD"),
                     BookingPassMetric(title: "Room", value: clean(details.roomType, fallback: "—")),
                     confirmationMetric
                 ]
@@ -385,10 +431,10 @@ private struct BookingListRow: View {
                 eyebrow: "Table Card",
                 symbol: "fork.knife",
                 title: place.name,
-                subtitle: details.reservationTime.map { "\($0.shortFormatted) · \($0.timeFormatted)" } ?? dateLine,
+                subtitle: details.reservationTime.map { "\($0.shortFormatted(timeZone: tz)) · \($0.timeFormatted(timeZone: tz))" } ?? dateLine,
                 statusText: partyLabel(details.partySize),
                 metrics: [
-                    BookingPassMetric(title: "Time", value: details.reservationTime?.timeFormatted ?? "TBD"),
+                    BookingPassMetric(title: "Time", value: details.reservationTime?.timeFormatted(timeZone: tz) ?? "TBD"),
                     BookingPassMetric(title: "Party", value: partyLabel(details.partySize)),
                     BookingPassMetric(title: "Area", value: neighborhood(from: place.address) ?? "—"),
                     confirmationMetric
@@ -401,7 +447,7 @@ private struct BookingListRow: View {
                 symbol: "car.fill",
                 title: clean(details.company, fallback: place.name),
                 subtitle: "\(clean(details.pickupLocation, fallback: "Pickup TBD")) → \(clean(details.dropoffLocation, fallback: "Dropoff TBD"))",
-                statusText: details.pickupTime?.shortFormatted ?? "Pickup TBD",
+                statusText: details.pickupTime?.shortFormatted(timeZone: tz) ?? "Pickup TBD",
                 metrics: [
                     dateTimeMetric(title: "Pickup", date: details.pickupTime),
                     dateTimeMetric(title: "Return", date: details.dropoffTime),
@@ -416,7 +462,7 @@ private struct BookingListRow: View {
                 symbol: "ticket.fill",
                 title: place.name,
                 subtitle: clean(place.address, fallback: details.provider.isEmpty ? "Venue TBD" : details.provider),
-                statusText: place.startTime?.timeFormatted ?? "Time TBD",
+                statusText: place.startTime?.timeFormatted(timeZone: tz) ?? "Time TBD",
                 metrics: [
                     dateTimeMetric(title: "Starts", date: place.startTime),
                     BookingPassMetric(title: "Duration", value: clean(details.duration, fallback: "—")),
@@ -431,7 +477,7 @@ private struct BookingListRow: View {
                 symbol: category.sfSymbol,
                 title: transportTitle(details),
                 subtitle: "\(clean(details.departureStation, fallback: "Departure TBD")) → \(clean(details.arrivalStation, fallback: "Arrival TBD"))",
-                statusText: details.departureTime?.shortFormatted ?? "Departure TBD",
+                statusText: details.departureTime?.shortFormatted(timeZone: tz) ?? "Departure TBD",
                 metrics: [
                     dateTimeMetric(title: "Departs", date: details.departureTime),
                     dateTimeMetric(title: "Arrives", date: details.arrivalTime),
@@ -465,13 +511,14 @@ private struct BookingListRow: View {
     }
 
     private func hotelStaySubtitle(_ details: HotelDetails) -> String {
+        let tz = displayTimeZone
         switch (details.checkInDate, details.checkOutDate) {
         case let (checkIn?, checkOut?):
-            return "\(checkIn.shortFormatted) → \(checkOut.shortFormatted)"
+            return "\(checkIn.shortFormatted(timeZone: tz)) → \(checkOut.shortFormatted(timeZone: tz))"
         case let (checkIn?, nil):
-            return "Check-in \(checkIn.shortFormatted)"
+            return "Check-in \(checkIn.shortFormatted(timeZone: tz))"
         case let (nil, checkOut?):
-            return "Check-out \(checkOut.shortFormatted)"
+            return "Check-out \(checkOut.shortFormatted(timeZone: tz))"
         default:
             return dateLine
         }
@@ -489,7 +536,8 @@ private struct BookingListRow: View {
 
     private func dateTimeMetric(title: String, date: Date?) -> BookingPassMetric {
         guard let date else { return BookingPassMetric(title: title, value: "TBD") }
-        return BookingPassMetric(title: title, value: date.shortFormatted, detail: date.timeFormatted)
+        let tz = displayTimeZone
+        return BookingPassMetric(title: title, value: date.shortFormatted(timeZone: tz), detail: date.timeFormatted(timeZone: tz))
     }
 
     private func transportTitle(_ details: TransportDetails) -> String {
@@ -667,6 +715,9 @@ private struct FlightBookingPassCard: View {
     let status: FlightStatus?
     let isStale: Bool
     let tint: FlightStatus.DisplayState.Tint
+    /// Trip destination timezone — every visible time on this card is rendered here so the
+    /// card matches the rest of the trip-detail surface (one mental clock for the traveler).
+    var displayTimeZone: TimeZone = .current
 
     private var departureAirport: String {
         preferred(status?.originAirportIata, details.departureAirport, fallback: "TBD")
@@ -801,7 +852,7 @@ private struct FlightBookingPassCard: View {
                 airportBlock(
                     airport: departureAirport,
                     city: departureCity,
-                    time: departureTime?.timeFormatted
+                    time: departureTime?.timeFormatted(timeZone: displayTimeZone)
                 )
 
                 Spacer(minLength: AppSpacing.md)
@@ -815,7 +866,7 @@ private struct FlightBookingPassCard: View {
                 airportBlock(
                     airport: arrivalAirport,
                     city: arrivalCity,
-                    time: arrivalTime?.timeFormatted,
+                    time: arrivalTime?.timeFormatted(timeZone: displayTimeZone),
                     alignment: .trailing
                 )
             }

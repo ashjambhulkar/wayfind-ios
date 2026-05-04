@@ -279,6 +279,13 @@ final class TripDetailViewModel {
             switch (lhsClockSeconds, rhsClockSeconds) {
             case let (l?, r?):
                 if l != r { return l < r }
+                // Same clock time: break the tie with the full date so bookings whose
+                // stored timestamp is on a different calendar date than the itinerary day
+                // still sort chronologically (e.g. overnight flight assigned to the
+                // departure day but with an arrival timestamp on the following day).
+                if let li = lhs.timelineSortInstant, let ri = rhs.timelineSortInstant, li != ri {
+                    return li < ri
+                }
             case (nil, _?):
                 return false
             case (_?, nil):
@@ -294,6 +301,32 @@ final class TripDetailViewModel {
             }
             return lhs.id < rhs.id
         }
+    }
+
+    /// Returns `true` when a booking's primary date lies outside the trip's
+    /// scheduled day range, evaluated in the trip's destination timezone.
+    ///
+    /// The whole timeline (day headers, card times, sort order) is rendered in
+    /// the destination TZ so a traveler reads itinerary like a local. The
+    /// warning therefore matches what the card actually prints — a booking
+    /// whose destination-local date falls outside the trip is genuinely
+    /// out-of-range and the user should fix it.
+    func isBookingOutsideTripDates(_ place: Place, timelineTimeZone: TimeZone) -> Bool {
+        guard place.isBooking,
+              let bookingInstant = place.timelineSpineSortInstant(hotelTimelineRole: nil) else {
+            return false
+        }
+        let scheduledDates = scheduledDays.compactMap(\.date)
+        guard let earliest = scheduledDates.min(),
+              let latest = scheduledDates.max() else {
+            return false
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timelineTimeZone
+        let bookingDay = calendar.startOfDay(for: bookingInstant)
+        let earliestDay = calendar.startOfDay(for: earliest)
+        let latestDay = calendar.startOfDay(for: latest)
+        return bookingDay < earliestDay || bookingDay > latestDay
     }
 
     func ongoingBookings(for day: ItineraryDay) -> [(place: Place, isFirstAppearance: Bool)] {

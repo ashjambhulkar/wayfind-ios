@@ -27,6 +27,9 @@ struct TimelineBookingCardView: View {
     var isProUser: Bool = true
     var onUpgradeTap: (() -> Void)? = nil
     var onFlightBadgeTap: (() -> Void)? = nil
+    /// `true` when the booking's primary date sits outside the trip's day
+    /// range — the row was forced onto the first scheduled day as a fallback.
+    var isOutsideTripDates: Bool = false
 
     init(
         place: Place,
@@ -42,7 +45,8 @@ struct TimelineBookingCardView: View {
         flightTint: FlightStatus.DisplayState.Tint = .neutral,
         isProUser: Bool = true,
         onUpgradeTap: (() -> Void)? = nil,
-        onFlightBadgeTap: (() -> Void)? = nil
+        onFlightBadgeTap: (() -> Void)? = nil,
+        isOutsideTripDates: Bool = false
     ) {
         self.place = place
         self.dayNumber = dayNumber
@@ -58,25 +62,19 @@ struct TimelineBookingCardView: View {
         self.isProUser = isProUser
         self.onUpgradeTap = onUpgradeTap
         self.onFlightBadgeTap = onFlightBadgeTap
+        self.isOutsideTripDates = isOutsideTripDates
     }
 
     private var bookingCategory: BookingCategory {
         place.bookingCategoryEnum ?? .activity
     }
 
-    /// Strong accent for booking card chrome from **local time of day**, not booking category (`TimelineScheduleChroma`).
     private var timelineScheduleAccent: Color {
-        TimelineScheduleChroma.accentColor(
-            scheduleInstant: spineStartTime,
-            timeZone: timelineDisplayTimeZone
-        )
+        TimelineCategoryChroma.stripeColor(for: bookingCategory)
     }
 
     private var timelineSpinePinColor: Color {
-        TimelineScheduleChroma.spinePinColor(
-            scheduleInstant: spineStartTime,
-            timeZone: timelineDisplayTimeZone
-        )
+        TimelineCategoryChroma.pinColor(for: bookingCategory)
     }
 
     /// Wall-clock instant shown on the spine (start of the row); falls back to
@@ -107,7 +105,12 @@ struct TimelineBookingCardView: View {
                 accessibilityLabel: spineAccessibilityLabel
             )
 
-            cardSurface
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                if isOutsideTripDates {
+                    outsideTripDatesBanner
+                }
+                cardSurface
+            }
         }
         .contextMenu {
             Button("Edit", action: onEdit)
@@ -119,6 +122,28 @@ struct TimelineBookingCardView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityDescription)
+    }
+
+    /// Inline warning shown above the booking card when the booking's date
+    /// falls outside the trip's day range. The booking is still rendered on
+    /// the first scheduled day so it isn't hidden, but the chip explains why
+    /// it's there and prompts the user to fix the date.
+    private var outsideTripDatesBanner: some View {
+        HStack(spacing: AppSpacing.xs) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.appSmall.weight(.semibold))
+                .foregroundStyle(AppColors.appWarning)
+                .accessibilityHidden(true)
+            Text("Outside trip dates · tap Edit to fix")
+                .font(.appSmall.weight(.medium))
+                .foregroundStyle(AppColors.appWarning)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xs)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColors.appWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous))
     }
 
     // MARK: - Card surface
@@ -134,6 +159,7 @@ struct TimelineBookingCardView: View {
                 departureTime: flightDepartureTime(details),
                 arrivalTime: flightArrivalTime(details),
                 duration: flightDuration(details),
+                displayTimeZone: timelineDisplayTimeZone,
                 scheduleAccent: timelineScheduleAccent,
                 statusText: flightStatusText ?? "Flight",
                 showFlightStatusBadge: shouldShowFlightBadge,
@@ -583,198 +609,87 @@ private struct TimelineBookingPassMetric: Identifiable {
 
 private struct TimelineBookingPassCard: View {
     let category: BookingCategory
-    /// Left stripe + schedule chrome — time-of-day, not booking category.
-    let stripeAccent: Color
-    let eyebrow: String
+    let stripeAccent: Color   // kept for API compatibility
+    let eyebrow: String       // kept for API compatibility
     let title: String
     let subtitle: String
-    let statusText: String
-    let metrics: [TimelineBookingPassMetric]
-    /// When set (e.g. restaurant footer), replaces the metric-column footer with stacked summary lines.
-    var footerSummaryLines: [String]? = nil
-    /// Optional trailing text on the title row (e.g. restaurant party size).
+    let statusText: String    // kept for API compatibility
+    let metrics: [TimelineBookingPassMetric] // kept for API compatibility
+    var footerSummaryLines: [String]? = nil  // kept for API compatibility
+    /// Key datum on the eyebrow line (e.g. "2 nights", "Party of 2", "9:00 AM").
     var titleTrailing: String? = nil
-    /// Optional trailing text on the eyebrow row (e.g. car rental pickup date); secondary, no capsule.
-    var eyebrowTrailingText: String? = nil
-    /// Hotel address line (timeline-only); shown with a map pin under the subtitle.
-    var addressFootnote: String? = nil
-
-    private var hasFooter: Bool {
-        if let lines = footerSummaryLines, !lines.isEmpty { return true }
-        return !metrics.isEmpty
-    }
-
-    private var showsEyebrowRow: Bool {
-        !eyebrow.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || showsStatusChip
-            || !(eyebrowTrailingText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty
-    }
-
-    private var showsStatusChip: Bool {
-        !statusText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var titleTrailingFont: Font {
-        switch category {
-        case .transport, .carRental, .activity:
-            return .appSmall.weight(.semibold)
-        default:
-            return .subheadline.weight(.semibold)
-        }
-    }
+    var eyebrowTrailingText: String? = nil   // kept for API compatibility
+    var addressFootnote: String? = nil       // kept for API compatibility
 
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
-            if showsEyebrowRow {
-                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
-                    Text(eyebrow.uppercased())
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(AppColors.textSecondary)
-                        .tracking(0.7)
-                        .lineLimit(1)
-
-                    Spacer(minLength: AppSpacing.xs)
-
-                    if showsStatusChip {
-                        statusChip
-                    } else if let eyebrowTrailing = eyebrowTrailingText?.trimmingCharacters(in: .whitespacesAndNewlines),
-                              !eyebrowTrailing.isEmpty {
-                        Text(eyebrowTrailing)
-                            .font(.footnote)
-                            .foregroundStyle(AppColors.textSecondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.78)
-                    }
-                }
-            }
-
-            if let trailing = titleTrailing?.trimmingCharacters(in: .whitespacesAndNewlines), !trailing.isEmpty {
-                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
-                    Text(title)
-                        .font(.timelineRowTitle)
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.78)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Text(trailing)
-                        .font(titleTrailingFont)
-                        .foregroundStyle(AppColors.textSecondary)
-                        .lineLimit(1)
-                        .monospacedDigit()
-                }
-            } else {
-                Text(title)
-                    .font(.timelineRowTitle)
-                    .foregroundStyle(Color.primary)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.78)
-            }
-
-            Text(subtitle)
-                .font(.footnote)
-                .foregroundStyle(AppColors.textSecondary)
-                .lineLimit(3)
-                .minimumScaleFactor(0.85)
-
-            if let address = addressFootnote?.trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty {
-                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
-                    Image(systemName: "mappin.and.ellipse")
-                        .font(.appSmall)
-                        .foregroundStyle(AppColors.textSecondary)
-                    Text(address)
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
-                        .lineLimit(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(String(localized: "Address"))
-            }
-
-            if hasFooter {
-                VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                    Divider()
-
-                    if let lines = footerSummaryLines, !lines.isEmpty {
-                        if lines.count == 1, let line = lines.first {
-                            Text(line)
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(AppColors.textSecondary)
-                                .lineLimit(2)
-                                .minimumScaleFactor(0.78)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                                    Text(line)
-                                        .font(index == 0 ? .subheadline.weight(.semibold) : .caption.weight(.semibold))
-                                        .foregroundStyle(AppColors.textSecondary)
-                                        .lineLimit(2)
-                                        .minimumScaleFactor(0.78)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                        }
-                    } else {
-                        HStack(alignment: .top, spacing: AppSpacing.sm) {
-                            ForEach(Array(metrics.prefix(3).enumerated()), id: \.offset) { _, metric in
-                                metricColumn(metric)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(.top, AppSpacing.xs)
-            }
+        VStack(alignment: .leading, spacing: 2) {
+            eyebrowRow
+            nameRow
+            detailRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .timelineCardChassis(
             stripeColor: stripeAccent,
             showsTopRail: false,
             horizontalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding,
-            verticalContentPadding: TimelineCardLayoutMetrics.contentVerticalPadding
+            verticalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(category.label), \(title), \(subtitle)")
+        .accessibilityLabel(accessibilityText)
     }
 
-    private var statusChip: some View {
-        Text(statusText)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(AppColors.textPrimary)
-            .lineLimit(1)
-            .padding(.horizontal, AppSpacing.sm)
-            .padding(.vertical, AppSpacing.xs)
-            .background(category.color.opacity(0.12), in: Capsule())
-            .overlay {
-                Capsule()
-                    .strokeBorder(category.color.opacity(0.2), lineWidth: 0.5)
-            }
-    }
+    // MARK: - Rows
 
-    private func metricColumn(_ metric: TimelineBookingPassMetric) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(metric.value)
-                .font(.appCaption.weight(.semibold))
-                .foregroundStyle(AppColors.textPrimary)
+    /// "Hotel · 2 nights" — tinted category label signals confirmed booking vs activity.
+    private var eyebrowRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+            Text(category.label)
+                .font(.appSmall.weight(.semibold))
+                .foregroundStyle(TimelineCategoryChroma.pinColor(for: category))
                 .lineLimit(1)
-                .minimumScaleFactor(0.72)
 
-            if let detail = metric.detail {
-                Text(detail)
-                    .font(.caption2.weight(.semibold))
+            if let trailing = titleTrailing?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !trailing.isEmpty {
+                Text("·")
+                    .font(.appSmall)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .accessibilityHidden(true)
+                Text(trailing)
+                    .font(.appSmall.weight(.medium))
                     .foregroundStyle(AppColors.textSecondary)
+                    .monospacedDigit()
                     .lineLimit(1)
-                    .minimumScaleFactor(0.78)
             }
-
-            Text(metric.title)
-                .font(.caption2)
-                .foregroundStyle(AppColors.textTertiary)
-                .lineLimit(1)
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Venue / company / operator name.
+    private var nameRow: some View {
+        Text(title)
+            .font(.timelineRowTitle)
+            .foregroundStyle(Color.primary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+    }
+
+    /// Route, dates, or reservation time — secondary confirmation at a glance.
+    @ViewBuilder
+    private var detailRow: some View {
+        let trimmed = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            Text(trimmed)
+                .font(.footnote)
+                .foregroundStyle(AppColors.textTertiary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.88)
+        }
+    }
+
+    private var accessibilityText: String {
+        let trailing = titleTrailing.map { ", \($0)" } ?? ""
+        let detail = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(category.label)\(trailing): \(title). \(detail)"
     }
 }
 
@@ -795,6 +710,9 @@ private struct TimelineFlightBookingPassCard: View {
     let departureTime: Date?
     let arrivalTime: Date?
     let duration: String?
+    /// Trip destination timezone — every visible time on this card is rendered in this TZ
+    /// so the traveler reads the itinerary in destination-local terms (matching the day header).
+    var displayTimeZone: TimeZone = .current
     /// Route / plane glyph tint aligned with spine (local departure time bucket).
     let scheduleAccent: Color
     /// Supplementary summary for the card-level VoiceOver label when the
@@ -831,8 +749,8 @@ private struct TimelineFlightBookingPassCard: View {
     }
 
     private var accessibilitySummary: String {
-        let dep = departureTime?.timeFormatted ?? "departure time unknown"
-        let arr = arrivalTime?.timeFormatted ?? "arrival time unknown"
+        let dep = departureTime?.timeFormatted(timeZone: displayTimeZone) ?? "departure time unknown"
+        let arr = arrivalTime?.timeFormatted(timeZone: displayTimeZone) ?? "arrival time unknown"
         let dur = duration.map { ", duration \($0)" } ?? ""
         return "Flight \(airlineName), \(departureAirport) to \(arrivalAirport), departs \(dep), arrives \(arr)\(dur). \(statusText)"
     }
@@ -886,7 +804,7 @@ private struct TimelineFlightBookingPassCard: View {
                 Image(systemName: "airplane.departure")
                     .font(.appCaption.weight(.semibold))
                     .foregroundStyle(scheduleAccent)
-                Text(departureTime?.timeFormatted ?? "Time TBD")
+                Text(departureTime?.timeFormatted(timeZone: displayTimeZone) ?? "Time TBD")
                     .font(.appSmall.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(AppColors.textSecondary)
@@ -899,7 +817,7 @@ private struct TimelineFlightBookingPassCard: View {
                 .frame(width: LayoutMetrics.centerRouteColumnWidth, alignment: .center)
 
             HStack(spacing: AppSpacing.xs) {
-                Text(arrivalTime?.timeFormatted ?? "Time TBD")
+                Text(arrivalTime?.timeFormatted(timeZone: displayTimeZone) ?? "Time TBD")
                     .font(.appSmall.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(AppColors.textSecondary)

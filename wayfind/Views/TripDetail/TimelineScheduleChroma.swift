@@ -29,6 +29,28 @@ enum TimelineCategoryChroma {
         case .transport, .custom:     return AppColors.timelineCategoryTransitStripe
         }
     }
+
+    /// Same muted pin fill for booking-card spine pins so both activity and booking
+    /// nodes share one consistent color language on the timeline.
+    static func pinColor(for category: BookingCategory) -> Color {
+        switch category {
+        case .restaurant:           return AppColors.timelineCategoryFoodPin
+        case .hotel:                return AppColors.timelineCategoryStayPin
+        case .flight, .carRental,
+             .transport:            return AppColors.timelineCategoryTransitPin
+        case .activity:             return AppColors.timelineCategoryCulturePin
+        }
+    }
+
+    static func stripeColor(for category: BookingCategory) -> Color {
+        switch category {
+        case .restaurant:           return AppColors.timelineCategoryFoodStripe
+        case .hotel:                return AppColors.timelineCategoryStayStripe
+        case .flight, .carRental,
+             .transport:            return AppColors.timelineCategoryTransitStripe
+        case .activity:             return AppColors.timelineCategoryCultureStripe
+        }
+    }
 }
 
 // MARK: - Schedule chroma (time-of-day — used by booking cards)

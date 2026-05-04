@@ -7,6 +7,11 @@ struct PlaceDetailSheet: View {
     let place: Place
     let previousPlace: Place?
     var tripId: UUID? = nil
+    /// Trip destination timezone passed in by the parent (the timeline already
+    /// knows it). When non-nil this is used directly for booking date/time
+    /// rendering and the local geocode is skipped — avoids `CLGeocoder`
+    /// throttling and a flash of device-TZ content while we re-resolve.
+    var injectedDisplayTimeZone: TimeZone? = nil
 
     var onEdit: () -> Void = {}
     var onMove: () -> Void = {}
@@ -24,6 +29,11 @@ struct PlaceDetailSheet: View {
     @State private var showingPhotosSheet: Bool = false
     @State private var selectedPopularDayKey: String?
     @State private var venueTimeZone: TimeZone?
+    /// Trip destination timezone (resolved from the trip's lat/lng). Used so
+    /// booking dates/times in the detail sheet read in the same clock as the
+    /// timeline. Falls back to device TZ when no trip context is present
+    /// (e.g. the standalone preview host).
+    @State private var tripDisplayTimeZone: TimeZone?
 
     // Apple Maps style interactive stage
     @State private var mapPosition: MapCameraPosition = .automatic
@@ -35,6 +45,7 @@ struct PlaceDetailSheet: View {
         place: Place,
         previousPlace: Place?,
         tripId: UUID? = nil,
+        injectedDisplayTimeZone: TimeZone? = nil,
         initialEnrichment: SupabaseManager.CityPlaceEnrichmentRow? = nil,
         onEdit: @escaping () -> Void = {},
         onMove: @escaping () -> Void = {},
@@ -43,6 +54,7 @@ struct PlaceDetailSheet: View {
         self.place = place
         self.previousPlace = previousPlace
         self.tripId = tripId
+        self.injectedDisplayTimeZone = injectedDisplayTimeZone
         self.onEdit = onEdit
         self.onMove = onMove
         self.onDelete = onDelete
@@ -53,6 +65,7 @@ struct PlaceDetailSheet: View {
         _showingPhotosSheet = State(initialValue: false)
         _selectedPopularDayKey = State(initialValue: nil)
         _venueTimeZone = State(initialValue: nil)
+        _tripDisplayTimeZone = State(initialValue: nil)
         _mapPosition = State(initialValue: .automatic)
         _mapPitchEnabled = State(initialValue: true)
         _showingExpandedMap = State(initialValue: false)
@@ -197,9 +210,10 @@ struct PlaceDetailSheet: View {
     }
 
     private var scheduledTimeText: String? {
+        let tz = bookingDisplayTimeZone
         switch (place.startTime, place.endTime) {
-        case let (s?, e?): return "\(s.timeFormatted) – \(e.timeFormatted)"
-        case let (s?, nil): return s.timeFormatted
+        case let (s?, e?): return "\(s.timeFormatted(timeZone: tz)) – \(e.timeFormatted(timeZone: tz))"
+        case let (s?, nil): return s.timeFormatted(timeZone: tz)
         default: return nil
         }
     }
@@ -368,11 +382,15 @@ struct PlaceDetailSheet: View {
         }
         .task(id: place.id) {
             await resolveVenueTimeZone()
+            if injectedDisplayTimeZone == nil {
+                await resolveTripDisplayTimeZone()
+            }
             updateMapCamera(animated: false)
         }
         .onChange(of: place.id) { _, _ in
             selectedPopularDayKey = nil
             venueTimeZone = nil
+            tripDisplayTimeZone = nil
             aboutSummaryExpanded = false
             updateMapCamera(animated: false)
         }
@@ -1102,7 +1120,8 @@ struct PlaceDetailSheet: View {
     }
 
     private func flightContent(_ f: FlightDetails) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let tz = bookingDisplayTimeZone
+        return VStack(alignment: .leading, spacing: 0) {
             bookingInfoCard {
                 VStack(spacing: 16) {
                     HStack {
@@ -1111,9 +1130,9 @@ struct PlaceDetailSheet: View {
                                 .font(.largeTitle.weight(.semibold))
                                 .fontDesign(.rounded)
                             if let t = f.departureTime {
-                                Text(t.timeFormatted)
+                                Text(t.timeFormatted(timeZone: tz))
                                     .font(.title3.weight(.medium))
-                                Text(t.shortFormatted)
+                                Text(t.shortFormatted(timeZone: tz))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
@@ -1132,9 +1151,9 @@ struct PlaceDetailSheet: View {
                                 .font(.largeTitle.weight(.semibold))
                                 .fontDesign(.rounded)
                             if let t = f.arrivalTime {
-                                Text(t.timeFormatted)
+                                Text(t.timeFormatted(timeZone: tz))
                                     .font(.title3.weight(.medium))
-                                Text(t.shortFormatted)
+                                Text(t.shortFormatted(timeZone: tz))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
@@ -1153,12 +1172,13 @@ struct PlaceDetailSheet: View {
     }
 
     private func hotelContent(_ h: HotelDetails) -> some View {
-        bookingInfoCard {
+        let tz = bookingDisplayTimeZone
+        return bookingInfoCard {
             if let checkIn = h.checkInDate {
-                bookingRow(label: "Check-in", value: "\(checkIn.shortFormatted)\(h.checkInTime.map { " · \($0)" } ?? "")")
+                bookingRow(label: "Check-in", value: "\(checkIn.shortFormatted(timeZone: tz))\(h.checkInTime.map { " · \($0)" } ?? "")")
             }
             if let checkOut = h.checkOutDate {
-                bookingRow(label: "Check-out", value: "\(checkOut.shortFormatted)\(h.checkOutTime.map { " · \($0)" } ?? "")")
+                bookingRow(label: "Check-out", value: "\(checkOut.shortFormatted(timeZone: tz))\(h.checkOutTime.map { " · \($0)" } ?? "")")
             }
             if let nights = h.nights { bookingRow(label: "Nights", value: "\(nights)") }
             if !h.roomType.isEmpty { bookingRow(label: "Room", value: h.roomType) }
@@ -1166,18 +1186,20 @@ struct PlaceDetailSheet: View {
     }
 
     private func restaurantContent(_ r: RestaurantDetails) -> some View {
-        bookingInfoCard {
-            if let t = r.reservationTime { bookingRow(label: "Time", value: t.timeFormatted) }
+        let tz = bookingDisplayTimeZone
+        return bookingInfoCard {
+            if let t = r.reservationTime { bookingRow(label: "Time", value: t.timeFormatted(timeZone: tz)) }
             if let p = r.partySize { bookingRow(label: "Party", value: "\(p) people") }
         }
     }
 
     private func carRentalContent(_ c: CarRentalDetails) -> some View {
-        bookingInfoCard {
+        let tz = bookingDisplayTimeZone
+        return bookingInfoCard {
             bookingRow(label: "Pick-up", value: c.pickupLocation)
             bookingRow(label: "Drop-off", value: c.dropoffLocation)
-            if let t = c.pickupTime { bookingRow(label: "Pick-up time", value: t.timeFormatted) }
-            if let t = c.dropoffTime { bookingRow(label: "Drop-off time", value: t.timeFormatted) }
+            if let t = c.pickupTime { bookingRow(label: "Pick-up time", value: t.timeFormatted(timeZone: tz)) }
+            if let t = c.dropoffTime { bookingRow(label: "Drop-off time", value: t.timeFormatted(timeZone: tz)) }
             if !c.carType.isEmpty { bookingRow(label: "Car", value: c.carType) }
         }
     }
@@ -1191,11 +1213,12 @@ struct PlaceDetailSheet: View {
     }
 
     private func transportContent(_ t: TransportDetails) -> some View {
-        bookingInfoCard {
+        let tz = bookingDisplayTimeZone
+        return bookingInfoCard {
             bookingRow(label: "From", value: t.departureStation)
             bookingRow(label: "To", value: t.arrivalStation)
-            if let dep = t.departureTime { bookingRow(label: "Departs", value: dep.timeFormatted) }
-            if let arr = t.arrivalTime { bookingRow(label: "Arrives", value: arr.timeFormatted) }
+            if let dep = t.departureTime { bookingRow(label: "Departs", value: dep.timeFormatted(timeZone: tz)) }
+            if let arr = t.arrivalTime { bookingRow(label: "Arrives", value: arr.timeFormatted(timeZone: tz)) }
             if !t.serviceNumber.isEmpty { bookingRow(label: "Service", value: t.serviceNumber) }
             if !t.seat.isEmpty { bookingRow(label: "Seat", value: t.seat) }
         }
@@ -1337,6 +1360,38 @@ struct PlaceDetailSheet: View {
         } catch {
             venueTimeZone = nil
         }
+    }
+
+    /// Resolves the trip's destination timezone by fetching the trip and
+    /// reverse-geocoding its lat/lng. Mirrors `TripDetailView`/`BookingsScreenView`
+    /// so all trip-scoped surfaces show times in the same destination clock.
+    private func resolveTripDisplayTimeZone() async {
+        guard let tripId else {
+            tripDisplayTimeZone = nil
+            return
+        }
+        let trips = await dataService.fetchTrips()
+        guard let trip = trips.first(where: { $0.id == tripId }),
+              let lat = trip.lat, let lng = trip.lng,
+              !lat.isNaN, !lng.isNaN else {
+            tripDisplayTimeZone = nil
+            return
+        }
+        let geocoder = CLGeocoder()
+        do {
+            let marks = try await geocoder.reverseGeocodeLocation(CLLocation(latitude: lat, longitude: lng))
+            tripDisplayTimeZone = marks.first?.timeZone
+        } catch {
+            tripDisplayTimeZone = nil
+        }
+    }
+
+    /// Trip TZ is preferred for booking dates/times so the detail sheet matches
+    /// the timeline. Caller-injected value wins (avoids a redundant geocode
+    /// and the inevitable race where the sheet renders before our local
+    /// resolver finishes). Falls back to local geocode → device TZ.
+    private var bookingDisplayTimeZone: TimeZone {
+        injectedDisplayTimeZone ?? tripDisplayTimeZone ?? .current
     }
 
     private func updateMapCamera(animated: Bool) {

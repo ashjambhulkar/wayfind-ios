@@ -424,7 +424,9 @@ final class SupabaseManager {
             .execute()
             .value
 
-        let (dayRows, activityRows, bookingRows) = try await (daysTask, activitiesTask, bookingsTask)
+        async let tripTzTask: String? = Self.fetchTripDisplayTimezone(client: client, tripIdString: tripIdString)
+
+        let (dayRows, activityRows, bookingRows, tripDisplayTz) = try await (daysTask, activitiesTask, bookingsTask, tripTzTask)
 
         // Once we have the activities, fan out one more parallel query to
         // `city_places` for the distinct Google place_ids referenced by the
@@ -460,15 +462,25 @@ final class SupabaseManager {
         }
 
         // Bookings have no day_id — match by calendar date of starts_at.
-        // If a sync race ever lands two trip_days rows for the same date,
-        // we keep the first day_id rather than crashing. Bookings will
-        // resolve to that day deterministically.
-        let calendar = Calendar.current
+        // Use the trip's destination timezone (from day rows) so that a flight
+        // departing late UTC lands on the correct local calendar day.
+        // IMPORTANT: build the day-key lookup from the RAW `trip_days.date`
+        // string (already `yyyy-MM-dd`), not from a re-parsed Date — parsing
+        // the day date in device TZ and re-formatting in trip TZ shifts the
+        // value by one day whenever those TZs straddle midnight for the
+        // implied absolute instant.
+        let tripTimeZone = Self.resolveTripTimeZone(days: days, tripDisplayTimezone: tripDisplayTz)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = tripTimeZone
+
+        // Exclude wishlist days (`day_number = 0`) — they carry a placeholder
+        // date (usually the day before the trip starts) which would otherwise
+        // attract bookings via either exact date match or the closest-day
+        // fallback inside `resolveDayId`.
         let daysByDateKey: [String: UUID] = Dictionary(
-            days.compactMap { day -> (String, UUID)? in
-                guard let date = day.date else { return nil }
-                let key = SupabaseModelMapping.calendarDateOnlyString(from: date, calendar: calendar)
-                return (key, day.id)
+            dayRows.compactMap { row -> (String, UUID)? in
+                guard row.day_number != 0 else { return nil }
+                return (String(row.date.prefix(10)), row.id)
             },
             uniquingKeysWith: { existing, _ in existing }
         )
@@ -1532,7 +1544,6 @@ final class SupabaseManager {
     func fetchPlaces(for dayId: UUID) async throws -> [Place] {
         let (client, _) = try await requireClientAndUserId()
         let tripId = try await requireTripIdForDay(client: client, dayId: dayId)
-        let calendar = Calendar.current
         let dayRow: TripDayRow = try await client
             .from("trip_days")
             .select("id, trip_id, day_number, date, timezone")
@@ -1557,7 +1568,9 @@ final class SupabaseManager {
             .execute()
             .value
 
-        let (activityRows, bookingRows) = try await (activitiesTask, bookingsTask)
+        async let tripTzTask: String? = Self.fetchTripDisplayTimezone(client: client, tripIdString: tripId.uuidString.lowercased())
+
+        let (activityRows, bookingRows, tripDisplayTz) = try await (activitiesTask, bookingsTask, tripTzTask)
         let canonicalBookingIds = Set(bookingRows.map(\.id))
         var places = activityRows
             .filter { row in
@@ -1566,7 +1579,24 @@ final class SupabaseManager {
             }
             .map { Self.mapActivityRow($0, dayId: dayId) }
 
-        let daysByDateKey = [dayRow.date: dayId]
+        // Prefer the day's own timezone, then the trip's display_timezone, then
+        // device TZ. This keeps booking-day resolution consistent with how the
+        // trip detail and bookings list views show times.
+        let tripTimeZone: TimeZone = {
+            if let tz = dayRow.timezone?.trimmingCharacters(in: .whitespacesAndNewlines), !tz.isEmpty,
+               let zone = TimeZone(identifier: tz) {
+                return zone
+            }
+            if let tz = tripDisplayTz?.trimmingCharacters(in: .whitespacesAndNewlines), !tz.isEmpty,
+               let zone = TimeZone(identifier: tz) {
+                return zone
+            }
+            return .current
+        }()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = tripTimeZone
+
+        let daysByDateKey: [String: UUID] = [String(dayRow.date.prefix(10)): dayId]
         places.append(contentsOf: bookingRows.compactMap { booking -> Place? in
             guard Self.resolveDayId(
                 for: booking,
@@ -1603,14 +1633,22 @@ final class SupabaseManager {
             .execute()
             .value
 
-        let (dayRows, bookingRows) = try await (daysTask, bookingsTask)
+        async let tripTzTask: String? = Self.fetchTripDisplayTimezone(client: client, tripIdString: tripIdString)
+
+        let (dayRows, bookingRows, tripDisplayTz) = try await (daysTask, bookingsTask, tripTzTask)
         let days = dayRows.map { Self.mapDayRow($0, tripId: tripId) }
             .sorted { $0.dayNumber < $1.dayNumber }
-        let calendar = Calendar.current
+
+        let tripTimeZone = Self.resolveTripTimeZone(days: days, tripDisplayTimezone: tripDisplayTz)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = tripTimeZone
+
+        // Wishlist days (`day_number = 0`) carry a placeholder date and must
+        // not attract bookings via exact-match or closest-day fallback.
         let daysByDateKey: [String: UUID] = Dictionary(
-            days.compactMap { day -> (String, UUID)? in
-                guard let date = day.date else { return nil }
-                return (SupabaseModelMapping.calendarDateOnlyString(from: date, calendar: calendar), day.id)
+            dayRows.compactMap { row -> (String, UUID)? in
+                guard row.day_number != 0 else { return nil }
+                return (String(row.date.prefix(10)), row.id)
             },
             uniquingKeysWith: { existing, _ in existing }
         )
@@ -2742,6 +2780,51 @@ final class SupabaseManager {
         }
     }
 
+    /// Reads `trips.display_timezone` for a single trip. Returns nil when the
+    /// column is null/empty, the row is missing, or the request fails — callers
+    /// must always provide a sensible fallback (we never assume device TZ for
+    /// booking placement). Lower-cased UUID input is required.
+    private static func fetchTripDisplayTimezone(client: SupabaseClient, tripIdString: String) async -> String? {
+        struct TripTzRow: Decodable, Sendable { let display_timezone: String? }
+        do {
+            let row: TripTzRow = try await client
+                .from("trips")
+                .select("display_timezone")
+                .eq("id", value: tripIdString)
+                .single()
+                .execute()
+                .value
+            return row.display_timezone
+        } catch {
+            return nil
+        }
+    }
+
+    /// Resolves the calendar-day timezone used to place bookings on a trip.
+    ///
+    /// Priority:
+    /// 1. The first non-nil `trip_days.timezone` (per-day override).
+    /// 2. `trips.display_timezone` (trip-wide canonical destination zone).
+    /// 3. Device TZ (`.current`) — last-resort, only when both are missing.
+    ///
+    /// The fallback to `.current` historically caused intercontinental flights
+    /// to land on the wrong itinerary day: a flight stored as a UTC instant
+    /// could resolve to one calendar date in the device TZ and a different
+    /// date in the trip TZ. Always prefer trip-side data when available.
+    private static func resolveTripTimeZone(days: [ItineraryDay], tripDisplayTimezone: String?) -> TimeZone {
+        for day in days {
+            if let id = day.timeZoneIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty,
+               let tz = TimeZone(identifier: id) {
+                return tz
+            }
+        }
+        if let id = tripDisplayTimezone?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty,
+           let tz = TimeZone(identifier: id) {
+            return tz
+        }
+        return .current
+    }
+
     /// Finds which day a booking belongs to by matching the calendar-date of
     /// `starts_at` (or `ends_at` when start is absent) against `trip_days.date`.
     /// Falls back to the first scheduled day deterministically; using
@@ -2759,7 +2842,34 @@ final class SupabaseManager {
             return fallbackDayId
         }
         let key = SupabaseModelMapping.calendarDateOnlyString(from: date, calendar: calendar)
-        return daysByDateKey[key] ?? fallbackDayId
+        if let exact = daysByDateKey[key] { return exact }
+
+        // Exact key missed — usually because `trip_days.timezone` is null and
+        // the device TZ pushed the date by 1. Pick the closest scheduled day
+        // *within ±2 days* so a TZ-shifted booking still lands sensibly.
+        // Anything further off is a data error (e.g. wrong year) and should
+        // fall back deterministically to the first scheduled day rather than
+        // attaching to an arbitrary "closest" day hundreds of days away.
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        guard let bookingDay = formatter.date(from: key) else {
+            return fallbackDayId
+        }
+        let maxDistance = 2
+        var best: (dayId: UUID, distance: Int)?
+        for (dayKey, dayId) in daysByDateKey {
+            guard let d = formatter.date(from: String(dayKey.prefix(10))) else { continue }
+            let diff = abs(calendar.dateComponents([.day], from: bookingDay, to: d).day ?? Int.max)
+            if diff > maxDistance { continue }
+            if best == nil || diff < best!.distance {
+                best = (dayId, diff)
+            }
+        }
+        return best?.dayId ?? fallbackDayId
     }
 
     private static func activityCategory(for place: Place) -> String {

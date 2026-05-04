@@ -551,6 +551,9 @@ private struct FlightResultRouteRow: View {
 private struct FlightResultTimeRow: View {
     let title: String
     let date: Date
+    /// Reads the trip TZ that `AddBookingView` injects via `.environment(\.timeZone, ...)`.
+    /// Defaults to the device TZ when shown outside that hierarchy.
+    @Environment(\.timeZone) private var environmentTimeZone
 
     var body: some View {
         HStack {
@@ -558,7 +561,7 @@ private struct FlightResultTimeRow: View {
                 .font(.appSmall)
                 .foregroundStyle(AppColors.textTertiary)
             Spacer(minLength: AppSpacing.md)
-            Text("\(date.shortFormatted) · \(date.timeFormatted)")
+            Text("\(date.shortFormatted(timeZone: environmentTimeZone)) · \(date.timeFormatted(timeZone: environmentTimeZone))")
                 .font(.appSmall.weight(.semibold))
                 .foregroundStyle(AppColors.textSecondary)
         }

@@ -79,6 +79,11 @@ struct AddBookingView: View {
     /// affordance; navigation pushes (which have a system back chevron)
     /// can leave it `false` to avoid duplicating the action.
     let showsCloseButton: Bool
+    /// Trip destination timezone — applied as `\.timeZone` environment so all
+    /// child `DatePicker`s display in the same destination clock as the
+    /// timeline and detail sheet. Falls back to device TZ when no trip context
+    /// is available (legacy callers / previews).
+    var displayTimeZone: TimeZone = .current
     @State private var isSaving = false
     @State private var saveError: String?
     /// Snapshot of the form taken once after prefill in edit mode. Used to
@@ -94,12 +99,14 @@ struct AddBookingView: View {
         initialType: BookingCategory = .flight,
         onSave: ((Place, BookingCost?) async -> Bool)? = nil,
         targetDayId: UUID,
-        showsCloseButton: Bool = false
+        showsCloseButton: Bool = false,
+        displayTimeZone: TimeZone = .current
     ) {
         self.editingPlace = editingPlace
         self.onSave = onSave
         self.targetDayId = targetDayId
         self.showsCloseButton = showsCloseButton
+        self.displayTimeZone = displayTimeZone
         if let typeStr = editingPlace?.bookingType, let category = BookingCategory(rawValue: typeStr) {
             _selectedType = State(initialValue: category)
         } else {
@@ -193,6 +200,17 @@ struct AddBookingView: View {
                 initialSnapshot = currentSnapshot()
             }
         }
+        .environment(\.timeZone, displayTimeZone)
+        .environment(\.calendar, tripCalendar)
+    }
+
+    /// Calendar pinned to the trip's destination TZ. Surfaced so internal
+    /// `Date()` initialisers inside child `DatePicker`s and any `Calendar`
+    /// reads via `\.calendar` align with what the user sees on the timeline.
+    private var tripCalendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = displayTimeZone
+        return cal
     }
 
     private func prefillFromEditingPlace() {
