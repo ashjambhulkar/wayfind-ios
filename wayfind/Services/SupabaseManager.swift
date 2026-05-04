@@ -2437,6 +2437,7 @@ final class SupabaseManager {
         let baggage_claim: String?
         let room_type: String?
         let car_type: String?
+        let address: String?
     }
 
     private struct TripBookingRow: Decodable, Sendable {
@@ -2524,6 +2525,7 @@ final class SupabaseManager {
         let duration: String?
         let ticket_number: String?
         let service_number: String?
+        let address: String?
     }
 
     private struct TripBookingInsert: Encodable, Sendable {
@@ -2666,16 +2668,33 @@ final class SupabaseManager {
 
     // MARK: - Booking row mapping
 
+    /// Resolves `Place.address` from `trip_bookings.start_location`, with a hotel-only
+    /// fallback on `details_json.address` when `start_location` was never populated.
+    private static func bookingDisplayAddress(
+        category: BookingCategory?,
+        startLocation: String?,
+        detailsJSON: BookingJSONDetails?
+    ) -> String? {
+        if let line = trimmedOrNil(startLocation) { return line }
+        guard category == .hotel else { return nil }
+        return trimmedOrNil(detailsJSON?.address)
+    }
+
     private static func mapBookingRow(_ row: TripBookingRow, dayId: UUID) -> Place {
         let category = bookingKindToCategory(row.kind)
         let start = row.starts_at.flatMap { SupabaseModelMapping.parsePostgresTimestamp($0) }
         let end   = row.ends_at.flatMap   { SupabaseModelMapping.parsePostgresTimestamp($0) }
         let details = buildBookingDetails(row: row, category: category, start: start, end: end)
+        let bookingAddress = bookingDisplayAddress(
+            category: category,
+            startLocation: row.start_location,
+            detailsJSON: row.details_json
+        )
         return Place(
             id: row.id,
             itineraryDayId: dayId,
             name: row.title,
-            address: row.start_location,
+            address: bookingAddress,
             lat: row.start_lat,
             lng: row.start_lng,
             category: category.map(\.rawValue) ?? row.kind,
@@ -3063,14 +3082,16 @@ final class SupabaseManager {
                     car_type: nil,
                     duration: nil,
                     ticket_number: nil,
-                    service_number: nil
+                    service_number: nil,
+                    address: nil
                 )
             )
         case .hotel(let hotel):
+            let propertyAddress = trimmedOrNil(place.address)
             return BookingPayload(
                 kind: "lodging",
                 provider: place.name,
-                startLocation: nil,
+                startLocation: propertyAddress,
                 endLocation: nil,
                 details: TripBookingDetailsPayload(
                     airline: nil,
@@ -3091,7 +3112,8 @@ final class SupabaseManager {
                     car_type: nil,
                     duration: nil,
                     ticket_number: nil,
-                    service_number: nil
+                    service_number: nil,
+                    address: propertyAddress
                 )
             )
         case .restaurant(let restaurant):
@@ -3119,7 +3141,8 @@ final class SupabaseManager {
                     car_type: nil,
                     duration: nil,
                     ticket_number: nil,
-                    service_number: nil
+                    service_number: nil,
+                    address: nil
                 )
             )
         case .carRental(let car):
@@ -3147,7 +3170,8 @@ final class SupabaseManager {
                     car_type: trimmedOrNil(car.carType),
                     duration: nil,
                     ticket_number: nil,
-                    service_number: nil
+                    service_number: nil,
+                    address: nil
                 )
             )
         case .activity(let activity):
@@ -3175,7 +3199,8 @@ final class SupabaseManager {
                     car_type: nil,
                     duration: activity.duration,
                     ticket_number: trimmedOrNil(activity.ticketNumber),
-                    service_number: nil
+                    service_number: nil,
+                    address: nil
                 )
             )
         case .transport(let transport):
@@ -3203,7 +3228,8 @@ final class SupabaseManager {
                     car_type: nil,
                     duration: nil,
                     ticket_number: nil,
-                    service_number: trimmedOrNil(transport.serviceNumber)
+                    service_number: trimmedOrNil(transport.serviceNumber),
+                    address: nil
                 )
             )
         }
@@ -3241,7 +3267,8 @@ final class SupabaseManager {
             car_type: nil,
             duration: nil,
             ticket_number: nil,
-            service_number: nil
+            service_number: nil,
+            address: nil
         )
     }
 

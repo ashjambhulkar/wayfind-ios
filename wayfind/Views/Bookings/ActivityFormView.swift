@@ -3,7 +3,7 @@ import SwiftUI
 struct ActivityFormView: View {
     @Binding var activityName: String
     @Binding var location: String
-    @Binding var activityDate: Date
+    @Binding var activityDate: Date?
     @Binding var duration: String
 
     var body: some View {
@@ -27,10 +27,12 @@ struct ActivityFormView: View {
             }
 
             ActivityMapSectionCard(title: "Schedule") {
-                ActivityMapDateRow(
+                OptionalBookingDateRow(
                     icon: "calendar.badge.clock",
-                    title: "Starts",
-                    selection: $activityDate
+                    rowTitle: String(localized: "Starts"),
+                    accent: BookingCategory.activity.color,
+                    selection: $activityDate,
+                    displayedComponents: [.date, .hourAndMinute]
                 )
 
                 ActivityMapDivider()
@@ -146,32 +148,6 @@ private struct ActivityMapTextRow: View {
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .frame(minWidth: ActivityMapFormMetrics.trailingFieldMinWidth)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: ActivityMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct ActivityMapDateRow: View {
-    let icon: String
-    let title: String
-    @Binding var selection: Date
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.activity.color,
-                accessibilityLabel: title
-            )
-
-            DatePicker(title, selection: $selection, displayedComponents: [.date, .hourAndMinute])
-                .font(.appBody)
-                .datePickerStyle(.compact)
-                .tint(AppColors.appPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, AppSpacing.md)
         .frame(minHeight: ActivityMapFormMetrics.rowMinHeight)

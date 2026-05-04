@@ -2,7 +2,7 @@ import SwiftUI
 
 struct RestaurantFormView: View {
     @Binding var restaurantName: String
-    @Binding var reservationDate: Date
+    @Binding var reservationDate: Date?
     @Binding var partySize: Int
 
     var body: some View {
@@ -17,10 +17,12 @@ struct RestaurantFormView: View {
 
                 RestaurantMapDivider()
 
-                RestaurantMapDateRow(
+                OptionalBookingDateRow(
                     icon: "calendar.badge.clock",
-                    title: "Reservation",
-                    selection: $reservationDate
+                    rowTitle: String(localized: "Reservation"),
+                    accent: BookingCategory.restaurant.color,
+                    selection: $reservationDate,
+                    displayedComponents: [.date, .hourAndMinute]
                 )
 
                 RestaurantMapDivider()
@@ -93,32 +95,6 @@ private struct RestaurantMapTextRow: View {
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .frame(minWidth: RestaurantMapFormMetrics.trailingFieldMinWidth)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: RestaurantMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct RestaurantMapDateRow: View {
-    let icon: String
-    let title: String
-    @Binding var selection: Date
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.restaurant.color,
-                accessibilityLabel: title
-            )
-
-            DatePicker(title, selection: $selection, displayedComponents: [.date, .hourAndMinute])
-                .font(.appBody)
-                .datePickerStyle(.compact)
-                .tint(AppColors.appPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, AppSpacing.md)
         .frame(minHeight: RestaurantMapFormMetrics.rowMinHeight)

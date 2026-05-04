@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// Booking row in the trip-detail timeline. Sibling of `TimelinePlaceCardView`
-/// — same chassis, same pin column, same rhythm — distinguished by a type-specific subtitle line that
-/// surfaces the booking's most useful fact at a glance: a flight's route, a
-/// hotel's nights, a restaurant's party size, etc. The full booking detail
-/// (confirmation chip, address, room type, etc.) lives on the detail screen.
+/// — same chassis, same pin column, same rhythm — distinguished by type-specific
+/// content: flights use `TimelineFlightBookingPassCard`, transport uses
+/// `TimelineTransportBookingCard` (route / operator / times), and other kinds use
+/// `TimelineBookingPassCard` with a compact subtitle. Full booking detail lives
+/// on the detail screen.
 struct TimelineBookingCardView: View {
     let place: Place
     let dayNumber: Int
@@ -170,6 +171,15 @@ struct TimelineBookingCardView: View {
                 onFlightBadgeTap: onFlightBadgeTap,
                 onFlightUpsellTap: onUpgradeTap
             )
+        } else if case .transport(let transportDetails) = place.bookingDetails {
+            TimelineTransportBookingCard(
+                details: transportDetails,
+                placeStartTime: place.startTime,
+                placeEndTime: place.endTime,
+                displayTimeZone: timelineDisplayTimeZone,
+                stripeAccent: timelineScheduleAccent,
+                confirmationChip: confirmationCode
+            )
         } else {
             TimelineBookingPassCard(
                 category: bookingCategory,
@@ -257,12 +267,34 @@ struct TimelineBookingCardView: View {
             ?? restaurantTitleTrailingText
     }
 
-    private func hotelCheckInOutMoment(label: String, date: Date?, timeString: String?, timeZone: TimeZone, missing: String) -> String {
-        guard let date else { return "\(label) \(missing)" }
-        let datePart = date.shortFormatted(timeZone: timeZone)
+    /// Timeline hotel rows: time only (date is implied by the day header / spine).
+    private func hotelTimelineTimeOnlyString(date: Date?, timeString: String?, timeZone: TimeZone) -> String {
         let trimmedTime = timeString?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let timePart = trimmedTime.isEmpty ? date.timeFormatted(timeZone: timeZone) : trimmedTime
-        return "\(label) \(datePart) · \(timePart)"
+        if !trimmedTime.isEmpty { return trimmedTime }
+        if let date { return date.timeFormatted(timeZone: timeZone) }
+        return String(localized: "TBD")
+    }
+
+    private func hotelTimelineSubtitle(_ h: HotelDetails) -> String {
+        let tz = timelineDisplayTimeZone
+        let checkInLabel = String(localized: "Check-in")
+        let checkOutLabel = String(localized: "Check-out")
+        switch hotelTimelineRole {
+        case .checkIn:
+            return "\(checkInLabel) · \(hotelTimelineTimeOnlyString(date: h.checkInDate, timeString: h.checkInTime, timeZone: tz))"
+        case .checkOut:
+            return "\(checkOutLabel) · \(hotelTimelineTimeOnlyString(date: h.checkOutDate, timeString: h.checkOutTime, timeZone: tz))"
+        case nil:
+            var lines: [String] = []
+            if h.checkInDate != nil {
+                lines.append("\(checkInLabel) · \(hotelTimelineTimeOnlyString(date: h.checkInDate, timeString: h.checkInTime, timeZone: tz))")
+            }
+            if h.checkOutDate != nil {
+                lines.append("\(checkOutLabel) · \(hotelTimelineTimeOnlyString(date: h.checkOutDate, timeString: h.checkOutTime, timeZone: tz))")
+            }
+            if lines.isEmpty { return String(localized: "Dates TBD") }
+            return lines.joined(separator: "\n")
+        }
     }
 
     /// Restaurant: one scannable footer line — time · guests · confirmation.
@@ -348,22 +380,7 @@ struct TimelineBookingCardView: View {
         case .flight(let f):
             return flightCode(f)
         case .hotel(let h):
-            let tz = timelineDisplayTimeZone
-            let checkInLine = hotelCheckInOutMoment(
-                label: String(localized: "Check-in"),
-                date: h.checkInDate,
-                timeString: h.checkInTime,
-                timeZone: tz,
-                missing: String(localized: "TBD")
-            )
-            let checkOutLine = hotelCheckInOutMoment(
-                label: String(localized: "Check-out"),
-                date: h.checkOutDate,
-                timeString: h.checkOutTime,
-                timeZone: tz,
-                missing: String(localized: "TBD")
-            )
-            return "\(checkInLine) · \(checkOutLine)"
+            return hotelTimelineSubtitle(h)
         case .restaurant(let r):
             if let t = r.reservationTime {
                 return "\(t.shortFormatted(timeZone: timelineDisplayTimeZone)) · \(t.timeFormatted(timeZone: timelineDisplayTimeZone))"
@@ -551,6 +568,33 @@ struct TimelineBookingCardView: View {
 
     // MARK: - Accessibility
 
+    private func transportAccessibilitySummary(label: String, details t: TransportDetails, scheduling: String) -> String {
+        let tz = timelineDisplayTimeZone
+        let from = clean(t.departureStation, fallback: String(localized: "Departure TBD"))
+        let to = clean(t.arrivalStation, fallback: String(localized: "Arrival TBD"))
+        let op = t.operatorName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let svc = t.serviceNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let opLine: String = {
+            if op.isEmpty && svc.isEmpty { return String(localized: "Operator and service not set") }
+            if op.isEmpty { return svc }
+            if svc.isEmpty { return op }
+            return "\(op) · \(svc)"
+        }()
+        let start = t.departureTime ?? place.startTime
+        let end = t.arrivalTime ?? place.endTime
+        let timePart: String = {
+            if let s = start, let e = end, e > s {
+                return "\(s.timeFormatted(timeZone: tz)) to \(e.timeFormatted(timeZone: tz))"
+            }
+            if let s = start { return s.timeFormatted(timeZone: tz) }
+            if let e = end { return e.timeFormatted(timeZone: tz) }
+            return String(localized: "Times not set")
+        }()
+        let confRaw = place.confirmationNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let confPart = confRaw.isEmpty ? "" : ", confirmation \(confRaw)"
+        return "\(label): \(from) to \(to). \(opLine). \(timePart)\(confPart). \(scheduling)"
+    }
+
     private var accessibilityDescription: String {
         let scheduling = TimelineScheduleChroma.accessibilitySchedulingBucket(
             scheduleInstant: spineStartTime,
@@ -566,9 +610,8 @@ struct TimelineBookingCardView: View {
             let schedule = passTitleTrailingText ?? String(localized: "Pickup TBD")
             return "\(label): \(passTitle), \(schedule), \(passSubtitle), \(scheduling)"
         }
-        if case .transport = place.bookingDetails {
-            let schedule = passTitleTrailingText ?? String(localized: "Time TBD")
-            return "\(label): \(passTitle), \(schedule), \(passSubtitle), \(scheduling)"
+        if case .transport(let t) = place.bookingDetails {
+            return transportAccessibilitySummary(label: label, details: t, scheduling: scheduling)
         }
         if case .activity = place.bookingDetails {
             let timePart = place.startTime.map { $0.timeFormatted(timeZone: timelineDisplayTimeZone) }
@@ -626,6 +669,7 @@ private struct TimelineBookingPassCard: View {
             eyebrowRow
             nameRow
             detailRow
+            addressFootnoteRow
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .timelineCardChassis(
@@ -681,15 +725,44 @@ private struct TimelineBookingPassCard: View {
             Text(trimmed)
                 .font(.footnote)
                 .foregroundStyle(AppColors.textTertiary)
-                .lineLimit(2)
+                .lineLimit(3)
                 .minimumScaleFactor(0.88)
+        }
+    }
+
+    /// Property / venue address (e.g. hotel) under the schedule line.
+    @ViewBuilder
+    private var addressFootnoteRow: some View {
+        let trimmed = addressFootnote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty {
+            HStack(alignment: .top, spacing: AppSpacing.xs) {
+                Image(systemName: "mappin.and.ellipse")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppColors.textTertiary)
+                    .accessibilityHidden(true)
+
+                Text(trimmed)
+                    .font(.footnote)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, AppSpacing.xs)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(String(localized: "Address"))
+            .accessibilityValue(trimmed)
         }
     }
 
     private var accessibilityText: String {
         let trailing = titleTrailing.map { ", \($0)" } ?? ""
         let detail = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        return "\(category.label)\(trailing): \(title). \(detail)"
+        let addr = addressFootnote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if addr.isEmpty {
+            return "\(category.label)\(trailing): \(title). \(detail)"
+        }
+        return "\(category.label)\(trailing): \(title). \(detail). \(addr)"
     }
 }
 

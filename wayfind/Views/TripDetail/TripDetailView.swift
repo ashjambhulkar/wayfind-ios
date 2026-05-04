@@ -1,4 +1,5 @@
 import CoreLocation
+import Inject
 import MapKit
 import Observation
 import SwiftUI
@@ -29,6 +30,8 @@ private struct TripDetailDayHeaderNavigationKey: PreferenceKey {
 }
 
 struct TripDetailView: View {
+    @ObserveInjection var inject
+
     @Environment(DataService.self) private var dataService
     @Environment(ToastManager.self) private var toastManager
     @Environment(CollaborationStore.self) private var collaborationStore
@@ -434,7 +437,8 @@ struct TripDetailView: View {
                         },
                         targetDayId: place.itineraryDayId,
                         showsCloseButton: true,
-                        displayTimeZone: tripTimelineGeocodedTimeZone
+                        displayTimeZone: tripTimelineGeocodedTimeZone,
+                        tripId: viewModel?.trip.id ?? trip.id
                     )
                 }
             } else {
@@ -544,7 +548,8 @@ struct TripDetailView: View {
                         },
                         targetDayId: targetDayId,
                         showsCloseButton: true,
-                        displayTimeZone: tripTimelineGeocodedTimeZone
+                        displayTimeZone: tripTimelineGeocodedTimeZone,
+                        tripId: vm.trip.id
                     )
                 }
             }
@@ -602,6 +607,7 @@ struct TripDetailView: View {
                 await refreshItineraryPhotoStacks()
             }
         }
+        .enableInjection()
     }
 
     /// Navigation shell: title, toolbar, and action-bar destinations.

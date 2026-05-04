@@ -240,11 +240,36 @@ struct PlaceDetailSheet: View {
         guard place.isBooking, let details = place.bookingDetails else { return nil }
         switch details {
         case .flight(let f): return "\(f.departureAirport) → \(f.arrivalAirport)"
-        case .hotel(let h): return h.nights.map { "\($0) nights · \(h.roomType)" } ?? "Hotel"
+        case .hotel(let h):
+            let room = h.roomType.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let n = h.nights {
+                if room.isEmpty { return "\(n) nights" }
+                return "\(n) nights · \(room)"
+            }
+            if !room.isEmpty { return room }
+            return "Hotel"
         case .restaurant(let r): return r.partySize.map { "Party of \($0)" } ?? "Reservation"
-        case .carRental(let c): return "\(c.pickupLocation) → \(c.dropoffLocation)"
-        case .activity(let a): return a.duration?.isEmpty == false ? a.duration! : a.provider
-        case .transport(let t): return "\(t.departureStation) → \(t.arrivalStation)"
+        case .carRental(let c):
+            let pick = c.pickupLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+            let drop = c.dropoffLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+            if pick.isEmpty, drop.isEmpty { return String(localized: "Car rental") }
+            if pick.isEmpty { return drop }
+            if drop.isEmpty { return pick }
+            return "\(pick) → \(drop)"
+        case .activity(let a):
+            let prov = a.provider.trimmingCharacters(in: .whitespacesAndNewlines)
+            let dur = a.duration?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !dur.isEmpty, !prov.isEmpty { return "\(dur) · \(prov)" }
+            if !dur.isEmpty { return dur }
+            if !prov.isEmpty { return prov }
+            return String(localized: "Activity")
+        case .transport(let t):
+            let dep = t.departureStation.trimmingCharacters(in: .whitespacesAndNewlines)
+            let arr = t.arrivalStation.trimmingCharacters(in: .whitespacesAndNewlines)
+            if dep.isEmpty, arr.isEmpty { return String(localized: "Transport") }
+            if dep.isEmpty { return arr }
+            if arr.isEmpty { return dep }
+            return "\(dep) → \(arr)"
         }
     }
 
@@ -1027,13 +1052,13 @@ struct PlaceDetailSheet: View {
     private var bookingDetailBody: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: AppSpacing.lg) {
                     bookingHeroStrip
                     bookingContent
                 }
-                .padding(.bottom, 24)
+                .padding(.bottom, AppSpacing.xl)
             }
-            .background(Color(uiColor: .systemBackground))
+            .background(AppColors.appBackground)
             .navigationTitle(categoryLabel)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1046,47 +1071,57 @@ struct PlaceDetailSheet: View {
     }
 
     private var bookingHeroStrip: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: AppSpacing.lg) {
             ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill((place.bookingCategoryEnum?.color ?? AppColors.appPrimary).opacity(0.12))
-                    .frame(width: 60, height: 60)
+                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                    .fill((place.bookingCategoryEnum?.color ?? AppColors.appPrimary).opacity(0.14))
+                    .frame(width: 56, height: 56)
 
                 Image(systemName: categorySymbol)
-                    .font(.title2.weight(.medium))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 Text(place.name)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(.sectionHeader)
+                    .foregroundStyle(AppColors.textPrimary)
 
                 if let provider = bookingProvider {
                     Text(provider)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textSecondary)
+                } else if place.bookingCategoryEnum == .flight
+                    || place.bookingCategoryEnum == .hotel
+                    || place.bookingCategoryEnum == .restaurant
+                    || place.bookingCategoryEnum == .carRental
+                    || place.bookingCategoryEnum == .transport
+                    || place.bookingCategoryEnum == .activity,
+                    let line = bookingDetailLine {
+                    Text(line)
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textSecondary)
                 }
             }
 
-            Spacer()
+            Spacer(minLength: AppSpacing.sm)
 
             if let conf = place.confirmationNumber, !conf.isEmpty {
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("CONF.")
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .kerning(0.5)
+                    Text("Confirmation")
+                        .font(.appSmall.weight(.medium))
+                        .foregroundStyle(AppColors.textSecondary)
 
                     Text(conf)
-                        .font(.footnote.weight(.semibold))
+                        .font(.appCaption.weight(.semibold))
                         .monospaced()
                         .foregroundStyle(place.bookingCategoryEnum?.color ?? AppColors.appPrimary)
                 }
+                .multilineTextAlignment(.trailing)
             }
         }
-        .padding(20)
-        .background(Color(uiColor: .secondarySystemBackground))
+        .padding(AppSpacing.lg)
+        .background(AppColors.appSurface)
     }
 
     private var bookingProvider: String? {
@@ -1117,111 +1152,59 @@ struct PlaceDetailSheet: View {
         if let notes = place.notes, !notes.isEmpty {
             notesCard(notes)
         }
+
+        if place.isBooking, let tripId {
+            BookingDetailDocumentsSection(
+                bookingId: place.id,
+                tripId: tripId,
+                bookingTitle: place.name
+            )
+        }
     }
 
     private func flightContent(_ f: FlightDetails) -> some View {
-        let tz = bookingDisplayTimeZone
-        return VStack(alignment: .leading, spacing: 0) {
-            bookingInfoCard {
-                VStack(spacing: 16) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(f.departureAirport)
-                                .font(.largeTitle.weight(.semibold))
-                                .fontDesign(.rounded)
-                            if let t = f.departureTime {
-                                Text(t.timeFormatted(timeZone: tz))
-                                    .font(.title3.weight(.medium))
-                                Text(t.shortFormatted(timeZone: tz))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Spacer()
-
-                        Image(systemName: "airplane")
-                            .font(.title3)
-                            .foregroundStyle(BookingCategory.flight.color)
-
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(f.arrivalAirport)
-                                .font(.largeTitle.weight(.semibold))
-                                .fontDesign(.rounded)
-                            if let t = f.arrivalTime {
-                                Text(t.timeFormatted(timeZone: tz))
-                                    .font(.title3.weight(.medium))
-                                Text(t.shortFormatted(timeZone: tz))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-
-            bookingInfoCard {
-                bookingRow(label: "Flight", value: "\(f.airline) \(f.flightNumber)")
-                if !f.terminal.isEmpty { bookingRow(label: "Terminal", value: f.terminal) }
-                if !f.gate.isEmpty { bookingRow(label: "Gate", value: f.gate) }
-                if !f.seat.isEmpty { bookingRow(label: "Seat", value: f.seat) }
-            }
-        }
+        FlightBookingDetailContent(details: f, timeZone: bookingDisplayTimeZone)
     }
 
     private func hotelContent(_ h: HotelDetails) -> some View {
-        let tz = bookingDisplayTimeZone
-        return bookingInfoCard {
-            if let checkIn = h.checkInDate {
-                bookingRow(label: "Check-in", value: "\(checkIn.shortFormatted(timeZone: tz))\(h.checkInTime.map { " · \($0)" } ?? "")")
-            }
-            if let checkOut = h.checkOutDate {
-                bookingRow(label: "Check-out", value: "\(checkOut.shortFormatted(timeZone: tz))\(h.checkOutTime.map { " · \($0)" } ?? "")")
-            }
-            if let nights = h.nights { bookingRow(label: "Nights", value: "\(nights)") }
-            if !h.roomType.isEmpty { bookingRow(label: "Room", value: h.roomType) }
-        }
+        HotelBookingDetailContent(
+            details: h,
+            timeZone: bookingDisplayTimeZone,
+            address: place.address
+        )
     }
 
     private func restaurantContent(_ r: RestaurantDetails) -> some View {
-        let tz = bookingDisplayTimeZone
-        return bookingInfoCard {
-            if let t = r.reservationTime { bookingRow(label: "Time", value: t.timeFormatted(timeZone: tz)) }
-            if let p = r.partySize { bookingRow(label: "Party", value: "\(p) people") }
-        }
+        RestaurantBookingDetailContent(
+            details: r,
+            timeZone: bookingDisplayTimeZone,
+            address: place.address
+        )
     }
 
     private func carRentalContent(_ c: CarRentalDetails) -> some View {
-        let tz = bookingDisplayTimeZone
-        return bookingInfoCard {
-            bookingRow(label: "Pick-up", value: c.pickupLocation)
-            bookingRow(label: "Drop-off", value: c.dropoffLocation)
-            if let t = c.pickupTime { bookingRow(label: "Pick-up time", value: t.timeFormatted(timeZone: tz)) }
-            if let t = c.dropoffTime { bookingRow(label: "Drop-off time", value: t.timeFormatted(timeZone: tz)) }
-            if !c.carType.isEmpty { bookingRow(label: "Car", value: c.carType) }
-        }
+        CarRentalBookingDetailContent(
+            details: c,
+            timeZone: bookingDisplayTimeZone,
+            address: place.address
+        )
     }
 
     private func activityContent(_ a: ActivityDetails) -> some View {
-        bookingInfoCard {
-            if let d = a.duration, !d.isEmpty { bookingRow(label: "Duration", value: d) }
-            if !a.provider.isEmpty { bookingRow(label: "Provider", value: a.provider) }
-            if !a.ticketNumber.isEmpty { bookingRow(label: "Ticket", value: a.ticketNumber) }
-        }
+        ActivityBookingDetailContent(
+            details: a,
+            timeZone: bookingDisplayTimeZone,
+            startTime: place.startTime,
+            address: place.address
+        )
     }
 
     private func transportContent(_ t: TransportDetails) -> some View {
-        let tz = bookingDisplayTimeZone
-        return bookingInfoCard {
-            bookingRow(label: "From", value: t.departureStation)
-            bookingRow(label: "To", value: t.arrivalStation)
-            if let dep = t.departureTime { bookingRow(label: "Departs", value: dep.timeFormatted(timeZone: tz)) }
-            if let arr = t.arrivalTime { bookingRow(label: "Arrives", value: arr.timeFormatted(timeZone: tz)) }
-            if !t.serviceNumber.isEmpty { bookingRow(label: "Service", value: t.serviceNumber) }
-            if !t.seat.isEmpty { bookingRow(label: "Seat", value: t.seat) }
-        }
+        TransportBookingDetailContent(
+            details: t,
+            timeZone: bookingDisplayTimeZone,
+            address: place.address
+        )
     }
 
     private func bookingInfoCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {

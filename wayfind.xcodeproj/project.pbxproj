@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1AAINJ032F7F0D8C00154B03 /* Inject in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAINJ022F7F0D8C00154B02 /* Inject */; };
 		210F8DA82F8D7EA1001E4E65 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAPRD032F7F0D8C00154A03 /* Supabase */; };
 		210F8DA92F8D7EA1001E4E65 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAPRD042F7F0D8C00154A04 /* GoogleSignIn */; };
 		A1AA5E170000000000154A23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = A1AA5E170000000000154A22 /* Sentry */; };
@@ -61,6 +62,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				210F8DA92F8D7EA1001E4E65 /* GoogleSignIn in Frameworks */,
+				A1AAINJ032F7F0D8C00154B03 /* Inject in Frameworks */,
 				A1AAC0DE2F7F0D8C00154A08 /* RevenueCat in Frameworks */,
 				A1AAC0DE2F7F0D8C00154A09 /* RevenueCatUI in Frameworks */,
 				A1AA5E170000000000154A23 /* Sentry in Frameworks */,
@@ -127,6 +129,7 @@
 			packageProductDependencies = (
 				A1AAPRD032F7F0D8C00154A03 /* Supabase */,
 				A1AAPRD042F7F0D8C00154A04 /* GoogleSignIn */,
+				A1AAINJ022F7F0D8C00154B02 /* Inject */,
 				A1AAC0DE2F7F0D8C00154A06 /* RevenueCat */,
 				A1AAC0DE2F7F0D8C00154A07 /* RevenueCatUI */,
 				A1AA5E170000000000154A22 /* Sentry */,
@@ -214,6 +217,7 @@
 			mainGroup = 21CB271B2F7F0D8C00154A0F;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				A1AAINJ012F7F0D8C00154B01 /* XCRemoteSwiftPackageReference "Inject" */,
 				A1AAPKG012F7F0D8C00154A01 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 				A1AAPKG022F7F0D8C00154A02 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 				A1AAC0DE2F7F0D8C00154A05 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
@@ -329,6 +333,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 7RNU3W6ND4;
+				EMIT_FRONTEND_COMMAND_LINES = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -424,6 +429,11 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7RNU3W6ND4;
 				ENABLE_PREVIEWS = YES;
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
+					"$(inherited)",
+					"-Xlinker",
+					"-interposable",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InfoAdditions.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -612,6 +622,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		A1AAINJ012F7F0D8C00154B01 /* XCRemoteSwiftPackageReference "Inject" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/krzysztofzablocki/Inject.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.5.0;
+			};
+		};
 		A1AA5E170000000000154A21 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
@@ -647,6 +665,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		A1AAINJ022F7F0D8C00154B02 /* Inject */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1AAINJ012F7F0D8C00154B01 /* XCRemoteSwiftPackageReference "Inject" */;
+			productName = Inject;
+		};
 		A1AA5E170000000000154A22 /* Sentry */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A1AA5E170000000000154A21 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;

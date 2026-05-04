@@ -63,6 +63,129 @@ struct FormDateRow: View {
     }
 }
 
+// MARK: - Optional date (booking forms)
+
+/// Row for a booking date/time that may be unset: shows **Not set** until the
+/// user chooses a value (no silent default to “now”).
+struct OptionalBookingDateRow: View {
+    let icon: String
+    let rowTitle: String
+    let accent: Color
+    @Binding var selection: Date?
+    var displayedComponents: DatePickerComponents = [.date, .hourAndMinute]
+
+    @Environment(\.calendar) private var calendar
+
+    @State private var showingSheet = false
+    @State private var draft = Date()
+
+    var body: some View {
+        HStack(alignment: .center, spacing: AppSpacing.md) {
+            MapStyleIcon(
+                systemName: icon,
+                size: .small,
+                accent: accent,
+                accessibilityLabel: rowTitle
+            )
+
+            if selection != nil {
+                DatePicker(
+                    rowTitle,
+                    selection: Binding(
+                        get: { selection! },
+                        set: { selection = $0 }
+                    ),
+                    displayedComponents: displayedComponents
+                )
+                .font(.appBody)
+                .datePickerStyle(.compact)
+                .tint(AppColors.appPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Menu {
+                    Button(role: .destructive) {
+                        selection = nil
+                    } label: {
+                        Label(String(localized: "Clear date"), systemImage: "xmark.circle")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel(String(localized: "Date options"))
+            } else {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text(rowTitle)
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textPrimary)
+                    Text(String(localized: "Not set"))
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+
+                Spacer(minLength: AppSpacing.md)
+
+                Button(String(localized: "Set date")) {
+                    prepareDraftFromCurrentSelection()
+                    showingSheet = true
+                }
+                .font(.appCaption.weight(.semibold))
+                .foregroundStyle(AppColors.appPrimary)
+            }
+        }
+        .padding(.horizontal, AppSpacing.md)
+        .frame(minHeight: 56)
+        .contentShape(Rectangle())
+        .sheet(isPresented: $showingSheet) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                    DatePicker(
+                        rowTitle,
+                        selection: $draft,
+                        displayedComponents: displayedComponents
+                    )
+                    .datePickerStyle(.graphical)
+                    .labelsHidden()
+                    .tint(AppColors.appPrimary)
+                    Spacer(minLength: 0)
+                }
+                .padding(AppSpacing.lg)
+                .navigationTitle(rowTitle)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(String(localized: "Cancel")) {
+                            showingSheet = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(String(localized: "Done")) {
+                            selection = draft
+                            showingSheet = false
+                        }
+                        .fontWeight(.semibold)
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private func prepareDraftFromCurrentSelection() {
+        if let existing = selection {
+            draft = existing
+            return
+        }
+        let anchor = Date()
+        draft = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: anchor)
+            ?? calendar.startOfDay(for: anchor)
+    }
+}
+
 /// Decimal-pad money input with an inline currency chip. Used in both the
 /// AddExpenseSheet (PR-3) and the booking forms (PR-5) so all monetary
 /// inputs share one parser. The text binding is the locale-friendly user

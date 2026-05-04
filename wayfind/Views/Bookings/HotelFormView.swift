@@ -2,8 +2,9 @@ import SwiftUI
 
 struct HotelFormView: View {
     @Binding var hotelName: String
-    @Binding var checkInDate: Date
-    @Binding var checkOutDate: Date
+    @Binding var address: String
+    @Binding var checkInDate: Date?
+    @Binding var checkOutDate: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.lg) {
@@ -14,21 +15,34 @@ struct HotelFormView: View {
                     placeholder: "Le Marais Hotel",
                     text: $hotelName
                 )
+
+                HotelMapDivider()
+
+                HotelMapTextRow(
+                    icon: "mappin.and.ellipse",
+                    title: String(localized: "Address"),
+                    placeholder: String(localized: "Street, city"),
+                    text: $address
+                )
             }
 
             HotelMapSectionCard(title: "Schedule") {
-                HotelMapDateRow(
+                OptionalBookingDateRow(
                     icon: "calendar.badge.plus",
-                    title: "Check-in",
-                    selection: $checkInDate
+                    rowTitle: String(localized: "Check-in"),
+                    accent: BookingCategory.hotel.color,
+                    selection: $checkInDate,
+                    displayedComponents: [.date, .hourAndMinute]
                 )
 
                 HotelMapDivider()
 
-                HotelMapDateRow(
+                OptionalBookingDateRow(
                     icon: "calendar.badge.minus",
-                    title: "Check-out",
-                    selection: $checkOutDate
+                    rowTitle: String(localized: "Check-out"),
+                    accent: BookingCategory.hotel.color,
+                    selection: $checkOutDate,
+                    displayedComponents: [.date, .hourAndMinute]
                 )
             }
         }
@@ -125,32 +139,6 @@ private struct HotelMapTextRow: View {
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .frame(minWidth: HotelMapFormMetrics.trailingFieldMinWidth)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: HotelMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct HotelMapDateRow: View {
-    let icon: String
-    let title: String
-    @Binding var selection: Date
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.hotel.color,
-                accessibilityLabel: title
-            )
-
-            DatePicker(title, selection: $selection, displayedComponents: [.date, .hourAndMinute])
-                .font(.appBody)
-                .datePickerStyle(.compact)
-                .tint(AppColors.appPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, AppSpacing.md)
         .frame(minHeight: HotelMapFormMetrics.rowMinHeight)

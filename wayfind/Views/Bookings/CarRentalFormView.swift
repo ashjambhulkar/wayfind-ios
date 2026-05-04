@@ -4,8 +4,8 @@ struct CarRentalFormView: View {
     @Binding var company: String
     @Binding var pickupLocation: String
     @Binding var dropoffLocation: String
-    @Binding var pickupDate: Date
-    @Binding var dropoffDate: Date
+    @Binding var pickupDate: Date?
+    @Binding var dropoffDate: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.lg) {
@@ -37,18 +37,22 @@ struct CarRentalFormView: View {
             }
 
             CarRentalMapSectionCard(title: "Schedule") {
-                CarRentalMapDateRow(
+                OptionalBookingDateRow(
                     icon: "calendar.badge.plus",
-                    title: "Pickup",
-                    selection: $pickupDate
+                    rowTitle: String(localized: "Pick-up"),
+                    accent: BookingCategory.carRental.color,
+                    selection: $pickupDate,
+                    displayedComponents: [.date, .hourAndMinute]
                 )
 
                 CarRentalMapDivider()
 
-                CarRentalMapDateRow(
+                OptionalBookingDateRow(
                     icon: "calendar.badge.minus",
-                    title: "Dropoff",
-                    selection: $dropoffDate
+                    rowTitle: String(localized: "Drop-off"),
+                    accent: BookingCategory.carRental.color,
+                    selection: $dropoffDate,
+                    displayedComponents: [.date, .hourAndMinute]
                 )
             }
         }
@@ -145,32 +149,6 @@ private struct CarRentalMapTextRow: View {
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .frame(minWidth: CarRentalMapFormMetrics.trailingFieldMinWidth)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: CarRentalMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct CarRentalMapDateRow: View {
-    let icon: String
-    let title: String
-    @Binding var selection: Date
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.carRental.color,
-                accessibilityLabel: title
-            )
-
-            DatePicker(title, selection: $selection, displayedComponents: [.date, .hourAndMinute])
-                .font(.appBody)
-                .datePickerStyle(.compact)
-                .tint(AppColors.appPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, AppSpacing.md)
         .frame(minHeight: CarRentalMapFormMetrics.rowMinHeight)

@@ -160,7 +160,8 @@ struct BookingsScreenView: View {
                     },
                     targetDayId: route.targetDayId,
                     showsCloseButton: true,
-                    displayTimeZone: tripDisplayTimeZone
+                    displayTimeZone: tripDisplayTimeZone,
+                    tripId: trip.id
                 )
             }
         }
@@ -180,7 +181,8 @@ struct BookingsScreenView: View {
                     },
                     targetDayId: place.itineraryDayId,
                     showsCloseButton: true,
-                    displayTimeZone: tripDisplayTimeZone
+                    displayTimeZone: tripDisplayTimeZone,
+                    tripId: trip.id
                 )
             }
         }

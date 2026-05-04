@@ -13,8 +13,8 @@ struct FlightFormView: View {
     @Binding var flightNumber: String
     @Binding var departureAirport: String
     @Binding var arrivalAirport: String
-    @Binding var departureDate: Date
-    @Binding var arrivalDate: Date
+    @Binding var departureDate: Date?
+    @Binding var arrivalDate: Date?
     @Binding var terminal: String
     @Binding var gate: String
     @Binding var seat: String
@@ -73,11 +73,12 @@ struct FlightFormView: View {
 
             FlightMapDivider()
 
-            FlightMapDateRow(
+            OptionalBookingDateRow(
                 icon: "calendar",
-                title: "Departure Date",
-                displayedComponents: [.date],
-                selection: $departureDate
+                rowTitle: String(localized: "Departure date"),
+                accent: BookingCategory.flight.color,
+                selection: $departureDate,
+                displayedComponents: [.date]
             )
 
             if lookupState == .lookupInput {
@@ -311,33 +312,6 @@ private struct FlightAirlinePickerRow: View {
     }
 }
 
-private struct FlightMapDateRow: View {
-    let icon: String
-    let title: String
-    var displayedComponents: DatePickerComponents = [.date, .hourAndMinute]
-    @Binding var selection: Date
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.flight.color,
-                accessibilityLabel: title
-            )
-
-            DatePicker(title, selection: $selection, displayedComponents: displayedComponents)
-                .font(.appBody)
-                .datePickerStyle(.compact)
-                .tint(AppColors.appPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: FlightMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
-    }
-}
-
 private struct FlightProgressRow: View {
     var body: some View {
         HStack(spacing: AppSpacing.md) {
@@ -427,8 +401,8 @@ private struct FlightManualFallbackSection: View {
     let message: String?
     @Binding var departureAirport: String
     @Binding var arrivalAirport: String
-    @Binding var departureDate: Date
-    @Binding var arrivalDate: Date
+    @Binding var departureDate: Date?
+    @Binding var arrivalDate: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.lg) {
@@ -457,18 +431,22 @@ private struct FlightManualFallbackSection: View {
 
                 FlightMapDivider()
 
-                FlightMapDateRow(
+                OptionalBookingDateRow(
                     icon: "clock.fill",
-                    title: "Departure",
-                    selection: $departureDate
+                    rowTitle: String(localized: "Departure"),
+                    accent: BookingCategory.flight.color,
+                    selection: $departureDate,
+                    displayedComponents: [.date, .hourAndMinute]
                 )
 
                 FlightMapDivider()
 
-                FlightMapDateRow(
+                OptionalBookingDateRow(
                     icon: "clock.badge.checkmark.fill",
-                    title: "Arrival",
-                    selection: $arrivalDate
+                    rowTitle: String(localized: "Arrival"),
+                    accent: BookingCategory.flight.color,
+                    selection: $arrivalDate,
+                    displayedComponents: [.date, .hourAndMinute]
                 )
             }
         }

@@ -21,8 +21,8 @@ struct AddBookingView: View {
     @State private var flightNumber = ""
     @State private var flightDepartureAirport = ""
     @State private var flightArrivalAirport = ""
-    @State private var flightDepartureDate = Date()
-    @State private var flightArrivalDate = Calendar.current.date(byAdding: .hour, value: 2, to: Date()) ?? Date()
+    @State private var flightDepartureDate: Date? = nil
+    @State private var flightArrivalDate: Date? = nil
     @State private var flightTerminal = ""
     @State private var flightGate = ""
     @State private var flightSeat = ""
@@ -32,26 +32,27 @@ struct AddBookingView: View {
     @State private var isLookingUpFlight = false
 
     @State private var hotelName = ""
-    @State private var hotelCheckIn = Date()
-    @State private var hotelCheckOut = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
+    @State private var hotelCheckIn: Date? = nil
+    @State private var hotelCheckOut: Date? = nil
     @State private var hotelRoomType = ""
+    @State private var hotelAddress = ""
     @State private var hotelCheckInTime = ""
     @State private var hotelCheckOutTime = ""
 
     @State private var restaurantName = ""
-    @State private var restaurantReservationDate = Date()
+    @State private var restaurantReservationDate: Date? = nil
     @State private var restaurantPartySize = 2
 
     @State private var carCompany = ""
     @State private var carPickupLocation = ""
     @State private var carDropoffLocation = ""
-    @State private var carPickupDate = Date()
-    @State private var carDropoffDate = Date()
+    @State private var carPickupDate: Date? = nil
+    @State private var carDropoffDate: Date? = nil
     @State private var carType = ""
 
     @State private var activityName = ""
     @State private var activityLocation = ""
-    @State private var activityDate = Date()
+    @State private var activityDate: Date? = nil
     @State private var activityDuration = ""
     @State private var activityProvider = ""
     @State private var activityTicketNumber = ""
@@ -60,8 +61,8 @@ struct AddBookingView: View {
     @State private var transportServiceNumber = ""
     @State private var transportDepartureStation = ""
     @State private var transportArrivalStation = ""
-    @State private var transportDepartureDate = Date()
-    @State private var transportArrivalDate = Date()
+    @State private var transportDepartureDate: Date? = nil
+    @State private var transportArrivalDate: Date? = nil
     @State private var transportSeat = ""
 
     /// Phase 7 — optional cost the user types into `MoneyField`. When
@@ -84,6 +85,9 @@ struct AddBookingView: View {
     /// timeline and detail sheet. Falls back to device TZ when no trip context
     /// is available (legacy callers / previews).
     var displayTimeZone: TimeZone = .current
+    /// When set, edit-mode flight bookings can attach documents via
+    /// `BookingDocumentsEditEntryRow` (same pipeline as detail + timeline).
+    var tripId: UUID? = nil
     @State private var isSaving = false
     @State private var saveError: String?
     /// Snapshot of the form taken once after prefill in edit mode. Used to
@@ -100,13 +104,15 @@ struct AddBookingView: View {
         onSave: ((Place, BookingCost?) async -> Bool)? = nil,
         targetDayId: UUID,
         showsCloseButton: Bool = false,
-        displayTimeZone: TimeZone = .current
+        displayTimeZone: TimeZone = .current,
+        tripId: UUID? = nil
     ) {
         self.editingPlace = editingPlace
         self.onSave = onSave
         self.targetDayId = targetDayId
         self.showsCloseButton = showsCloseButton
         self.displayTimeZone = displayTimeZone
+        self.tripId = tripId
         if let typeStr = editingPlace?.bookingType, let category = BookingCategory(rawValue: typeStr) {
             _selectedType = State(initialValue: category)
         } else {
@@ -140,6 +146,15 @@ struct AddBookingView: View {
                         seat: $flightSeat
                     )
                     .padding(.horizontal, AppSpacing.lg)
+
+                    if isEditMode, let tripId, let ep = editingPlace {
+                        BookingDocumentsEditEntryRow(
+                            bookingId: ep.id,
+                            tripId: tripId,
+                            bookingTitle: ep.name
+                        )
+                        .padding(.horizontal, AppSpacing.lg)
+                    }
                 } else if selectedType == .hotel {
                     HotelOptionalDetailsSection(roomType: $hotelRoomType)
                         .padding(.horizontal, AppSpacing.lg)
@@ -238,16 +253,16 @@ struct AddBookingView: View {
             flightTerminal = f.terminal
             flightGate = f.gate
             flightSeat = f.seat
-            flightLookupState = f.lookupVerified ? .verifiedResult : .manualFallback
-            if f.lookupVerified {
+            if f.lookupVerified, let dep = f.departureTime, let arr = f.arrivalTime {
+                flightLookupState = .verifiedResult
                 verifiedFlightLookup = VerifiedFlightLookup(
                     carrierIATA: f.carrierIATA ?? "",
                     flightNumber: f.flightNumber,
                     departureDate: "",
                     originAirportIATA: f.departureAirport.nilIfEmpty,
                     destinationAirportIATA: f.arrivalAirport.nilIfEmpty,
-                    scheduledDepartureUTC: f.departureTime ?? flightDepartureDate,
-                    scheduledArrivalUTC: f.arrivalTime ?? flightArrivalDate,
+                    scheduledDepartureUTC: dep,
+                    scheduledArrivalUTC: arr,
                     terminalOrigin: f.terminal.nilIfEmpty,
                     terminalDestination: f.terminalDestination,
                     gateOrigin: f.gate.nilIfEmpty,
@@ -255,9 +270,13 @@ struct AddBookingView: View {
                     baggageClaim: f.baggageClaim,
                     provider: nil
                 )
+            } else {
+                verifiedFlightLookup = nil
+                flightLookupState = .manualFallback
             }
         case .hotel(let h):
             hotelName = place.name
+            hotelAddress = place.address ?? ""
             if let d = h.checkInDate { hotelCheckIn = d }
             if let d = h.checkOutDate { hotelCheckOut = d }
             hotelRoomType = h.roomType
@@ -319,6 +338,7 @@ struct AddBookingView: View {
             case .hotel:
                 HotelFormView(
                     hotelName: $hotelName,
+                    address: $hotelAddress,
                     checkInDate: $hotelCheckIn,
                     checkOutDate: $hotelCheckOut
                 )
@@ -427,6 +447,7 @@ struct AddBookingView: View {
             flightLookupState: flightLookupState,
             verifiedFlightLookup: verifiedFlightLookup,
             hotelName: hotelName,
+            hotelAddress: hotelAddress,
             hotelCheckIn: hotelCheckIn,
             hotelCheckOut: hotelCheckOut,
             hotelRoomType: hotelRoomType,
@@ -467,12 +488,13 @@ struct AddBookingView: View {
     private var canLookupFlight: Bool {
         normalizedCarrierIATA() != nil
             && !normalizedFlightNumberDisplay().isEmpty
+            && flightDepartureDate != nil
             && flightLookupState != .lookingUp
     }
 
     private func lookupFlight() async {
-        guard let carrier = normalizedCarrierIATA(), canLookupFlight else {
-            flightLookupMessage = "Choose an airline and add the flight number first."
+        guard let carrier = normalizedCarrierIATA(), let departureDate = flightDepartureDate, canLookupFlight else {
+            flightLookupMessage = "Choose an airline, flight number, and departure date first."
             return
         }
         isLookingUpFlight = true
@@ -482,7 +504,7 @@ struct AddBookingView: View {
         let result = await FlightLookupService.shared.lookup(FlightLookupRequest(
             carrierIATA: carrier,
             flightNumber: normalizedFlightNumberDisplay(),
-            departureDate: flightDepartureDate
+            departureDate: departureDate
         ))
 
         isLookingUpFlight = false
@@ -562,7 +584,7 @@ struct AddBookingView: View {
 
         switch selectedType {
         case .flight:
-            let arrivalForSave = flightArrivalForSave()
+            let arrivalForSave: Date? = flightArrivalForSave()
             let verified = verifiedFlightLookup
             let isVerified = flightLookupState == .verifiedResult && verified != nil
             let details = FlightDetails(
@@ -612,14 +634,14 @@ struct AddBookingView: View {
                 id: placeId,
                 itineraryDayId: targetDayId,
                 name: hotelName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Hotel",
-                address: nil,
+                address: hotelAddress.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 lat: nil,
                 lng: nil,
                 category: "hotel",
                 notes: nil,
                 sortOrder: 0,
-                startTime: nil,
-                endTime: nil,
+                startTime: hotelCheckIn,
+                endTime: hotelCheckOut,
                 isBooking: true,
                 bookingType: BookingCategory.hotel.rawValue,
                 confirmationNumber: confirmation,
@@ -746,14 +768,15 @@ struct AddBookingView: View {
         return Self.inferredCarrierIATA(from: flightAirline, flightNumber: flightNumber)
     }
 
-    private func flightArrivalForSave() -> Date {
+    private func flightArrivalForSave() -> Date? {
         if let verifiedFlightLookup {
             return verifiedFlightLookup.scheduledArrivalUTC
         }
         if flightLookupState == .manualFallback {
             return flightArrivalDate
         }
-        return Calendar.current.date(byAdding: .hour, value: 2, to: flightDepartureDate) ?? flightDepartureDate
+        guard let dep = flightDepartureDate else { return nil }
+        return tripCalendar.date(byAdding: .hour, value: 2, to: dep) ?? dep
     }
 
     private func normalizedFlightNumberDisplay() -> String {
@@ -787,12 +810,11 @@ struct AddBookingView: View {
         return "Transport"
     }
 
-    private func hotelNights(from checkIn: Date, to checkOut: Date) -> Int? {
-        let calendar = Calendar.current
-        let start = calendar.startOfDay(for: checkIn)
-        let end = calendar.startOfDay(for: checkOut)
-        let days = calendar.dateComponents([.day], from: start, to: end).day
-        return days
+    private func hotelNights(from checkIn: Date?, to checkOut: Date?) -> Int? {
+        guard let checkIn, let checkOut else { return nil }
+        let start = tripCalendar.startOfDay(for: checkIn)
+        let end = tripCalendar.startOfDay(for: checkOut)
+        return tripCalendar.dateComponents([.day], from: start, to: end).day
     }
 }
 
@@ -979,8 +1001,8 @@ private struct BookingFormSnapshot: Equatable {
     let flightNumber: String
     let flightDepartureAirport: String
     let flightArrivalAirport: String
-    let flightDepartureDate: Date
-    let flightArrivalDate: Date
+    let flightDepartureDate: Date?
+    let flightArrivalDate: Date?
     let flightTerminal: String
     let flightGate: String
     let flightSeat: String
@@ -988,26 +1010,27 @@ private struct BookingFormSnapshot: Equatable {
     let verifiedFlightLookup: VerifiedFlightLookup?
 
     let hotelName: String
-    let hotelCheckIn: Date
-    let hotelCheckOut: Date
+    let hotelAddress: String
+    let hotelCheckIn: Date?
+    let hotelCheckOut: Date?
     let hotelRoomType: String
     let hotelCheckInTime: String
     let hotelCheckOutTime: String
 
     let restaurantName: String
-    let restaurantReservationDate: Date
+    let restaurantReservationDate: Date?
     let restaurantPartySize: Int
 
     let carCompany: String
     let carPickupLocation: String
     let carDropoffLocation: String
-    let carPickupDate: Date
-    let carDropoffDate: Date
+    let carPickupDate: Date?
+    let carDropoffDate: Date?
     let carType: String
 
     let activityName: String
     let activityLocation: String
-    let activityDate: Date
+    let activityDate: Date?
     let activityDuration: String
     let activityProvider: String
     let activityTicketNumber: String
@@ -1016,8 +1039,8 @@ private struct BookingFormSnapshot: Equatable {
     let transportServiceNumber: String
     let transportDepartureStation: String
     let transportArrivalStation: String
-    let transportDepartureDate: Date
-    let transportArrivalDate: Date
+    let transportDepartureDate: Date?
+    let transportArrivalDate: Date?
     let transportSeat: String
 }
 

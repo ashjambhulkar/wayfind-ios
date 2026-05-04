@@ -5,8 +5,8 @@ struct TransportFormView: View {
     @Binding var serviceNumber: String
     @Binding var departureStation: String
     @Binding var arrivalStation: String
-    @Binding var departureDate: Date
-    @Binding var arrivalDate: Date
+    @Binding var departureDate: Date?
+    @Binding var arrivalDate: Date?
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.lg) {
@@ -48,18 +48,22 @@ struct TransportFormView: View {
             }
 
             TransportMapSectionCard(title: "Schedule") {
-                TransportMapDateRow(
+                OptionalBookingDateRow(
                     icon: "tram.fill",
-                    title: "Departs",
-                    selection: $departureDate
+                    rowTitle: String(localized: "Departs"),
+                    accent: BookingCategory.transport.color,
+                    selection: $departureDate,
+                    displayedComponents: [.date, .hourAndMinute]
                 )
 
                 TransportMapDivider()
 
-                TransportMapDateRow(
+                OptionalBookingDateRow(
                     icon: "checkmark.circle.fill",
-                    title: "Arrives",
-                    selection: $arrivalDate
+                    rowTitle: String(localized: "Arrives"),
+                    accent: BookingCategory.transport.color,
+                    selection: $arrivalDate,
+                    displayedComponents: [.date, .hourAndMinute]
                 )
             }
         }
@@ -157,32 +161,6 @@ private struct TransportMapTextRow: View {
                 .textInputAutocapitalization(capitalization)
                 .autocorrectionDisabled()
                 .frame(minWidth: TransportMapFormMetrics.trailingFieldMinWidth)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: TransportMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct TransportMapDateRow: View {
-    let icon: String
-    let title: String
-    @Binding var selection: Date
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.transport.color,
-                accessibilityLabel: title
-            )
-
-            DatePicker(title, selection: $selection, displayedComponents: [.date, .hourAndMinute])
-                .font(.appBody)
-                .datePickerStyle(.compact)
-                .tint(AppColors.appPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, AppSpacing.md)
         .frame(minHeight: TransportMapFormMetrics.rowMinHeight)
