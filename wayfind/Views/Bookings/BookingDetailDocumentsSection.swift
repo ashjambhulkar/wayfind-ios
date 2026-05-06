@@ -264,22 +264,32 @@ struct BookingDocumentsEditEntryRow: View {
 /// Files & Photos sheet is needed. Attachments and in-progress uploads
 /// appear as standard list rows directly below the section header.
 ///
-/// The add action is a plain list row (not a header Menu) so that the
-/// `PhotosPicker` and document sheet anchor correctly in the Form context.
-/// A `Menu` inside a List section header suffers from a SwiftUI layout
-/// issue where it dismisses the presentation context before sheets can appear.
+/// The add row is a `Menu` that lets the user choose "Choose Photo" or
+/// "Choose File".  Menu items set `triggerPhotosPicker` / `triggerDocumentPicker`
+/// bindings (owned by `AddBookingView`) so the actual presentations happen at
+/// the NavigationStack level.  This avoids the "already presenting" conflict
+/// that occurs when PhotosPicker or a sheet is attached inside a Form Section
+/// that is itself inside a `.sheet` presentation.
+/// The parent owns: `triggerPhotosPicker`, `triggerDocumentPicker`,
+/// `incomingPhotoItems`, `incomingDocumentURL`; this component owns all
+/// upload/display logic.
 struct BookingDocumentsInlineSection: View {
     let bookingId: UUID
     let tripId: UUID
     let bookingTitle: String
 
+    /// Owned by the parent so the actual pickers present at the NavigationStack
+    /// level, not inside the Form Section (avoids "already presenting" conflicts).
+    /// The row uses a `Menu` to make the choice; menu items set these bindings
+    /// with a short delay so the menu animation finishes first.
+    @Binding var triggerPhotosPicker: Bool
+    @Binding var triggerDocumentPicker: Bool
+    @Binding var incomingPhotoItems: [PhotosPickerItem]
+    @Binding var incomingDocumentURL: URL?
+
     @Environment(DataService.self) private var dataService
 
     @State private var service: BookingAttachmentService?
-    @State private var photoPickerItems: [PhotosPickerItem] = []
-    @State private var showingAddDialog = false
-    @State private var showingPhotosPicker = false
-    @State private var showingDocumentPicker = false
     @State private var pendingUploads: [PendingAttachmentUpload] = []
     @State private var uploadError: String?
     @State private var previewURL: URL?
@@ -290,29 +300,16 @@ struct BookingDocumentsInlineSection: View {
             pendingRows
             attachmentRows
         }
-        // Attach presentations to the Section so they have a stable anchor.
-        // Using plain Button rows (not a Menu) avoids the known SwiftUI issue
-        // where Menu dismissal cancels a sheet before it can present.
-        .confirmationDialog("Add Attachment", isPresented: $showingAddDialog, titleVisibility: .hidden) {
-            Button("Choose Photo") { showingPhotosPicker = true }
-            Button("Choose File") { showingDocumentPicker = true }
-        }
-        .photosPicker(
-            isPresented: $showingPhotosPicker,
-            selection: $photoPickerItems,
-            maxSelectionCount: remainingSlots,
-            matching: .images,
-            photoLibrary: .shared()
-        )
-        .onChange(of: photoPickerItems) { _, items in
+        .onChange(of: incomingPhotoItems) { _, items in
             guard !items.isEmpty else { return }
             Task { await handlePhotosPicked(items: items) }
         }
-        .sheet(isPresented: $showingDocumentPicker) {
-            DocumentPicker(
-                allowedTypes: [.pdf, .jpeg, .png, .heic, .webP, .image],
-                onPicked: { url in Task { await handleDocumentPicked(url: url) } }
-            )
+        .onChange(of: incomingDocumentURL) { _, url in
+            guard let url else { return }
+            Task {
+                await handleDocumentPicked(url: url)
+                incomingDocumentURL = nil
+            }
         }
         .sheet(item: previewURLBinding) { wrapped in
             QuickLookPreview(url: wrapped.url)
@@ -341,12 +338,28 @@ struct BookingDocumentsInlineSection: View {
     @ViewBuilder
     private var addRow: some View {
         if remainingSlots > 0 {
-            Button {
-                showingAddDialog = true
+            Menu {
+                Button {
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        triggerPhotosPicker = true
+                    }
+                } label: {
+                    Label(String(localized: "Choose Photo"), systemImage: "photo.on.rectangle.angled")
+                }
+                Button {
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        triggerDocumentPicker = true
+                    }
+                } label: {
+                    Label(String(localized: "Choose File"), systemImage: "doc.badge.plus")
+                }
             } label: {
-                Label("Add Photo or File", systemImage: "plus.circle.fill")
+                Label(String(localized: "Add Photo or File"), systemImage: "plus.circle.fill")
                     .foregroundStyle(AppColors.appPrimary)
             }
+            .accessibilityLabel(String(localized: "Add Photo or File"))
         }
     }
 
@@ -395,7 +408,7 @@ struct BookingDocumentsInlineSection: View {
     }
 
     private func handlePhotosPicked(items: [PhotosPickerItem]) async {
-        defer { photoPickerItems = [] }
+        defer { incomingPhotoItems = [] }
         guard let service else { return }
         for item in items {
             do {

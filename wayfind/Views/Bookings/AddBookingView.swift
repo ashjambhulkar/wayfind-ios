@@ -1,5 +1,7 @@
 import Observation
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// User-entered cost surfaced through `AddBookingView.onSave`. The parent
 /// view is responsible for routing it to the budget service so a tracked
@@ -98,6 +100,14 @@ struct AddBookingView: View {
     /// Stable `trip_bookings.id` for this form session (matches `editingPlace.id` in edit).
     @State private var bookingRowId: UUID
     @State private var didPersistBookingSuccessfully = false
+    // Document-section presentation state — owned here so modifiers are at the
+    // NavigationStack level. Attaching them inside a Form Section when the Form
+    // lives inside a sheet causes "already presenting" errors (SwiftUI walks up
+    // past AddBookingView to its parent PresentationHostingController).
+    @State private var docPhotoItems: [PhotosPickerItem] = []
+    @State private var docShowingPhotosPicker = false
+    @State private var docShowingDocumentPicker = false
+    @State private var docIncomingDocumentURL: URL?
     @State private var isSaving = false
     @State private var saveError: String?
     /// Snapshot of the form taken once after prefill in edit mode. Used to
@@ -134,7 +144,11 @@ struct AddBookingView: View {
     var body: some View {
         Group {
             Form {
-                switch selectedType {
+                // Category tint applies only to type-specific fields — not to
+                // `confirmationDialog` / menus in Documents or booking details,
+                // which should keep the system default accent (see HIG).
+                Group {
+                    switch selectedType {
                 case .flight:
                     FlightFormView(
                         airline: $flightAirline,
@@ -201,6 +215,8 @@ struct AddBookingView: View {
                         partySize: $restaurantPartySize
                     )
                 }
+                }
+                .tint(selectedType.color)
 
                 if let saveError {
                     Section {
@@ -216,13 +232,16 @@ struct AddBookingView: View {
                     BookingDocumentsInlineSection(
                         bookingId: bookingRowId,
                         tripId: tripId,
-                        bookingTitle: documentsSectionBookingTitle
+                        bookingTitle: documentsSectionBookingTitle,
+                        triggerPhotosPicker: $docShowingPhotosPicker,
+                        triggerDocumentPicker: $docShowingDocumentPicker,
+                        incomingPhotoItems: $docPhotoItems,
+                        incomingDocumentURL: $docIncomingDocumentURL
                     )
                 }
             }
             .scrollContentBackground(.hidden)
             .background(AppColors.appBackground)
-            .tint(selectedType.color)
             .scrollDismissesKeyboard(.interactively)
         }
         .navigationTitle(isEditMode ? "Edit \(selectedType.label)" : "Add \(selectedType.label)")
@@ -273,6 +292,21 @@ struct AddBookingView: View {
             )
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+        // Photo picker and document sheet anchored here (NavigationStack level)
+        // so they present cleanly without "already presenting" conflicts.
+        .photosPicker(
+            isPresented: $docShowingPhotosPicker,
+            selection: $docPhotoItems,
+            maxSelectionCount: BookingAttachmentService.softCap,
+            matching: .images,
+            photoLibrary: .shared()
+        )
+        .sheet(isPresented: $docShowingDocumentPicker) {
+            DocumentPicker(
+                allowedTypes: [.pdf, .jpeg, .png, .heic, .webP, .image],
+                onPicked: { url in docIncomingDocumentURL = url }
+            )
         }
         .task(id: bookingRowId) {
             guard !isEditMode, tripId != nil else { return }
