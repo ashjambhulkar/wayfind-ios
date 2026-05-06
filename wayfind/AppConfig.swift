@@ -23,7 +23,7 @@ enum AppConfig {
 
     /// SendGrid inbound parse domain. Backend routes `trips+{token}@domain`
     /// by looking up `{token}` in `user_forwarding_addresses`.
-    static let bookingForwardingDomain = "mail.wayfind.app"
+    static let bookingForwardingDomain = "inbox.wayfind.city"
 
     /// iOS OAuth client ID (Google Cloud Console). Must match bundle ID `app.wayfind.travel` or replace with your own client.
     static let googleIOSClientID = "1009434603775-8c92mfkampnmj1l7goj6517raaelq0vl.apps.googleusercontent.com"

@@ -398,11 +398,14 @@ async function extractFromAttachments(
     ];
 
     if (isImage) {
+      // Images: gpt-4o-mini supports image_url — use primary→fallback path.
       content.push({
         type: "image_url",
         image_url: { url: `data:${resolvedType};base64,${base64}`, detail: "high" },
       });
     } else {
+      // PDFs: only gpt-4o supports the "file" content type in Chat Completions.
+      // Skip gpt-4o-mini entirely and call gpt-4o directly.
       content.push({
         type: "file",
         file: {
@@ -413,7 +416,9 @@ async function extractFromAttachments(
     }
 
     try {
-      const result = await extractWithFallback(apiKey, content);
+      const result = isImage
+        ? await extractWithFallback(apiKey, content)
+        : await extractWithModel(apiKey, FALLBACK_MODEL, content);
       debugEntry.extract_ok = true;
       debugEntry.bookings_found = result.bookings.length;
       if (result.bookings.length > 0) {
@@ -556,6 +561,15 @@ async function extractWithFallback(
   return { bookings: sanitizeBookings(extracted, modelUsed), modelUsed };
 }
 
+async function extractWithModel(
+  apiKey: string,
+  model: string,
+  content: Array<Record<string, unknown>>,
+): Promise<{ bookings: SafeBooking[]; modelUsed: string }> {
+  const extracted = await callExtractionModel(apiKey, model, content, MODEL_TIMEOUT_MS);
+  return { bookings: sanitizeBookings(extracted, model), modelUsed: model };
+}
+
 // ── Stage 6: Dedup + insert bookings ──────────────────────────────────────
 
 interface PersistResult {
@@ -611,7 +625,7 @@ async function persistBookings(
         details_json: detailsWithSource,
         total_price: booking.total_price,
         currency: booking.currency,
-        source: "email",
+        source: "forwarded_email",
       })
       .select("id")
       .single();

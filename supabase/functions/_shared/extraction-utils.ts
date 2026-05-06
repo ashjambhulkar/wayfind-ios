@@ -72,7 +72,7 @@ Return ONLY a valid JSON object with a top-level "bookings" array:
 
 Rules:
 - Return one entry per distinct leg/segment/reservation. A round-trip flight = 2 entries. Multiple hotel nights at different properties = separate entries. Same hotel, one stay = 1 entry.
-- Flights: title "ORIGIN → DESTINATION" with airport codes when possible.
+- Flights: title "ORIGIN → DESTINATION" with airport codes when possible. Use ONLY the IATA airport code (e.g. "MCO", "JFK") in start_location and end_location — never append terminal or gate info there. Put terminal in details_json.terminal instead.
 - Lodging: property name as title; end_location often null.
 - Restaurant / concert / theater / tour: venue in start_location; end_location usually null.
 - Train / bus / ferry: origin and destination in start_location / end_location.
@@ -113,7 +113,7 @@ Return ONLY a valid JSON object with a top-level "bookings" array:
 
 Rules:
 - Return one entry per distinct leg/segment/reservation. A round-trip flight = 2 entries. Multiple hotel nights at different properties = separate entries. Same hotel, one stay = 1 entry.
-- Flights: title "ORIGIN → DESTINATION" with airport codes when possible.
+- Flights: title "ORIGIN → DESTINATION" with airport codes when possible. Use ONLY the IATA airport code (e.g. "MCO", "JFK") in start_location and end_location — never append terminal or gate info there. Put terminal in details_json.terminal instead.
 - Lodging: property name as title; end_location often null.
 - Restaurant / concert / theater / tour: venue in start_location; end_location usually null.
 - Train / bus / ferry: origin and destination in start_location / end_location.
