@@ -248,6 +248,12 @@ private struct AppRootTabView: View {
     /// Bound below in the same `onChange` that binds the collaboration store
     /// so all three lifecycles stay synchronized.
     @State private var realtimeService = TripRealtimeService()
+    /// Wave 3.3 — single shared flight status cache for the active trip.
+    /// Owned here (not inside TripDetailView or BookingsScreenView) so both
+    /// views read from the same instance without opening duplicate realtime
+    /// channels. TripDetailView manages bind/unbind; BookingsScreenView
+    /// reads the published dictionary via @Environment.
+    @State private var flightTrackingService = FlightTrackingService()
     /// Phase 3 — held so the realtime kick handler can ask the active
     /// `TripDetailViewModel` to refetch (and so we can pull the title for
     /// the kick toast). Updated by `TripDetailView.onAppear` once it
@@ -318,6 +324,7 @@ private struct AppRootTabView: View {
         .environment(collaborationStore)
         .environment(collaborationUi)
         .environment(realtimeService)
+        .environment(flightTrackingService)
         // Phase 5 — wire NotificationManager to the live coordinator
         // and install the pre-sign-out cleanup. Both are driven off
         // `task` so they survive scene re-creation cleanly without
@@ -334,6 +341,7 @@ private struct AppRootTabView: View {
                 // store. PendingInviteStorage is intentionally NOT
                 // touched — invite tokens must survive sign-out.
                 await PushNotificationService.shared.clearTokenForCurrentDevice()
+                await flightTrackingService.unbind()
                 await MainActor.run {
                     realtimeService.unbind()
                     collaborationStore.clear()
@@ -377,13 +385,19 @@ private struct AppRootTabView: View {
                     dataService: dataService
                 )
                 activeBudgetViewModel = budget
-                Task { await budget.reload() }
+                // Eager reload removed: `attachRealtimeIfReady()` calls
+                // `realtimeService.bindBudget(budget)` synchronously before
+                // `startSubscription` opens the channel. By the time the
+                // channel reaches `.subscribed` (~200-500ms), `budgetViewModel`
+                // is non-nil and `scheduleBudgetRefetch()` fires the first
+                // real load — no duplicate 5-request burst on trip open.
                 // Realtime binds lazily — wait for the detail viewmodel
                 // to land via `activeTripDetailViewModel` (set below).
             } else {
                 collaborationStore.clear()
                 collaborationUi.clear()
                 realtimeService.unbind()
+                Task { await flightTrackingService.unbind() }
                 activeTripDetailViewModel = nil
                 activeBudgetViewModel = nil
                 isKickFading = false

@@ -5,6 +5,10 @@ enum FlightLookupFormState: Hashable {
     case lookingUp
     case verifiedResult
     case manualFallback
+    /// Flight data was pre-populated from an email import — all fields are
+    /// already correct, no AeroDataBox lookup was run. Show the editable
+    /// manual form with a neutral info banner instead of the warning.
+    case emailImport
 }
 
 /// Flight booking fields using native **grouped form** sections (Calendar / Reminders style).
@@ -62,6 +66,8 @@ struct FlightFormView: View {
             }
         case .manualFallback:
             manualFallbackSections
+        case .emailImport:
+            emailImportSections
         }
     }
 
@@ -174,11 +180,17 @@ struct FlightFormView: View {
             )
             LabeledContent(
                 String(localized: "Departure"),
-                value: "\(flight.scheduledDepartureUTC.shortFormatted(timeZone: timeZone)) · \(flight.scheduledDepartureUTC.timeFormatted(timeZone: timeZone))"
+                value: {
+                    let tz = flight.resolvedOriginTimeZone
+                    return "\(flight.scheduledDepartureUTC.shortFormatted(timeZone: tz)) · \(flight.scheduledDepartureUTC.timeFormatted(timeZone: tz))"
+                }()
             )
             LabeledContent(
                 String(localized: "Arrival"),
-                value: "\(flight.scheduledArrivalUTC.shortFormatted(timeZone: timeZone)) · \(flight.scheduledArrivalUTC.timeFormatted(timeZone: timeZone))"
+                value: {
+                    let tz = flight.resolvedDestinationTimeZone
+                    return "\(flight.scheduledArrivalUTC.shortFormatted(timeZone: tz)) · \(flight.scheduledArrivalUTC.timeFormatted(timeZone: tz))"
+                }()
             )
         } footer: {
             Text(String(localized: "Provider verified — you can add optional terminal, gate, and seat below."))
@@ -187,6 +199,64 @@ struct FlightFormView: View {
         }
 
         optionalFlightDetailsSection
+    }
+
+    // MARK: - Email import (pre-populated, no warning)
+
+    private var emailImportSections: some View {
+        Group {
+            Section {
+                HStack(alignment: .top, spacing: AppSpacing.md) {
+                    Image(systemName: "envelope.badge.fill")
+                        .foregroundStyle(AppColors.appPrimary)
+                        .font(.title3)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        Text(String(localized: "Imported from email"))
+                            .font(.appBody.weight(.semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                        Text(String(localized: "Details were extracted automatically. Review and save."))
+                            .font(.appFootnote)
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
+                }
+                .padding(.vertical, AppSpacing.xs)
+            }
+
+            Section(String(localized: "Flight")) {
+                LabeledContent(String(localized: "From")) {
+                    TextField(String(localized: "Airport code, e.g. JFK"), text: $departureAirport)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.characters)
+                }
+                LabeledContent(String(localized: "To")) {
+                    TextField(String(localized: "Airport code, e.g. LAX"), text: $arrivalAirport)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.characters)
+                }
+            }
+
+            Section(String(localized: "Schedule")) {
+                DatePicker(
+                    String(localized: "Departure"),
+                    selection: Binding(
+                        get: { departureDate ?? defaultDepartureAnchor() },
+                        set: { departureDate = $0 }
+                    ),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                DatePicker(
+                    String(localized: "Arrival"),
+                    selection: Binding(
+                        get: { arrivalDate ?? departureDate ?? defaultDepartureAnchor() },
+                        set: { arrivalDate = $0 }
+                    ),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+            }
+
+            optionalFlightDetailsSection
+        }
     }
 
     // MARK: - Manual fallback

@@ -27,7 +27,9 @@ struct BookingsScreenView: View {
     @State private var pendingUndo: Place?
     @State private var undoTask: Task<Void, Never>?
     @State private var addBookingRoute: AddBookingRoute?
-    @State private var flightTracking = FlightTrackingService()
+    /// Shared with TripDetailView via AppRootTabView's environment — reads
+    /// the same statusesByBookingId without opening a second realtime channel.
+    @Environment(FlightTrackingService.self) private var flightTracking
     /// Trip destination timezone — every visible booking date/time on this screen
     /// is rendered in this TZ so the traveler reads the itinerary in destination-local
     /// terms. Resolved via reverse-geocoding the trip's lat/lng, mirroring `TripDetailView`.
@@ -142,10 +144,9 @@ struct BookingsScreenView: View {
         .task {
             await loadBookings()
             await refreshTripDisplayTimeZone()
-            await flightTracking.bind(tripId: trip.id)
-        }
-        .onDisappear {
-            Task { await flightTracking.unbind() }
+            // Flight tracking lifecycle is managed by TripDetailView via
+            // the shared AppRootTabView-owned FlightTrackingService instance.
+            // BookingsScreenView only reads statusesByBookingId from it.
         }
         .sheet(item: $addBookingRoute) { route in
             NavigationStack {

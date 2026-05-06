@@ -3,6 +3,9 @@
     "revenuecat": {
       "type": "http",
       "url": "https://mcp.revenuecat.ai/mcp"
+    },
+    "sentry": {
+      "url": "https://mcp.sentry.dev/mcp"
     }
   }
 }

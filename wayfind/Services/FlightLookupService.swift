@@ -39,6 +39,12 @@ struct VerifiedFlightLookup: Decodable, Hashable, Sendable {
     let departureDate: String
     let originAirportIATA: String?
     let destinationAirportIATA: String?
+    /// IANA timezone identifier for the origin airport (e.g. "America/New_York").
+    /// Used to display departure time in the airport's local time.
+    let originTimeZone: String?
+    /// IANA timezone identifier for the destination airport (e.g. "America/Los_Angeles").
+    /// Used to display arrival time in the airport's local time.
+    let destinationTimeZone: String?
     let scheduledDepartureUTC: Date
     let scheduledArrivalUTC: Date
     let terminalOrigin: String?
@@ -47,6 +53,16 @@ struct VerifiedFlightLookup: Decodable, Hashable, Sendable {
     let gateDestination: String?
     let baggageClaim: String?
     let provider: String?
+
+    /// Resolved `TimeZone` for the origin airport, falling back to UTC.
+    var resolvedOriginTimeZone: TimeZone {
+        originTimeZone.flatMap(TimeZone.init(identifier:)) ?? TimeZone(secondsFromGMT: 0)!
+    }
+
+    /// Resolved `TimeZone` for the destination airport, falling back to UTC.
+    var resolvedDestinationTimeZone: TimeZone {
+        destinationTimeZone.flatMap(TimeZone.init(identifier:)) ?? TimeZone(secondsFromGMT: 0)!
+    }
 
     init(
         carrierIATA: String,
@@ -61,13 +77,17 @@ struct VerifiedFlightLookup: Decodable, Hashable, Sendable {
         gateOrigin: String?,
         gateDestination: String?,
         baggageClaim: String?,
-        provider: String?
+        provider: String?,
+        originTimeZone: String? = nil,
+        destinationTimeZone: String? = nil
     ) {
         self.carrierIATA = carrierIATA
         self.flightNumber = flightNumber
         self.departureDate = departureDate
         self.originAirportIATA = originAirportIATA
         self.destinationAirportIATA = destinationAirportIATA
+        self.originTimeZone = originTimeZone
+        self.destinationTimeZone = destinationTimeZone
         self.scheduledDepartureUTC = scheduledDepartureUTC
         self.scheduledArrivalUTC = scheduledArrivalUTC
         self.terminalOrigin = terminalOrigin
@@ -84,6 +104,8 @@ struct VerifiedFlightLookup: Decodable, Hashable, Sendable {
         case departureDate = "departure_date"
         case originAirportIATA = "origin_airport_iata"
         case destinationAirportIATA = "destination_airport_iata"
+        case originTimeZone = "origin_timezone"
+        case destinationTimeZone = "destination_timezone"
         case scheduledDepartureUTC = "scheduled_departure_utc"
         case scheduledArrivalUTC = "scheduled_arrival_utc"
         case terminalOrigin = "terminal_origin"
@@ -101,6 +123,8 @@ struct VerifiedFlightLookup: Decodable, Hashable, Sendable {
         departureDate = try container.decode(String.self, forKey: .departureDate)
         originAirportIATA = try container.decodeIfPresent(String.self, forKey: .originAirportIATA)
         destinationAirportIATA = try container.decodeIfPresent(String.self, forKey: .destinationAirportIATA)
+        originTimeZone = try container.decodeIfPresent(String.self, forKey: .originTimeZone)
+        destinationTimeZone = try container.decodeIfPresent(String.self, forKey: .destinationTimeZone)
         terminalOrigin = try container.decodeIfPresent(String.self, forKey: .terminalOrigin)
         terminalDestination = try container.decodeIfPresent(String.self, forKey: .terminalDestination)
         gateOrigin = try container.decodeIfPresent(String.self, forKey: .gateOrigin)

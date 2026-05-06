@@ -67,9 +67,11 @@ struct TripDetailView: View {
     @State private var showCalendarOnboarding: Bool = false
     @State private var calendarSyncService: CalendarSyncService = CalendarSyncService()
     @State private var calendarSyncInFlight: Bool = false
-    /// Wave 3.3 — live-updating flight status cache for this trip's
-    /// flight bookings. Bound on `.task`; unbound on `.onDisappear`.
-    @State private var flightTracking: FlightTrackingService = FlightTrackingService()
+    /// Wave 3.3 — live-updating flight status cache. Owned by AppRootTabView
+    /// and injected via environment so TripDetailView and BookingsScreenView
+    /// share one channel instead of opening two. TripDetailView manages
+    /// bind/unbind; BookingsScreenView only reads statusesByBookingId.
+    @Environment(FlightTrackingService.self) private var flightTracking
     /// Fallback when `trip_days.timezone` is missing: trip-center geocode, else device.
     @State private var tripTimelineGeocodedTimeZone: TimeZone = .current
 
@@ -598,12 +600,15 @@ struct TripDetailView: View {
         }
         // The +ai tab posts this notification after applying an AI Day Planner
         // result. `TabView` keeps this view alive between switches, so `.task`
-        // doesn't re-run — we explicitly trigger a reload here.
+        // doesn't re-run. `loadTripData()` is intentionally omitted here —
+        // `TripRealtimeService.scheduleTimelineRefetch()` fires within 250ms
+        // of the same Supabase write and handles the data reload, so calling
+        // it again from the notification produces a duplicate 5-request burst.
+        // We only refresh photo stacks because those aren't covered by realtime.
         .onReceive(NotificationCenter.default.publisher(for: .tripActivitiesDidChange)) { note in
             guard let id = note.userInfo?[TripActivitiesNotificationKeys.tripId] as? UUID,
                   id == trip.id else { return }
             Task {
-                await viewModel?.loadTripData()
                 await refreshItineraryPhotoStacks()
             }
         }

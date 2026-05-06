@@ -449,7 +449,9 @@ struct AddBookingView: View {
                 )
             } else {
                 verifiedFlightLookup = nil
-                flightLookupState = .manualFallback
+                let hasAirports = !f.departureAirport.isEmpty && !f.arrivalAirport.isEmpty
+                let hasTimes = f.departureTime != nil && f.arrivalTime != nil
+                flightLookupState = (hasAirports && hasTimes) ? .emailImport : .manualFallback
             }
         case .hotel(let h):
             hotelName = place.name

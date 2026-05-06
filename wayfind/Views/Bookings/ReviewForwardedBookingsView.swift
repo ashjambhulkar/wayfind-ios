@@ -6,12 +6,29 @@ struct ReviewForwardedBookingsView: View {
 
     @Environment(DataService.self) private var dataService
     @State private var parsedBookings: [ParsedBooking] = []
+    @State private var dismissedIds: Set<UUID> = []
     @State private var targetDayId: UUID? = nil
     @State private var showingAddBooking = false
 
+    private var visibleBookings: [ParsedBooking] {
+        parsedBookings.filter { !dismissedIds.contains($0.id) }
+    }
+
+    private var hasPending: Bool {
+        visibleBookings.contains { $0.status == .pending }
+    }
+
     var body: some View {
         Group {
-            if parsedBookings.isEmpty {
+            if visibleBookings.isEmpty && !parsedBookings.isEmpty {
+                EmptyStateView(
+                    sfSymbol: "checkmark.circle",
+                    title: "All caught up",
+                    subtitle: "All forwarded bookings have been processed.",
+                    buttonTitle: nil,
+                    buttonAction: nil
+                )
+            } else if visibleBookings.isEmpty {
                 EmptyStateView(
                     sfSymbol: "tray",
                     title: "No forwarded bookings",
@@ -22,12 +39,13 @@ struct ReviewForwardedBookingsView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: AppSpacing.md) {
-                        ForEach(parsedBookings) { booking in
+                        ForEach(visibleBookings) { booking in
                             ParsedBookingCardView(
                                 booking: booking,
                                 onAdd: { openAddBooking() },
                                 onEdit: { openAddBooking() }
                             )
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
                     .padding(.horizontal, AppSpacing.lg)
@@ -55,6 +73,15 @@ struct ReviewForwardedBookingsView: View {
         }
         .task {
             await loadData()
+            scheduleDismissals()
+        }
+        .task(id: hasPending) {
+            guard hasPending else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                await loadData()
+                scheduleDismissals()
+            }
         }
     }
 
@@ -63,6 +90,22 @@ struct ReviewForwardedBookingsView: View {
     private func openAddBooking() {
         guard targetDayId != nil else { return }
         showingAddBooking = true
+    }
+
+    // MARK: - Dismiss confirmed cards
+
+    private func scheduleDismissals() {
+        let confirmedIds = parsedBookings
+            .filter { $0.status == .confirmed && !dismissedIds.contains($0.id) }
+            .map(\.id)
+        guard !confirmedIds.isEmpty else { return }
+
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation(.easeOut(duration: 0.35)) {
+                dismissedIds.formUnion(confirmedIds)
+            }
+        }
     }
 
     // MARK: - Data loading

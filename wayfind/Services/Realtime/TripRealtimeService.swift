@@ -65,11 +65,11 @@ final class TripRealtimeService {
     private var debounceTasks: [DebounceKey: Task<Void, Never>] = [:]
 
     private enum DebounceKey: Hashable {
-        case timeline           // trip_activities + trip_days + trip_bookings
-        case trip               // trips row
+        case timeline           // trip_activities + trip_days + trip_bookings + trips row
         case collaborators      // trip_collaborators
         case budget             // trip_expenses + expense_splits + trip_budgets + expense_settlements
         case reconnect          // backoff after CHANNEL_ERROR / TIMED_OUT
+        case fullReload         // reconnect drain: timeline + collaborators + budget in one window
     }
 
     /// Exponential-backoff bookkeeping for the channel reconnect loop. Reset
@@ -396,9 +396,10 @@ final class TripRealtimeService {
             // the view model and visibly blips open SwiftUI menus.
             if wasOffline || !hasDrainedCurrentSubscription {
                 hasDrainedCurrentSubscription = true
-                scheduleTimelineRefetch()
-                scheduleCollaboratorRefetch()
-                scheduleBudgetRefetch()
+                // Collapse all three reloads into one debounce window so a
+                // rapid reconnect burst (e.g. flaky network) doesn't fire
+                // 14 requests across three separate debounce keys.
+                scheduleFullReload()
             }
         case .subscribing:
             connectionState = .connecting
@@ -429,13 +430,25 @@ final class TripRealtimeService {
     }
 
     private func scheduleTripRefetch() {
-        scheduleDebounce(.trip, delayMs: 250) { [weak self] in
-            // TripDetailViewModel doesn't expose a trip-only refetch yet,
-            // and a `trips` row update is rare (title / dates / cover) —
-            // collapse with the timeline fetch which already re-applies
-            // any computed counts off the trip row.
+        // `trips` row updates (title, dates, cover) call the same
+        // `loadTripData()` as the timeline handlers. Using the same
+        // `.timeline` key means a concurrent activity change and a trips-row
+        // write collapse into one fetch instead of firing 10 requests.
+        scheduleDebounce(.timeline, delayMs: 250) { [weak self] in
             guard let self, let viewModel = self.viewModel else { return }
             await viewModel.loadTripData()
+        }
+    }
+
+    /// Fires timeline + collaborators + budget as a single debounce window.
+    /// Used by the `.subscribed` drain path so a reconnect burst doesn't
+    /// spread 14 requests across three independently-keyed windows.
+    private func scheduleFullReload() {
+        scheduleDebounce(.fullReload, delayMs: 350) { [weak self] in
+            guard let self, let viewModel = self.viewModel else { return }
+            await viewModel.loadTripData()
+            self.collaborationStore?.refresh()
+            if let budgetVm = self.budgetViewModel { await budgetVm.reload() }
         }
     }
 

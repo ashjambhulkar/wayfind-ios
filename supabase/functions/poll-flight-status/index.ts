@@ -166,7 +166,14 @@ async function fetchAeroDataBox(
       logEvent("provider_error", { status: res.status, flight, departureDateUTC });
       return null;
     }
-    const list = await res.json() as AeroDataBoxFlight[];
+    const text = await res.text();
+    if (!text || !text.trimStart().startsWith("[")) return null;
+    let list: AeroDataBoxFlight[];
+    try {
+      list = JSON.parse(text) as AeroDataBoxFlight[];
+    } catch {
+      return null;
+    }
     if (!Array.isArray(list) || list.length === 0) return null;
     return list[0];
   } catch (err) {

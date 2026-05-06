@@ -350,10 +350,19 @@ function parseInboundPayload(
 
 // ── Stage 3: Attachment extraction ────────────────────────────────────────
 
+interface ExtractedAttachmentSource {
+  filename: string;
+  mimeType: string;
+  bytes: Uint8Array;
+}
+
 interface AttachmentExtractionResult {
   bookings: SafeBooking[];
   modelUsed: string;
   debugEntries: AttachmentDebug[];
+  /** Attachments that successfully produced at least one booking — used to
+   *  auto-link the source PDF/image to every created trip_booking row. */
+  successfulAttachments: ExtractedAttachmentSource[];
 }
 
 async function extractFromAttachments(
@@ -363,6 +372,7 @@ async function extractFromAttachments(
   const allBookings: SafeBooking[] = [];
   let lastModelUsed = PRIMARY_MODEL;
   const debugEntries: AttachmentDebug[] = [];
+  const successfulAttachments: ExtractedAttachmentSource[] = [];
 
   const extractable = attachments.filter((a) =>
     isExtractable(a.contentType, a.filename),
@@ -424,6 +434,11 @@ async function extractFromAttachments(
       if (result.bookings.length > 0) {
         allBookings.push(...result.bookings);
         lastModelUsed = result.modelUsed;
+        successfulAttachments.push({
+          filename: att.filename,
+          mimeType: resolvedType,
+          bytes: att.bytes,
+        });
       }
       console.log(
         `${TAG} Attachment "${att.filename}": ${result.bookings.length} booking(s) via ${result.modelUsed}`,
@@ -455,7 +470,7 @@ async function extractFromAttachments(
     });
   }
 
-  return { bookings: allBookings, modelUsed: lastModelUsed, debugEntries };
+  return { bookings: allBookings, modelUsed: lastModelUsed, debugEntries, successfulAttachments };
 }
 
 // ── Stage 4: Email body extraction ────────────────────────────────────────
@@ -571,6 +586,61 @@ async function extractWithModel(
 }
 
 // ── Stage 6: Dedup + insert bookings ──────────────────────────────────────
+
+// ── Stage 6b: Auto-attach source PDFs/images to inserted bookings ─────────
+
+async function linkAttachmentsToBookings(
+  supabase: SupabaseClient,
+  attachments: ExtractedAttachmentSource[],
+  bookingIds: string[],
+  userId: string,
+): Promise<void> {
+  if (attachments.length === 0 || bookingIds.length === 0) return;
+
+  for (const att of attachments) {
+    for (const bookingId of bookingIds) {
+      const ext = att.filename.includes(".")
+        ? att.filename.split(".").pop()!.toLowerCase().slice(0, 8)
+        : att.mimeType === "application/pdf" ? "pdf" : "bin";
+      const storagePath = `${userId}/${bookingId}/${crypto.randomUUID()}.${ext}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from("booking-attachments")
+        .upload(storagePath, att.bytes, {
+          contentType: att.mimeType,
+          upsert: false,
+        });
+
+      if (uploadErr) {
+        console.error(
+          `${TAG} Storage upload failed for booking ${bookingId}: ${uploadErr.message}`,
+        );
+        continue;
+      }
+
+      const { error: insertErr } = await supabase
+        .from("trip_booking_attachments")
+        .insert({
+          booking_id: bookingId,
+          user_id: userId,
+          storage_path: storagePath,
+          original_filename: att.filename,
+          mime_type: att.mimeType,
+          file_size_bytes: att.bytes.length,
+        });
+
+      if (insertErr) {
+        console.error(
+          `${TAG} trip_booking_attachments insert failed for booking ${bookingId}: ${insertErr.message}`,
+        );
+      } else {
+        console.log(
+          `${TAG} Attached "${att.filename}" → booking ${bookingId}`,
+        );
+      }
+    }
+  }
+}
 
 interface PersistResult {
   insertedIds: string[];
@@ -832,9 +902,15 @@ serve(async (req: Request) => {
     debug.stage = "attachment_extraction";
     let allBookings: SafeBooking[] = [];
     let modelUsed = PRIMARY_MODEL;
+    let attResult: AttachmentExtractionResult = {
+      bookings: [],
+      modelUsed: PRIMARY_MODEL,
+      debugEntries: [],
+      successfulAttachments: [],
+    };
 
     if (parsed.attachments.length > 0) {
-      const attResult = await extractFromAttachments(
+      attResult = await extractFromAttachments(
         OPENAI_API_KEY!,
         parsed.attachments,
       );
@@ -902,6 +978,16 @@ serve(async (req: Request) => {
 
     debug.model.confidence_rejected = persistResult.confidenceRejected;
     debug.model.duplicate_rejected = persistResult.duplicateRejected;
+
+    // Auto-attach the source PDFs/images to every booking they produced.
+    if (persistResult.insertedIds.length > 0 && attResult.successfulAttachments.length > 0) {
+      await linkAttachmentsToBookings(
+        supabase,
+        attResult.successfulAttachments,
+        persistResult.insertedIds,
+        userId,
+      );
+    }
 
     if (persistResult.confidenceRejected === allBookings.length) {
       const errMsg =

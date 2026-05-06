@@ -54,6 +54,14 @@ final class BudgetViewModel {
     /// one. Same pattern as `TripDetailViewModel.timelineLoadGeneration`.
     private var loadGeneration = 0
 
+    /// Guards the one-per-session profile currency fetch. `reload()` is called
+    /// on every realtime burst AND after each successful mutation
+    /// (`addExpense`, `updateExpense`) — the profile currency never changes
+    /// during a session, so fetching it more than once is pure waste.
+    /// Reset to `false` is intentionally absent: `BudgetViewModel` is torn
+    /// down on trip switch, so each new trip always fetches once and caches.
+    private var hasFetchedProfileCurrency = false
+
     /// Optimistic mutation queue. We stash the in-flight mutation under its
     /// own UUID so the rollback path can find it without iterating snapshots.
     /// Empty in the steady state.
@@ -100,7 +108,10 @@ final class BudgetViewModel {
         hasLoadedAtLeastOnce = true
         lastFetchFailed = false
         isLoading = false
-        await refreshPreferredDisplayCurrencyFromProfile()
+        if !hasFetchedProfileCurrency {
+            await refreshPreferredDisplayCurrencyFromProfile()
+            hasFetchedProfileCurrency = true
+        }
     }
 
     /// Marks the last reload as failed without replacing the snapshot. Wired

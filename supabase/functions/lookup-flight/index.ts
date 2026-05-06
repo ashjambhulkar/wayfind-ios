@@ -31,9 +31,9 @@ interface AeroDataBoxFlight {
 }
 
 interface AeroDataBoxLeg {
-  airport?: { iata?: string };
-  scheduledTime?: { utc?: string };
-  revisedTime?: { utc?: string };
+  airport?: { iata?: string; timeZone?: string };
+  scheduledTime?: { utc?: string; local?: string };
+  revisedTime?: { utc?: string; local?: string };
   runwayTime?: { utc?: string };
   gate?: string;
   terminal?: string;
@@ -149,7 +149,14 @@ async function fetchAeroDataBox(
       throw new Error(`provider_${res.status}`);
     }
 
-    const list = await res.json() as AeroDataBoxFlight[];
+    const text = await res.text();
+    if (!text || !text.trimStart().startsWith("[")) return null;
+    let list: AeroDataBoxFlight[];
+    try {
+      list = JSON.parse(text) as AeroDataBoxFlight[];
+    } catch {
+      return null;
+    }
     if (!Array.isArray(list) || list.length === 0) return null;
     return list[0];
   } finally {
@@ -314,6 +321,8 @@ serve(async (req) => {
       lookup_verified: true,
       origin_airport_iata: snap.departure?.airport?.iata ?? null,
       destination_airport_iata: snap.arrival?.airport?.iata ?? null,
+      origin_timezone: snap.departure?.airport?.timeZone ?? null,
+      destination_timezone: snap.arrival?.airport?.timeZone ?? null,
       scheduled_departure_utc: scheduledDepartureUTC,
       scheduled_arrival_utc: scheduledArrivalUTC,
       terminal_origin: snap.departure?.terminal ?? null,
