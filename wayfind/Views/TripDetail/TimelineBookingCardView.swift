@@ -33,6 +33,9 @@ struct TimelineBookingCardView: View {
     /// `true` when the booking's primary date sits outside the trip's day
     /// range — the row was forced onto the first scheduled day as a fallback.
     var isOutsideTripDates: Bool = false
+    /// When this flight follows a previous flight with a layover, a short human-readable
+    /// duration string shown in an eyebrow above the card. Example: "4h 20m layover".
+    var layoverDurationText: String? = nil
 
     init(
         place: Place,
@@ -50,7 +53,8 @@ struct TimelineBookingCardView: View {
         isProUser: Bool = true,
         onUpgradeTap: (() -> Void)? = nil,
         onFlightBadgeTap: (() -> Void)? = nil,
-        isOutsideTripDates: Bool = false
+        isOutsideTripDates: Bool = false,
+        layoverDurationText: String? = nil
     ) {
         self.place = place
         self.dayNumber = dayNumber
@@ -68,6 +72,7 @@ struct TimelineBookingCardView: View {
         self.onUpgradeTap = onUpgradeTap
         self.onFlightBadgeTap = onFlightBadgeTap
         self.isOutsideTripDates = isOutsideTripDates
+        self.layoverDurationText = layoverDurationText
     }
 
     private var bookingCategory: BookingCategory {
@@ -122,6 +127,9 @@ struct TimelineBookingCardView: View {
             )
 
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                if let layover = layoverDurationText {
+                    layoverEyebrow(layover)
+                }
                 if isOutsideTripDates {
                     outsideTripDatesBanner
                 }
@@ -162,6 +170,23 @@ struct TimelineBookingCardView: View {
         .background(AppColors.appWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous))
     }
 
+    private func layoverEyebrow(_ durationText: String) -> some View {
+        HStack(spacing: AppSpacing.xs) {
+            Image(systemName: "clock")
+                .font(.appSmall.weight(.semibold))
+                .foregroundStyle(AppColors.textTertiary)
+                .accessibilityHidden(true)
+            Text("\(durationText) layover")
+                .font(.appSmall.weight(.medium))
+                .foregroundStyle(AppColors.textTertiary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xs)
+    }
+
     // MARK: - Card surface
 
     @ViewBuilder
@@ -176,6 +201,8 @@ struct TimelineBookingCardView: View {
                 arrivalTime: flightArrivalTime(details),
                 duration: flightDuration(details),
                 displayTimeZone: timelineDisplayTimeZone,
+                departureTimeZone: details.resolvedDepartureTimeZone(fallback: timelineDisplayTimeZone),
+                arrivalTimeZone: details.resolvedArrivalTimeZone(fallback: timelineDisplayTimeZone),
                 scheduleAccent: timelineScheduleAccent,
                 statusText: flightStatusText ?? "Flight",
                 showFlightStatusBadge: shouldShowFlightBadge,
@@ -1205,9 +1232,12 @@ private struct TimelineFlightBookingPassCard: View {
     let departureTime: Date?
     let arrivalTime: Date?
     let duration: String?
-    /// Trip destination timezone — every visible time on this card is rendered in this TZ
-    /// so the traveler reads the itinerary in destination-local terms (matching the day header).
+    /// Fallback timezone used when per-airport timezones are not available.
     var displayTimeZone: TimeZone = .current
+    /// Airport-specific timezone for the departure endpoint.
+    var departureTimeZone: TimeZone = .current
+    /// Airport-specific timezone for the arrival endpoint.
+    var arrivalTimeZone: TimeZone = .current
     /// Route / plane glyph tint aligned with spine (local departure time bucket).
     let scheduleAccent: Color
     /// Supplementary summary for the card-level VoiceOver label when the
@@ -1243,9 +1273,22 @@ private struct TimelineFlightBookingPassCard: View {
             .accessibilityLabel(accessibilitySummary)
     }
 
+    private var resolvedDepartureTimeZone: TimeZone { departureTimeZone }
+    private var resolvedArrivalTimeZone: TimeZone { arrivalTimeZone }
+
+    private func depTimeLabel(_ instant: Date) -> String {
+        instant.timeFormatted(timeZone: resolvedDepartureTimeZone)
+    }
+
+    private func arrTimeLabel(_ instant: Date) -> String {
+        instant.timeFormatted(timeZone: resolvedArrivalTimeZone)
+    }
+
     private var accessibilitySummary: String {
-        let dep = departureTime?.timeFormatted(timeZone: displayTimeZone) ?? "departure time unknown"
-        let arr = arrivalTime?.timeFormatted(timeZone: displayTimeZone) ?? "arrival time unknown"
+        let depTZ = resolvedDepartureTimeZone
+        let arrTZ = resolvedArrivalTimeZone
+        let dep = departureTime.map { "\($0.timeFormatted(timeZone: depTZ)) \($0.timeZoneAbbreviation(timeZone: depTZ))" } ?? "departure time unknown"
+        let arr = arrivalTime.map { "\($0.timeFormatted(timeZone: arrTZ)) \($0.timeZoneAbbreviation(timeZone: arrTZ))" } ?? "arrival time unknown"
         let dur = duration.map { ", duration \($0)" } ?? ""
         return "Flight \(airlineName), \(departureAirport) to \(arrivalAirport), departs \(dep), arrives \(arr)\(dur). \(statusText)"
     }
@@ -1293,17 +1336,26 @@ private struct TimelineFlightBookingPassCard: View {
         }
     }
 
-    /// Row 1: departure icon + time (leading) · center plane · arrival time + arrival icon (trailing).
+    /// Row 1: departure icon + time + tz abbreviation (leading) · center plane · arrival time + tz + icon (trailing).
     private var rowTimesAndCenterPlane: some View {
         HStack(alignment: .center, spacing: AppSpacing.sm) {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "airplane.departure")
                     .font(.appFootnote.weight(.semibold))
                     .foregroundStyle(scheduleAccent)
-                Text(departureTime?.timeFormatted(timeZone: displayTimeZone) ?? "Time TBD")
-                    .font(.appFootnote.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(AppColors.textSecondary)
+                if let dep = departureTime {
+                    Text(depTimeLabel(dep))
+                        .font(.appFootnote.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(AppColors.textSecondary)
+                    Text(dep.timeZoneAbbreviation(timeZone: resolvedDepartureTimeZone))
+                        .font(.appSmall)
+                        .foregroundStyle(AppColors.textTertiary)
+                } else {
+                    Text("Time TBD")
+                        .font(.appFootnote.weight(.semibold))
+                        .foregroundStyle(AppColors.textSecondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1313,10 +1365,27 @@ private struct TimelineFlightBookingPassCard: View {
                 .frame(width: LayoutMetrics.centerRouteColumnWidth, alignment: .center)
 
             HStack(spacing: AppSpacing.xs) {
-                Text(arrivalTime?.timeFormatted(timeZone: displayTimeZone) ?? "Time TBD")
-                    .font(.appFootnote.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(AppColors.textSecondary)
+                if let arr = arrivalTime {
+                    if let depDate = departureTime,
+                       let offsetLabel = Date.dayOffsetLabel(
+                            from: depDate, in: resolvedDepartureTimeZone,
+                            to: arr, in: resolvedArrivalTimeZone) {
+                        Text(offsetLabel)
+                            .font(.appSmall.weight(.semibold))
+                            .foregroundStyle(AppColors.appPrimary)
+                    }
+                    Text(arr.timeZoneAbbreviation(timeZone: resolvedArrivalTimeZone))
+                        .font(.appSmall)
+                        .foregroundStyle(AppColors.textTertiary)
+                    Text(arrTimeLabel(arr))
+                        .font(.appFootnote.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(AppColors.textSecondary)
+                } else {
+                    Text("Time TBD")
+                        .font(.appFootnote.weight(.semibold))
+                        .foregroundStyle(AppColors.textSecondary)
+                }
                 Image(systemName: "airplane.arrival")
                     .font(.appFootnote.weight(.semibold))
                     .foregroundStyle(scheduleAccent)

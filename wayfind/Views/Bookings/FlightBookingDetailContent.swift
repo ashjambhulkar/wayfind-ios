@@ -130,6 +130,7 @@ struct FlightBookingDetailContent: View {
                 airportBlock(
                     code: details.departureAirport,
                     instant: details.departureTime,
+                    airportTimeZone: details.resolvedDepartureTimeZone(fallback: timeZone),
                     alignment: .leading
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -139,7 +140,14 @@ struct FlightBookingDetailContent: View {
                 airportBlock(
                     code: details.arrivalAirport,
                     instant: details.arrivalTime,
-                    alignment: .trailing
+                    airportTimeZone: details.resolvedArrivalTimeZone(fallback: timeZone),
+                    alignment: .trailing,
+                    dayOffsetLabel: {
+                        guard let dep = details.departureTime, let arr = details.arrivalTime else { return nil }
+                        return Date.dayOffsetLabel(
+                            from: dep, in: details.resolvedDepartureTimeZone(fallback: timeZone),
+                            to: arr, in: details.resolvedArrivalTimeZone(fallback: timeZone))
+                    }()
                 )
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -177,7 +185,13 @@ struct FlightBookingDetailContent: View {
         .accessibilityLabel(String(localized: "In flight"))
     }
 
-    private func airportBlock(code: String, instant: Date?, alignment: HorizontalAlignment) -> some View {
+    private func airportBlock(
+        code: String,
+        instant: Date?,
+        airportTimeZone: TimeZone,
+        alignment: HorizontalAlignment,
+        dayOffsetLabel: String? = nil
+    ) -> some View {
         let iata = trimmedUpper(code)
         return VStack(alignment: alignment, spacing: AppSpacing.xs) {
             Text(iata.isEmpty ? "—" : iata)
@@ -187,11 +201,22 @@ struct FlightBookingDetailContent: View {
                 .lineLimit(1)
 
             if let instant {
-                Text(instant.timeFormatted(timeZone: timeZone))
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-                    .monospacedDigit()
-                Text(instant.shortFormatted(timeZone: timeZone))
+                HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+                    if let label = dayOffsetLabel {
+                        Text(label)
+                            .font(.appSmall.weight(.semibold))
+                            .foregroundStyle(AppColors.appPrimary)
+                    }
+                    Text(instant.timeFormatted(timeZone: airportTimeZone))
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                        .monospacedDigit()
+                    Text(instant.timeZoneAbbreviation(timeZone: airportTimeZone))
+                        .font(.appSmall.weight(.medium))
+                        .foregroundStyle(AppColors.textTertiary)
+                        .lineLimit(1)
+                }
+                Text(instant.shortFormatted(timeZone: airportTimeZone))
                     .font(.appCaption)
                     .foregroundStyle(AppColors.textSecondary)
             } else {

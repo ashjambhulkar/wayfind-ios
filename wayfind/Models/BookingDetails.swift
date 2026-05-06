@@ -15,6 +15,10 @@ struct FlightDetails: Codable, Hashable {
     var arrivalAirport: String
     var departureTime: Date?
     var arrivalTime: Date?
+    /// IANA timezone identifier for the departure airport (e.g. "America/New_York").
+    var departureTimezone: String? = nil
+    /// IANA timezone identifier for the arrival airport (e.g. "America/Los_Angeles").
+    var arrivalTimezone: String? = nil
     var terminal: String
     var gate: String
     var seat: String
@@ -23,6 +27,26 @@ struct FlightDetails: Codable, Hashable {
     var terminalDestination: String? = nil
     var gateDestination: String? = nil
     var baggageClaim: String? = nil
+
+    /// Resolves the departure timezone using the three-tier chain:
+    ///   1. Stored IANA identifier (from AeroDataBox or AI extraction).
+    ///   2. Static IATA→IANA table bundled with the app.
+    ///   3. Caller-supplied fallback (e.g. trip-level display timezone).
+    func resolvedDepartureTimeZone(fallback: TimeZone) -> TimeZone {
+        if let stored = departureTimezone.flatMap({ TimeZone(identifier: $0) }) { return stored }
+        if let static_ = AirportTimezones.timeZone(forIATA: departureAirport) { return static_ }
+        return fallback
+    }
+
+    /// Resolves the arrival timezone using the three-tier chain:
+    ///   1. Stored IANA identifier (from AeroDataBox or AI extraction).
+    ///   2. Static IATA→IANA table bundled with the app.
+    ///   3. Caller-supplied fallback (e.g. trip-level display timezone).
+    func resolvedArrivalTimeZone(fallback: TimeZone) -> TimeZone {
+        if let stored = arrivalTimezone.flatMap({ TimeZone(identifier: $0) }) { return stored }
+        if let static_ = AirportTimezones.timeZone(forIATA: arrivalAirport) { return static_ }
+        return fallback
+    }
 }
 
 struct HotelDetails: Codable, Hashable {
@@ -137,6 +161,8 @@ private struct FlightTagged: Encodable {
         try container.encode(details.arrivalAirport, forKey: .arrivalAirport)
         try container.encodeIfPresent(details.departureTime, forKey: .departureTime)
         try container.encodeIfPresent(details.arrivalTime, forKey: .arrivalTime)
+        try container.encodeIfPresent(details.departureTimezone, forKey: .departureTimezone)
+        try container.encodeIfPresent(details.arrivalTimezone, forKey: .arrivalTimezone)
         try container.encode(details.terminal, forKey: .terminal)
         try container.encode(details.gate, forKey: .gate)
         try container.encode(details.seat, forKey: .seat)
@@ -156,6 +182,8 @@ private struct FlightTagged: Encodable {
         case arrivalAirport
         case departureTime
         case arrivalTime
+        case departureTimezone
+        case arrivalTimezone
         case terminal
         case gate
         case seat

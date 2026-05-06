@@ -6,6 +6,7 @@ import {
   initSentry,
   safeLog,
 } from "../_shared/observability.ts";
+import { cacheAirportTimezones } from "../_shared/flight_enrichment.ts";
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -312,6 +313,23 @@ serve(async (req) => {
       origin: snap.departure?.airport?.iata ?? null,
       destination: snap.arrival?.airport?.iata ?? null,
     });
+
+    // Persist IATA→IANA mappings to the cache so future enrichment skips
+    // the AeroDataBox call for these airports.
+    if (audits) {
+      const tzEntries: Array<{ iata: string; iana: string }> = [];
+      const depIata = snap.departure?.airport?.iata;
+      const depTz = snap.departure?.airport?.timeZone;
+      const arrIata = snap.arrival?.airport?.iata;
+      const arrTz = snap.arrival?.airport?.timeZone;
+      if (depIata && depTz) tzEntries.push({ iata: depIata, iana: depTz });
+      if (arrIata && arrTz) tzEntries.push({ iata: arrIata, iana: arrTz });
+      if (tzEntries.length > 0) {
+        await cacheAirportTimezones(audits, tzEntries).catch(() => {
+          // Non-critical; don't fail the response if the cache write fails.
+        });
+      }
+    }
 
     return json({
       status: "found",

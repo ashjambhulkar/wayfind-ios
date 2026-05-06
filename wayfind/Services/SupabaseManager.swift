@@ -2482,6 +2482,8 @@ final class SupabaseManager {
         let flight_number: String?
         let origin_airport_iata: String?
         let destination_airport_iata: String?
+        let departure_tz: String?
+        let arrival_tz: String?
         let lookup_verified: Bool?
         let lookup_status: String?
         let terminal: String?
@@ -2567,6 +2569,8 @@ final class SupabaseManager {
         let flight_number: String?
         let origin_airport_iata: String?
         let destination_airport_iata: String?
+        let departure_tz: String?
+        let arrival_tz: String?
         let lookup_verified: Bool?
         let lookup_status: String?
         let terminal: String?
@@ -2798,6 +2802,8 @@ final class SupabaseManager {
                 arrivalAirport: json?.destination_airport_iata ?? row.end_location ?? "",
                 departureTime: start,
                 arrivalTime: end,
+                departureTimezone: json?.departure_tz,
+                arrivalTimezone: json?.arrival_tz,
                 terminal: json?.terminal ?? "",
                 gate: json?.gate ?? "",
                 seat: json?.seat ?? "",
@@ -3158,6 +3164,8 @@ final class SupabaseManager {
                     flight_number: flightNumber,
                     origin_airport_iata: trimmedOrNil(flight.departureAirport),
                     destination_airport_iata: trimmedOrNil(flight.arrivalAirport),
+                    departure_tz: flight.departureTimezone,
+                    arrival_tz: flight.arrivalTimezone,
                     lookup_verified: flight.lookupVerified,
                     lookup_status: flight.lookupStatus ?? (flight.lookupVerified ? "verified" : "manual"),
                     terminal: trimmedOrNil(flight.terminal),
@@ -3188,6 +3196,8 @@ final class SupabaseManager {
                     flight_number: nil,
                     origin_airport_iata: nil,
                     destination_airport_iata: nil,
+                    departure_tz: nil,
+                    arrival_tz: nil,
                     lookup_verified: nil,
                     lookup_status: nil,
                     terminal: nil,
@@ -3218,6 +3228,8 @@ final class SupabaseManager {
                     flight_number: nil,
                     origin_airport_iata: nil,
                     destination_airport_iata: nil,
+                    departure_tz: nil,
+                    arrival_tz: nil,
                     lookup_verified: nil,
                     lookup_status: nil,
                     terminal: nil,
@@ -3247,6 +3259,8 @@ final class SupabaseManager {
                     flight_number: nil,
                     origin_airport_iata: nil,
                     destination_airport_iata: nil,
+                    departure_tz: nil,
+                    arrival_tz: nil,
                     lookup_verified: nil,
                     lookup_status: nil,
                     terminal: nil,
@@ -3276,6 +3290,8 @@ final class SupabaseManager {
                     flight_number: nil,
                     origin_airport_iata: nil,
                     destination_airport_iata: nil,
+                    departure_tz: nil,
+                    arrival_tz: nil,
                     lookup_verified: nil,
                     lookup_status: nil,
                     terminal: nil,
@@ -3305,6 +3321,8 @@ final class SupabaseManager {
                     flight_number: nil,
                     origin_airport_iata: nil,
                     destination_airport_iata: nil,
+                    departure_tz: nil,
+                    arrival_tz: nil,
                     lookup_verified: nil,
                     lookup_status: nil,
                     terminal: nil,
@@ -3344,6 +3362,8 @@ final class SupabaseManager {
             flight_number: nil,
             origin_airport_iata: nil,
             destination_airport_iata: nil,
+            departure_tz: nil,
+            arrival_tz: nil,
             lookup_verified: nil,
             lookup_status: nil,
             terminal: nil,

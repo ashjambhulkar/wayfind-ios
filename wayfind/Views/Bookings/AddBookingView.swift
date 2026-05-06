@@ -36,6 +36,10 @@ struct AddBookingView: View {
     /// Dedupes automatic flight lookup when airline / number / date settle.
     @State private var flightAutoLookupSignature: String?
     @State private var showFlightAirlinePicker = false
+    /// Per-airport timezones resolved from the static IATA table as the user types.
+    /// The verified AeroDataBox TZ takes precedence when available (applied in makePlace).
+    @State private var resolvedDepartureTZ: TimeZone? = nil
+    @State private var resolvedArrivalTZ: TimeZone? = nil
 
     @State private var hotelName = ""
     @State private var hotelCheckIn: Date? = nil
@@ -179,7 +183,9 @@ struct AddBookingView: View {
                             flightLookupState = .manualFallback
                             flightLookupMessage = nil
                         },
-                        onResetLookup: resetFlightLookup
+                        onResetLookup: resetFlightLookup,
+                        resolvedDepartureTZ: verifiedFlightLookup?.resolvedOriginTimeZone ?? resolvedDepartureTZ,
+                        resolvedArrivalTZ: verifiedFlightLookup?.resolvedDestinationTimeZone ?? resolvedArrivalTZ
                     )
                 case .hotel:
                     HotelFormView(
@@ -303,6 +309,22 @@ struct AddBookingView: View {
         .onChange(of: flightCarrierIATA) { _, _ in tryAutoFlightLookup() }
         .onChange(of: flightNumber) { _, _ in tryAutoFlightLookup() }
         .onChange(of: flightDepartureDate) { _, _ in tryAutoFlightLookup() }
+        .onChange(of: flightDepartureAirport) { _, newCode in
+            let old = resolvedDepartureTZ
+            let new = AirportTimezones.timeZone(forIATA: newCode)
+            resolvedDepartureTZ = new
+            if let old, let new, old != new, let date = flightDepartureDate {
+                flightDepartureDate = date.rebased(from: old, to: new)
+            }
+        }
+        .onChange(of: flightArrivalAirport) { _, newCode in
+            let old = resolvedArrivalTZ
+            let new = AirportTimezones.timeZone(forIATA: newCode)
+            resolvedArrivalTZ = new
+            if let old, let new, old != new, let date = flightArrivalDate {
+                flightArrivalDate = date.rebased(from: old, to: new)
+            }
+        }
         .environment(\.timeZone, displayTimeZone)
         .environment(\.calendar, tripCalendar)
         .sheet(isPresented: $showFlightAirlinePicker) {
@@ -592,15 +614,21 @@ struct AddBookingView: View {
             case .verifiedResult:
                 return verifiedFlightLookup != nil
             case .manualFallback:
-                return !flightAirline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    && !flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    && !flightDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    && !flightArrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                guard !flightAirline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !flightDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !flightArrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else { return false }
+                if let dep = flightDepartureDate, let arr = flightArrivalDate, arr <= dep { return false }
+                return true
             case .emailImport:
-                return !flightAirline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    && !flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    && !flightDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    && !flightArrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                guard !flightAirline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !flightDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !flightArrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else { return false }
+                if let dep = flightDepartureDate, let arr = flightArrivalDate, arr <= dep { return false }
+                return true
             case .lookupInput, .lookingUp:
                 return false
             }
@@ -793,6 +821,12 @@ struct AddBookingView: View {
             let arrivalForSave: Date? = flightArrivalForSave()
             let verified = verifiedFlightLookup
             let isVerified = flightLookupState == .verifiedResult && verified != nil
+            let departureTZIdentifier = verified?.originTimeZone
+                ?? resolvedDepartureTZ?.identifier
+                ?? AirportTimezones.identifier(forIATA: verified?.originAirportIATA ?? flightDepartureAirport)
+            let arrivalTZIdentifier = verified?.destinationTimeZone
+                ?? resolvedArrivalTZ?.identifier
+                ?? AirportTimezones.identifier(forIATA: verified?.destinationAirportIATA ?? flightArrivalAirport)
             let details = FlightDetails(
                 airline: flightAirline,
                 carrierIATA: verified?.carrierIATA ?? normalizedCarrierIATA(),
@@ -801,6 +835,8 @@ struct AddBookingView: View {
                 arrivalAirport: verified?.destinationAirportIATA ?? flightArrivalAirport,
                 departureTime: verified?.scheduledDepartureUTC ?? flightDepartureDate,
                 arrivalTime: arrivalForSave,
+                departureTimezone: departureTZIdentifier,
+                arrivalTimezone: arrivalTZIdentifier,
                 terminal: flightTerminal,
                 gate: flightGate,
                 seat: flightSeat,

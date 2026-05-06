@@ -30,6 +30,7 @@ import {
   initSentry,
   safeLog,
 } from "../_shared/observability.ts";
+import { cacheAirportTimezones } from "../_shared/flight_enrichment.ts";
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -85,7 +86,7 @@ interface AeroDataBoxFlight {
 }
 
 interface AeroDataBoxLeg {
-  airport?: { iata?: string };
+  airport?: { iata?: string; timeZone?: string };
   scheduledTime?: { utc?: string };
   revisedTime?: { utc?: string };
   runwayTime?: { utc?: string };
@@ -502,6 +503,50 @@ serve(async (req) => {
 
     await sendPush(client, row, update);
     processed += 1;
+
+    // Opportunistically write per-airport IANA TZs back to trip_bookings.details_json
+    // when AeroDataBox returns them and the booking doesn't already have them.
+    if (snap) {
+      const depIata = snap.departure?.airport?.iata;
+      const depTz   = snap.departure?.airport?.timeZone;
+      const arrIata = snap.arrival?.airport?.iata;
+      const arrTz   = snap.arrival?.airport?.timeZone;
+
+      // Cache in airport_timezones table (non-blocking).
+      const tzEntries: Array<{ iata: string; iana: string }> = [];
+      if (depIata && depTz) tzEntries.push({ iata: depIata, iana: depTz });
+      if (arrIata && arrTz) tzEntries.push({ iata: arrIata, iana: arrTz });
+      if (tzEntries.length > 0) {
+        cacheAirportTimezones(client, tzEntries).catch(() => {/* non-critical */});
+      }
+
+      // Write TZs back to trip_bookings.details_json only if missing.
+      if (depTz || arrTz) {
+        client
+          .from("trip_bookings")
+          .select("id, details_json")
+          .eq("id", row.booking_id)
+          .maybeSingle()
+          .then(({ data: booking }) => {
+            if (!booking) return;
+            const details = (booking.details_json ?? {}) as Record<string, unknown>;
+            const needsUpdate = (depTz && !details["departure_tz"]) ||
+                                (arrTz && !details["arrival_tz"]);
+            if (!needsUpdate) return;
+            const patch: Record<string, unknown> = { ...details };
+            if (depTz && !patch["departure_tz"]) patch["departure_tz"] = depTz;
+            if (arrTz && !patch["arrival_tz"])   patch["arrival_tz"]   = arrTz;
+            client
+              .from("trip_bookings")
+              .update({ details_json: patch })
+              .eq("id", row.booking_id)
+              .then(({ error: patchErr }) => {
+                if (patchErr) logEvent("tz_writeback_error", { booking_id: row.booking_id, error: patchErr.message });
+                else logEvent("tz_writeback_ok", { booking_id: row.booking_id, depTz, arrTz });
+              });
+          });
+      }
+    }
 
     // Respect the day budget mid-loop too — a flood of new bookings
     // can otherwise blow past the cap inside a single tick.

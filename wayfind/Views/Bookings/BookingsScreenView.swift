@@ -840,39 +840,29 @@ private struct FlightBookingPassCard: View {
     }
 
     private var topPanel: some View {
-        VStack(spacing: AppSpacing.md) {
-            HStack(alignment: .top) {
-                airportBlock(
-                    airport: departureAirport,
-                    city: departureCity,
-                    time: departureTime?.timeFormatted(timeZone: displayTimeZone)
-                )
+        HStack(alignment: .top) {
+            airportBlock(
+                airport: departureAirport,
+                time: departureTime?.timeFormatted(timeZone: details.resolvedDepartureTimeZone(fallback: displayTimeZone)),
+                date: departureTime,
+                dateTZ: details.resolvedDepartureTimeZone(fallback: displayTimeZone)
+            )
 
-                Spacer(minLength: AppSpacing.md)
+            Spacer(minLength: AppSpacing.md)
 
-                routeArc
-                    .frame(maxWidth: 150)
-                    .padding(.top, AppSpacing.xs)
+            routeArc
+                .frame(maxWidth: 150)
+                .padding(.top, AppSpacing.xs)
 
-                Spacer(minLength: AppSpacing.md)
+            Spacer(minLength: AppSpacing.md)
 
-                airportBlock(
-                    airport: arrivalAirport,
-                    city: arrivalCity,
-                    time: arrivalTime?.timeFormatted(timeZone: displayTimeZone),
-                    alignment: .trailing
-                )
-            }
-
-            HStack {
-                flightStatusChip
-                Spacer(minLength: AppSpacing.sm)
-                if details.lookupVerified {
-                    Label("Verified", systemImage: "checkmark.seal.fill")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.82))
-                }
-            }
+            airportBlock(
+                airport: arrivalAirport,
+                time: arrivalTime?.timeFormatted(timeZone: details.resolvedArrivalTimeZone(fallback: displayTimeZone)),
+                date: arrivalTime,
+                dateTZ: details.resolvedArrivalTimeZone(fallback: displayTimeZone),
+                alignment: .trailing
+            )
         }
         .padding(AppSpacing.lg)
         .background(flightHeaderBackground)
@@ -889,9 +879,15 @@ private struct FlightBookingPassCard: View {
                 Text(airlineDisplayName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
-                    .lineLimit(2)
+                    .lineLimit(1)
                     .minimumScaleFactor(0.82)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                flightStatusChip
+                if details.lookupVerified {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.82))
+                }
             }
 
             HStack(alignment: .top, spacing: AppSpacing.lg) {
@@ -982,8 +978,9 @@ private struct FlightBookingPassCard: View {
 
     private func airportBlock(
         airport: String,
-        city: String?,
         time: String?,
+        date: Date?,
+        dateTZ: TimeZone,
         alignment: HorizontalAlignment = .leading
     ) -> some View {
         VStack(alignment: alignment, spacing: 3) {
@@ -1005,9 +1002,9 @@ private struct FlightBookingPassCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
 
-            Text(city ?? "Airport")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.66))
+            Text(date?.shortFormatted(timeZone: dateTZ) ?? "Date TBD")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.82))
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
@@ -1028,14 +1025,6 @@ private struct FlightBookingPassCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var departureCity: String? {
-        airportCity(from: details.departureAirport)
-    }
-
-    private var arrivalCity: String? {
-        airportCity(from: details.arrivalAirport)
-    }
-
     private var accessibilitySummary: String {
         [
             airlineDisplayName,
@@ -1043,12 +1032,6 @@ private struct FlightBookingPassCard: View {
             statusTitle,
             "confirmation \(confirmationCode)"
         ].joined(separator: ", ")
-    }
-
-    private func airportCity(from value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.count > 3 else { return nil }
-        return trimmed
     }
 
     private func preferred(_ first: String?, _ second: String?, fallback: String) -> String {

@@ -30,9 +30,16 @@ struct FlightFormView: View {
     let onShowAirlinePicker: () -> Void
     let onUseManualEntry: () -> Void
     let onResetLookup: () -> Void
+    /// Resolved per-airport timezones from the static IATA table.
+    /// When set, DatePickers display wall-clock time in the airport's local timezone.
+    var resolvedDepartureTZ: TimeZone? = nil
+    var resolvedArrivalTZ: TimeZone? = nil
 
     @Environment(\.calendar) private var calendar
     @Environment(\.timeZone) private var timeZone
+
+    private var departureDatePickerTZ: TimeZone { resolvedDepartureTZ ?? timeZone }
+    private var arrivalDatePickerTZ: TimeZone { resolvedArrivalTZ ?? timeZone }
 
     private var accent: Color { BookingCategory.flight.color }
 
@@ -236,25 +243,7 @@ struct FlightFormView: View {
                 }
             }
 
-            Section(String(localized: "Schedule")) {
-                DatePicker(
-                    String(localized: "Departure"),
-                    selection: Binding(
-                        get: { departureDate ?? defaultDepartureAnchor() },
-                        set: { departureDate = $0 }
-                    ),
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-                DatePicker(
-                    String(localized: "Arrival"),
-                    selection: Binding(
-                        get: { arrivalDate ?? departureDate ?? defaultDepartureAnchor() },
-                        set: { arrivalDate = $0 }
-                    ),
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-            }
-
+            scheduleSection
             optionalFlightDetailsSection
         }
     }
@@ -290,26 +279,64 @@ struct FlightFormView: View {
                 }
             }
 
-            Section(String(localized: "Schedule")) {
-                DatePicker(
-                    String(localized: "Departure"),
-                    selection: Binding(
-                        get: { departureDate ?? defaultDepartureAnchor() },
-                        set: { departureDate = $0 }
-                    ),
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-                DatePicker(
-                    String(localized: "Arrival"),
-                    selection: Binding(
-                        get: { arrivalDate ?? departureDate ?? defaultDepartureAnchor() },
-                        set: { arrivalDate = $0 }
-                    ),
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-            }
-
+            scheduleSection
             optionalFlightDetailsSection
+        }
+    }
+
+    // MARK: - Shared TZ-aware schedule section
+
+    private var scheduleSection: some View {
+        Section {
+            DatePicker(
+                String(localized: "Departure"),
+                selection: Binding(
+                    get: { departureDate ?? defaultDepartureAnchor() },
+                    set: { departureDate = $0 }
+                ),
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .environment(\.timeZone, departureDatePickerTZ)
+            .environment(\.calendar, Calendar(identifier: .gregorian).with(timeZone: departureDatePickerTZ))
+
+            DatePicker(
+                String(localized: "Arrival"),
+                selection: Binding(
+                    get: { arrivalDate ?? departureDate ?? defaultDepartureAnchor() },
+                    set: { arrivalDate = $0 }
+                ),
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .environment(\.timeZone, arrivalDatePickerTZ)
+            .environment(\.calendar, Calendar(identifier: .gregorian).with(timeZone: arrivalDatePickerTZ))
+        } header: {
+            Text(String(localized: "Schedule"))
+        } footer: {
+            scheduleFooterCaption
+        }
+    }
+
+    @ViewBuilder
+    private var scheduleFooterCaption: some View {
+        let depCode = departureAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let arrCode = arrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let depLabel = resolvedDepartureTZ.map { "\(depCode) · \($0.identifier)" }
+        let arrLabel = resolvedArrivalTZ.map { "\(arrCode) · \($0.identifier)" }
+        if depLabel != nil || arrLabel != nil {
+            VStack(alignment: .leading, spacing: 2) {
+                if let d = depLabel {
+                    Text("Departure: \(d)")
+                }
+                if let a = arrLabel {
+                    Text("Arrival: \(a)")
+                }
+            }
+            .font(.appSmall)
+            .foregroundStyle(AppColors.textTertiary)
+        } else {
+            Text(String(localized: "Enter airport codes above to show local times."))
+                .font(.appSmall)
+                .foregroundStyle(AppColors.textTertiary)
         }
     }
 

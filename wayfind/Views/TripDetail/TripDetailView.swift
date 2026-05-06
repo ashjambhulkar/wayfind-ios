@@ -1154,7 +1154,8 @@ struct TripDetailView: View {
                                         flightTint: flightTint(for: place),
                                         isProUser: isProUserForFlightTracking,
                                         onUpgradeTap: { presentFlightPaywall() },
-                                        isOutsideTripDates: viewModel.isBookingOutsideTripDates(place, timelineTimeZone: dayTZ)
+                                        isOutsideTripDates: viewModel.isBookingOutsideTripDates(place, timelineTimeZone: dayTZ),
+                                        layoverDurationText: layoverDuration(at: index, in: timelineRows)
                                     )
                                     .onTapGesture {
                                         selectedPlacePrevious = index > 0 ? timelineRows[index - 1].place : nil
@@ -1898,6 +1899,22 @@ extension TripDetailView {
     /// Look up a `FlightStatus` for the given booking row, if we have
     /// one cached. Booking IDs come from `Place.id` for booking rows
     /// (see `placeFromBooking` in the viewmodel).
+    /// Returns a compact layover duration string when `timelineRows[index]` is a flight
+    /// that immediately follows another flight in the list. Returns `nil` otherwise.
+    fileprivate func layoverDuration(at index: Int, in rows: [TripTimelineDisplayRow]) -> String? {
+        guard index > 0 else { return nil }
+        let current = rows[index].place
+        let previous = rows[index - 1].place
+        guard case .flight(let currFlight) = current.bookingDetails,
+              case .flight(let prevFlight) = previous.bookingDetails,
+              let prevArrival = prevFlight.arrivalTime,
+              let currDep = currFlight.departureTime
+        else { return nil }
+        let interval = currDep.timeIntervalSince(prevArrival)
+        guard interval > 0, interval < 48 * 3600 else { return nil }
+        return interval.compactDurationLabel
+    }
+
     fileprivate func flightStatus(for place: Place) -> FlightStatus? {
         flightTracking.statusesByBookingId[place.id]
     }

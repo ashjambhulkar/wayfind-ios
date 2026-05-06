@@ -18,6 +18,8 @@ export const ALLOWED_DETAILS_KEYS = new Set([
   "seat",
   "terminal",
   "gate",
+  "departure_tz",
+  "arrival_tz",
   "car_type",
   "license_plate",
   "room_type",
@@ -73,6 +75,7 @@ Return ONLY a valid JSON object with a top-level "bookings" array:
 Rules:
 - Return one entry per distinct leg/segment/reservation. A round-trip flight = 2 entries. Multiple hotel nights at different properties = separate entries. Same hotel, one stay = 1 entry.
 - Flights: title "ORIGIN → DESTINATION" with airport codes when possible. Use ONLY the IATA airport code (e.g. "MCO", "JFK") in start_location and end_location — never append terminal or gate info there. Put terminal in details_json.terminal instead.
+- FLIGHT TIMES (critical): starts_at MUST use the departure airport's IANA timezone. ends_at MUST use the arrival airport's IANA timezone. Never apply the same timezone offset to both endpoints. Store the IANA timezone in details_json.departure_tz (e.g. "America/New_York") and details_json.arrival_tz (e.g. "America/Los_Angeles"). Examples: JFK/LGA/EWR → America/New_York; LAX/SFO/SJC → America/Los_Angeles; ORD/MDW → America/Chicago; PHX → America/Phoenix (no DST, always UTC-7); LHR/LGW → Europe/London; CDG/ORY → Europe/Paris; NRT/HND → Asia/Tokyo; DXB → Asia/Dubai. Apply DST correctly for the flight date (e.g. US clocks spring forward on the 2nd Sunday of March, fall back on the 1st Sunday of November; in November New York is EST=UTC-5 not EDT=UTC-4; LA is PST=UTC-8 not PDT=UTC-7).
 - Lodging: property name as title; end_location often null.
 - Restaurant / concert / theater / tour: venue in start_location; end_location usually null.
 - Train / bus / ferry: origin and destination in start_location / end_location.
@@ -114,6 +117,7 @@ Return ONLY a valid JSON object with a top-level "bookings" array:
 Rules:
 - Return one entry per distinct leg/segment/reservation. A round-trip flight = 2 entries. Multiple hotel nights at different properties = separate entries. Same hotel, one stay = 1 entry.
 - Flights: title "ORIGIN → DESTINATION" with airport codes when possible. Use ONLY the IATA airport code (e.g. "MCO", "JFK") in start_location and end_location — never append terminal or gate info there. Put terminal in details_json.terminal instead.
+- FLIGHT TIMES (critical): starts_at MUST use the departure airport's IANA timezone. ends_at MUST use the arrival airport's IANA timezone. Never apply the same timezone offset to both endpoints. Store the IANA timezone in details_json.departure_tz (e.g. "America/New_York") and details_json.arrival_tz (e.g. "America/Los_Angeles"). Examples: JFK/LGA/EWR → America/New_York; LAX/SFO/SJC → America/Los_Angeles; ORD/MDW → America/Chicago; PHX → America/Phoenix (no DST, always UTC-7); LHR/LGW → Europe/London; CDG/ORY → Europe/Paris; NRT/HND → Asia/Tokyo; DXB → Asia/Dubai. Apply DST correctly for the flight date (e.g. US clocks spring forward on the 2nd Sunday of March, fall back on the 1st Sunday of November; in November New York is EST=UTC-5 not EDT=UTC-4; LA is PST=UTC-8 not PDT=UTC-7).
 - Lodging: property name as title; end_location often null.
 - Restaurant / concert / theater / tour: venue in start_location; end_location usually null.
 - Train / bus / ferry: origin and destination in start_location / end_location.
