@@ -7,8 +7,17 @@ struct ReviewForwardedBookingsView: View {
     @Environment(DataService.self) private var dataService
     @State private var parsedBookings: [ParsedBooking] = []
     @State private var dismissedIds: Set<UUID> = []
+    @State private var timedOutIds: Set<UUID> = []
     @State private var targetDayId: UUID? = nil
     @State private var showingAddBooking = false
+    /// Set to `true` after the first fetch so subsequent polls can animate
+    /// newly-confirmed items; on first load all pre-existing confirmed items
+    /// are silently hidden to avoid the flash-then-disappear effect.
+    @State private var initialLoadComplete = false
+
+    /// Maximum time (seconds) to keep polling before surfacing stuck-pending
+    /// items as timed-out so the user sees the "Enter Manually" fallback.
+    private static let pollingTimeoutSeconds: TimeInterval = 10 * 60
 
     private var visibleBookings: [ParsedBooking] {
         parsedBookings.filter { !dismissedIds.contains($0.id) }
@@ -42,8 +51,19 @@ struct ReviewForwardedBookingsView: View {
                         ForEach(visibleBookings) { booking in
                             ParsedBookingCardView(
                                 booking: booking,
+                                isTimedOut: timedOutIds.contains(booking.id),
                                 onAdd: { openAddBooking() },
-                                onEdit: { openAddBooking() }
+                                onEdit: {
+                                    // Dismiss failed / timed-out cards when the user
+                                    // taps "Enter Manually" — they're handling it, so
+                                    // the card has served its purpose.
+                                    if booking.status == .failed || timedOutIds.contains(booking.id) {
+                                        withAnimation(.easeOut(duration: 0.35)) {
+                                            dismissedIds.insert(booking.id)
+                                        }
+                                    }
+                                    openAddBooking()
+                                }
                             )
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         }
@@ -77,10 +97,19 @@ struct ReviewForwardedBookingsView: View {
         }
         .task(id: hasPending) {
             guard hasPending else { return }
-            while !Task.isCancelled {
+            let deadline = Date.now.addingTimeInterval(Self.pollingTimeoutSeconds)
+            while !Task.isCancelled && Date.now < deadline {
                 try? await Task.sleep(for: .seconds(5))
                 await loadData()
                 scheduleDismissals()
+            }
+            // Deadline reached — mark any remaining pending items as timed out
+            // so the spinner is replaced with the "Enter Manually" fallback.
+            let stuckIds = Set(parsedBookings.filter { $0.status == .pending }.map(\.id))
+            if !stuckIds.isEmpty {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    timedOutIds.formUnion(stuckIds)
+                }
             }
         }
     }
@@ -119,6 +148,15 @@ struct ReviewForwardedBookingsView: View {
             .filter { !$0.isWishlist }
             .sorted { $0.dayNumber < $1.dayNumber }
             .first?.id
+
+        if !initialLoadComplete {
+            // Silently pre-dismiss any bookings that were already confirmed before
+            // this screen session so they don't flash "Added" then disappear.
+            // Items confirmed during this session reach dismissedIds via scheduleDismissals().
+            let preConfirmed = Set(b.filter { $0.status == .confirmed }.map(\.id))
+            dismissedIds.formUnion(preConfirmed)
+            initialLoadComplete = true
+        }
     }
 
     // MARK: - Background geocoding

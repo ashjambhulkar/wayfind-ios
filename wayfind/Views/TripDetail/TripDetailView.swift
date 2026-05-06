@@ -1155,7 +1155,8 @@ struct TripDetailView: View {
                                         isProUser: isProUserForFlightTracking,
                                         onUpgradeTap: { presentFlightPaywall() },
                                         isOutsideTripDates: viewModel.isBookingOutsideTripDates(place, timelineTimeZone: dayTZ),
-                                        layoverDurationText: layoverDuration(at: index, in: timelineRows)
+                                        layoverDurationText: layoverDuration(at: index, in: timelineRows),
+                                        layoverAirport: layoverAirport(at: index, in: timelineRows)
                                     )
                                     .onTapGesture {
                                         selectedPlacePrevious = index > 0 ? timelineRows[index - 1].place : nil
@@ -1913,6 +1914,18 @@ extension TripDetailView {
         let interval = currDep.timeIntervalSince(prevArrival)
         guard interval > 0, interval < 48 * 3600 else { return nil }
         return interval.compactDurationLabel
+    }
+
+    /// Returns the arrival airport IATA code of the previous flight when `timelineRows[index]`
+    /// is a consecutive flight (layover scenario). Used to label the layover spine row.
+    fileprivate func layoverAirport(at index: Int, in rows: [TripTimelineDisplayRow]) -> String? {
+        guard index > 0 else { return nil }
+        let previous = rows[index - 1].place
+        guard case .flight(let prevFlight) = previous.bookingDetails,
+              case .flight = rows[index].place.bookingDetails
+        else { return nil }
+        let airport = prevFlight.arrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines)
+        return airport.isEmpty ? nil : airport
     }
 
     fileprivate func flightStatus(for place: Place) -> FlightStatus? {

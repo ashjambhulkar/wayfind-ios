@@ -222,9 +222,6 @@ struct FlightFormView: View {
                         Text(String(localized: "Imported from email"))
                             .font(.appBody.weight(.semibold))
                             .foregroundStyle(AppColors.textPrimary)
-                        Text(String(localized: "Details were extracted automatically. Review and save."))
-                            .font(.appFootnote)
-                            .foregroundStyle(AppColors.textSecondary)
                     }
                 }
                 .padding(.vertical, AppSpacing.xs)

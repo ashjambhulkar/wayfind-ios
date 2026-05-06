@@ -520,8 +520,18 @@ serve(async (req) => {
         cacheAirportTimezones(client, tzEntries).catch(() => {/* non-critical */});
       }
 
-      // Write TZs back to trip_bookings.details_json only if missing.
-      if (depTz || arrTz) {
+      // Write timezones and live operational fields (gate, terminal, baggage)
+      // back to trip_bookings.details_json so the booking retains the latest
+      // values even after tracking ends and flight_statuses is no longer queried.
+      const liveGateOrigin        = snap.departure?.gate ?? null;
+      const liveTerminalOrigin    = snap.departure?.terminal ?? null;
+      const liveGateDestination   = snap.arrival?.gate ?? null;
+      const liveTerminalDest      = snap.arrival?.terminal ?? null;
+      const liveBaggage           = snap.arrival?.baggageBelt ?? null;
+      const hasOperational = liveGateOrigin || liveTerminalOrigin ||
+                             liveGateDestination || liveTerminalDest || liveBaggage;
+
+      if (depTz || arrTz || hasOperational) {
         client
           .from("trip_bookings")
           .select("id, details_json")
@@ -530,19 +540,41 @@ serve(async (req) => {
           .then(({ data: booking }) => {
             if (!booking) return;
             const details = (booking.details_json ?? {}) as Record<string, unknown>;
-            const needsUpdate = (depTz && !details["departure_tz"]) ||
-                                (arrTz && !details["arrival_tz"]);
-            if (!needsUpdate) return;
+
+            const tzNeedsUpdate = (depTz && !details["departure_tz"]) ||
+                                  (arrTz && !details["arrival_tz"]);
+            // Always overwrite operational fields when AeroDataBox returns them —
+            // gate/terminal assignments can change up to departure.
+            const opNeedsUpdate = (liveGateOrigin      && liveGateOrigin      !== details["gate"]) ||
+                                  (liveTerminalOrigin   && liveTerminalOrigin  !== details["terminal"]) ||
+                                  (liveGateDestination  && liveGateDestination !== details["gate_destination"]) ||
+                                  (liveTerminalDest     && liveTerminalDest    !== details["terminal_destination"]) ||
+                                  (liveBaggage          && liveBaggage         !== details["baggage_claim"]);
+            if (!tzNeedsUpdate && !opNeedsUpdate) return;
+
             const patch: Record<string, unknown> = { ...details };
             if (depTz && !patch["departure_tz"]) patch["departure_tz"] = depTz;
             if (arrTz && !patch["arrival_tz"])   patch["arrival_tz"]   = arrTz;
+            if (liveGateOrigin)     patch["gate"]                 = liveGateOrigin;
+            if (liveTerminalOrigin) patch["terminal"]             = liveTerminalOrigin;
+            if (liveGateDestination) patch["gate_destination"]    = liveGateDestination;
+            if (liveTerminalDest)   patch["terminal_destination"] = liveTerminalDest;
+            if (liveBaggage)        patch["baggage_claim"]        = liveBaggage;
+
             client
               .from("trip_bookings")
               .update({ details_json: patch })
               .eq("id", row.booking_id)
               .then(({ error: patchErr }) => {
-                if (patchErr) logEvent("tz_writeback_error", { booking_id: row.booking_id, error: patchErr.message });
-                else logEvent("tz_writeback_ok", { booking_id: row.booking_id, depTz, arrTz });
+                if (patchErr) {
+                  logEvent("details_writeback_error", { booking_id: row.booking_id, error: patchErr.message });
+                } else {
+                  logEvent("details_writeback_ok", {
+                    booking_id: row.booking_id,
+                    fields: { depTz, arrTz, liveGateOrigin, liveTerminalOrigin,
+                              liveGateDestination, liveTerminalDest, liveBaggage },
+                  });
+                }
               });
           });
       }

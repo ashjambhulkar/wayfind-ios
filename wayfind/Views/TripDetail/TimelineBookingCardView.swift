@@ -33,9 +33,12 @@ struct TimelineBookingCardView: View {
     /// `true` when the booking's primary date sits outside the trip's day
     /// range — the row was forced onto the first scheduled day as a fallback.
     var isOutsideTripDates: Bool = false
-    /// When this flight follows a previous flight with a layover, a short human-readable
-    /// duration string shown in an eyebrow above the card. Example: "4h 20m layover".
+    /// When this flight follows a previous flight with a layover, the compact duration
+    /// string (e.g. "4h 20m"). Rendered as a transit-style spine row above the card.
     var layoverDurationText: String? = nil
+    /// IATA code of the layover airport (arrival of the previous leg). Shown as
+    /// "4h 20m layover in TIA" when present.
+    var layoverAirport: String? = nil
 
     init(
         place: Place,
@@ -54,7 +57,8 @@ struct TimelineBookingCardView: View {
         onUpgradeTap: (() -> Void)? = nil,
         onFlightBadgeTap: (() -> Void)? = nil,
         isOutsideTripDates: Bool = false,
-        layoverDurationText: String? = nil
+        layoverDurationText: String? = nil,
+        layoverAirport: String? = nil
     ) {
         self.place = place
         self.dayNumber = dayNumber
@@ -73,7 +77,10 @@ struct TimelineBookingCardView: View {
         self.onFlightBadgeTap = onFlightBadgeTap
         self.isOutsideTripDates = isOutsideTripDates
         self.layoverDurationText = layoverDurationText
+        self.layoverAirport = layoverAirport
     }
+
+    @Environment(\.colorScheme) private var colorScheme
 
     private var bookingCategory: BookingCategory {
         place.bookingCategoryEnum ?? .activity
@@ -117,23 +124,26 @@ struct TimelineBookingCardView: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: TimelineSpineMetrics.pinColumnToCardSpacing) {
-            TimelineSpineTimeColumn(
-                startTime: spineStartTime,
-                accentColor: timelineSpinePinColor,
-                symbol: bookingCategory.sfSymbol,
-                timeZone: timelineDisplayTimeZone,
-                accessibilityLabel: spineAccessibilityLabel
-            )
+        VStack(spacing: 0) {
+            if layoverDurationText != nil {
+                layoverSpineRow
+            }
 
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                if let layover = layoverDurationText {
-                    layoverEyebrow(layover)
+            HStack(alignment: .center, spacing: TimelineSpineMetrics.pinColumnToCardSpacing) {
+                TimelineSpineTimeColumn(
+                    startTime: spineStartTime,
+                    accentColor: timelineSpinePinColor,
+                    symbol: bookingCategory.sfSymbol,
+                    timeZone: timelineDisplayTimeZone,
+                    accessibilityLabel: spineAccessibilityLabel
+                )
+
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    if isOutsideTripDates {
+                        outsideTripDatesBanner
+                    }
+                    cardSurface
                 }
-                if isOutsideTripDates {
-                    outsideTripDatesBanner
-                }
-                cardSurface
             }
         }
         .contextMenu {
@@ -170,21 +180,54 @@ struct TimelineBookingCardView: View {
         .background(AppColors.appWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous))
     }
 
-    private func layoverEyebrow(_ durationText: String) -> some View {
-        HStack(spacing: AppSpacing.xs) {
-            Image(systemName: "clock")
-                .font(.appSmall.weight(.semibold))
+    /// Transit-style layover connector — mirrors `TimelineGapView.collapsedRow` with a
+    /// clock icon in a ringed circle on the spine rail and the duration + airport as text.
+    private var layoverSpineRow: some View {
+        HStack(alignment: .center, spacing: AppSpacing.sm) {
+            ZStack {
+                Circle()
+                    .fill(AppColors.appBackground)
+                    .frame(
+                        width: TimelineBetweenStopsMetrics.modeCircleSide,
+                        height: TimelineBetweenStopsMetrics.modeCircleSide
+                    )
+                    .overlay {
+                        Circle()
+                            .strokeBorder(
+                                TimelineSpineMetrics.continuousRailColor(colorScheme: colorScheme),
+                                lineWidth: TimelineSpineMetrics.continuousRailLineWidth
+                            )
+                    }
+                Image(systemName: "clock")
+                    .font(.timelineSpineTravelModeIcon)
+                    .imageScale(.small)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .accessibilityHidden(true)
+            }
+            .offset(x: -TimelineSpineMetrics.spineCenterlineNudgeLeft)
+            .frame(width: TimelineBetweenStopsMetrics.timePinGutterWidth, alignment: .center)
+
+            Text(layoverRowLabel)
+                .font(.appFootnote)
                 .foregroundStyle(AppColors.textTertiary)
-                .accessibilityHidden(true)
-            Text("\(durationText) layover")
-                .font(.appSmall.weight(.medium))
-                .foregroundStyle(AppColors.textTertiary)
+                .monospacedDigit()
                 .lineLimit(1)
-                .minimumScaleFactor(0.85)
+                .minimumScaleFactor(0.82)
+
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, AppSpacing.sm)
-        .padding(.vertical, AppSpacing.xs)
+        .frame(minHeight: TimelineBetweenStopsMetrics.minRowHeight)
+        .padding(.vertical, TimelineBetweenStopsMetrics.gapRowVerticalPadding)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(layoverRowLabel)
+    }
+
+    private var layoverRowLabel: String {
+        guard let duration = layoverDurationText else { return "" }
+        if let airport = layoverAirport, !airport.isEmpty {
+            return "\(duration) layover in \(airport)"
+        }
+        return "\(duration) layover"
     }
 
     // MARK: - Card surface

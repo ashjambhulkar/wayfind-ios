@@ -2,6 +2,9 @@ import SwiftUI
 
 struct ParsedBookingCardView: View {
     let booking: ParsedBooking
+    /// When `true` the card overrides a `.pending` status and shows the
+    /// "Enter Manually" fallback — the same UI as `.failed`.
+    var isTimedOut: Bool = false
     var onAdd: (() -> Void)?
     var onEdit: (() -> Void)?
 
@@ -18,6 +21,18 @@ struct ParsedBookingCardView: View {
     var body: some View {
         Group {
             switch booking.status {
+            case .pending where isTimedOut:
+                VStack(alignment: .leading, spacing: AppSpacing.md) {
+                    HStack(spacing: AppSpacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(AppColors.appWarning)
+                        Text("Took too long to parse")
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textPrimary)
+                    }
+                    AppButton(title: "Enter Manually", style: .outline, action: { onEdit?() })
+                }
             case .pending:
                 HStack(spacing: AppSpacing.md) {
                     ProgressView()
