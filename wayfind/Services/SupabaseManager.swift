@@ -17,6 +17,18 @@ final class SupabaseManager {
     private static let tripDocumentsBucket = "trip-documents"
     private static let avatarsBucket = "avatars"
 
+    /// Session-scoped cache for `city_places` enrichment rows, keyed by Google
+    /// `place_id`. These rows are essentially immutable from the iOS client's
+    /// perspective (ratings, thumbnails, AI summaries change only via
+    /// server-side jobs). Caching them eliminates the `city_places` SELECT on
+    /// every realtime timeline rebuild after the first load.
+    ///
+    /// Misses are intentionally NOT cached so that newly enriched places (the
+    /// enrichment job ran after first load) are picked up on the next refresh.
+    /// The cache grows across trips within a session — `place_id` is a global
+    /// Google identifier, so cross-trip reuse is correct.
+    private var cityPlaceCache: [String: CityPlaceEnrichmentRow] = [:]
+
     private var client: SupabaseClient? {
         AuthSessionService.shared.client
     }
@@ -434,7 +446,7 @@ final class SupabaseManager {
         // hero thumbnail, AI summary, subtypes, suggested visit length…).
         // We intentionally do NOT use `place_cache` — it's deprecated.
         let placeIds = Self.distinctPlaceIds(from: activityRows)
-        let enrichments = try await Self.fetchCityPlaceEnrichments(client: client, placeIds: placeIds)
+        let enrichments = try await fetchCityPlaceEnrichments(client: client, placeIds: placeIds)
 
         let days = dayRows.map { Self.mapDayRow($0, tripId: tripId) }
             .sorted { $0.dayNumber < $1.dayNumber }
@@ -690,60 +702,86 @@ final class SupabaseManager {
         return Array(seen)
     }
 
+    /// Decoded response from the `city_place_enrichments` action on the
+    /// `places-cache` edge function.
+    private struct CityPlaceEnrichmentsResponse: Decodable {
+        let enrichments: [String: CityPlaceEnrichmentRow]
+    }
+
+    /// Calls the `places-cache` edge function to fetch enrichment rows for the
+    /// given `missIds` via Redis (L2) → Supabase DB fallback. Throws on network
+    /// or decode failure so the caller can handle appropriately.
+    private func fetchCityPlaceEnrichmentsFromEdge(
+        missIds: [String],
+        accessToken: String
+    ) async throws -> [String: CityPlaceEnrichmentRow] {
+        let url = URL(string: "\(AppConfig.supabaseURL)/functions/v1/places-cache")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        req.timeoutInterval = 15
+        req.httpBody = try JSONSerialization.data(
+            withJSONObject: ["action": "city_place_enrichments", "place_ids": missIds]
+        )
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+            return [:]
+        }
+        let decoded = try JSONDecoder().decode(CityPlaceEnrichmentsResponse.self, from: data)
+        return decoded.enrichments
+    }
+
     /// Fetches the city_places rows for the given place_ids and returns a
     /// `[place_id: row]` lookup. Returns an empty map when `placeIds` is empty
     /// (skips the round-trip entirely) or when the query errors — enrichment
     /// is best-effort and must never block timeline rendering.
-    private static func fetchCityPlaceEnrichments(
+    ///
+    /// Cache hierarchy:
+    /// - L1 (in-memory `cityPlaceCache`): place_ids seen this session are
+    ///   returned immediately with no network call.
+    /// - L2 (Redis via `places-cache` edge function): catches cold starts and
+    ///   cross-session reuse. Falls back to the Supabase DB on Redis miss.
+    ///
+    /// Misses (place_ids absent from `city_places`) are not cached so that
+    /// newly enriched places are picked up on the next app session.
+    private func fetchCityPlaceEnrichments(
         client: SupabaseClient,
         placeIds: [String]
     ) async throws -> [String: CityPlaceEnrichmentRow] {
         guard !placeIds.isEmpty else { return [:] }
+
+        let cachedHits = cityPlaceCache.filter { placeIds.contains($0.key) }
+        let missIds = placeIds.filter { cityPlaceCache[$0] == nil }
+
+        guard !missIds.isEmpty else { return cachedHits }
+
+        let session = try await client.auth.session
+
         do {
-            let rows: [CityPlaceEnrichmentRow] = try await client
-                .from("city_places")
-                .select(
-                    """
-                    place_id,rating,user_ratings_total,price_level,thumbnail_url,\
-                    ai_short_summary,subtypes,time_spent_min,time_spent_max,\
-                    website,formatted_phone_number,opening_hours,\
-                    ai_editorial_summary,ai_review_summary,ai_why_go,ai_know_before_you_go,\
-                    details_enriched_at,ai_enriched_at,\
-                    image_source,images_refreshed_at,thumbnail_attribution,images,\
-                    popular_times,\
-                    ai_source_attribution
-                    """
-                )
-                .in("place_id", values: placeIds)
-                .execute()
-                .value
-            // city_places has no unique index on place_id (the same Google
-            // place can be cached under multiple city profiles, and seeding
-            // bugs can produce intra-city dupes), so we MUST resolve
-            // collisions instead of using `uniqueKeysWithValues:` which
-            // hard-traps in production. We keep the first row encountered;
-            // per-row debug logging is intentionally avoided because this
-            // enrichment runs during timeline refreshes and console spam can
-            // make open SwiftUI menus appear to flicker.
-            return Dictionary(rows.map { ($0.place_id, $0) }, uniquingKeysWith: { existing, _ in
-                return existing
-            })
+            let fetched = try await fetchCityPlaceEnrichmentsFromEdge(
+                missIds: missIds,
+                accessToken: session.accessToken
+            )
+            for (id, row) in fetched { cityPlaceCache[id] = row }
+            return cachedHits.merging(fetched) { _, new in new }
         } catch is CancellationError {
             // Propagate cancellation so callers see a clean failure instead
-            // of silently receiving an empty enrichment map. Swallowing it
-            // previously let `fetchTripTimeline` return Place structs stripped
-            // of subtypes/rating/thumbnails, which the view model committed —
-            // causing the timeline subtitle and spine icon to shuffle between
-            // enriched and unenriched values on every debounce cancellation.
+            // of silently receiving an empty enrichment map. Using `try?` here
+            // would swallow URLSession's CancellationError and let
+            // `fetchTripTimeline` commit a partially-enriched result — causing
+            // the timeline subtitle and spine icon to shuffle between enriched
+            // and unenriched values on every debounce cancellation.
             throw CancellationError()
         } catch {
-            // Enrichment is non-essential — print in DEBUG so the data-quality
-            // issue stays visible, but never trap. The timeline must still
-            // render if city_places RLS / schema / network breaks this query.
+            // Enrichment is non-essential — print in DEBUG so data-quality
+            // issues stay visible, but never trap. The timeline must still
+            // render if the edge function or network is unavailable.
             #if DEBUG
-            print("[city_places] enrichment failed: \(error)")
+            print("[city_places] edge enrichment failed: \(error)")
             #endif
-            return [:]
+            return cachedHits
         }
     }
 
@@ -939,6 +977,7 @@ final class SupabaseManager {
     }
 
     func fetchCityPlaceEnrichment(googlePlaceId: String) async throws -> CityPlaceEnrichmentRow? {
+        if let cached = cityPlaceCache[googlePlaceId] { return cached }
         let (client, _) = try await requireClientAndUserId()
         let rows: [CityPlaceEnrichmentRow] = try await client
             .from("city_places")
@@ -958,6 +997,7 @@ final class SupabaseManager {
             .limit(1)
             .execute()
             .value
+        if let row = rows.first { cityPlaceCache[googlePlaceId] = row }
         return rows.first
     }
 

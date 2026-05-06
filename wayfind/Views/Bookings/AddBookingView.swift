@@ -596,6 +596,11 @@ struct AddBookingView: View {
                     && !flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     && !flightDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     && !flightArrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .emailImport:
+                return !flightAirline.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && !flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && !flightDepartureAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && !flightArrivalAirport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             case .lookupInput, .lookingUp:
                 return false
             }

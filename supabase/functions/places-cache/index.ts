@@ -10,7 +10,7 @@ import {
   cachedGeocode,
 } from "../_shared/cached_google.ts";
 import { TTL_PLACE_HERO_METADATA_SECONDS } from "../_shared/google_maps_cache_ttl.ts";
-import { redisGet, redisSet } from "../_shared/redis_cache.ts";
+import { redisGet, redisSet, redisPipelineGet } from "../_shared/redis_cache.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -442,6 +442,81 @@ serve(async (req: Request) => {
           hero_image_url: signedUrl,
           hero_attribution: hero.attribution,
         });
+      }
+
+      case "city_place_enrichments": {
+        const rawPlaceIds = body.place_ids as unknown;
+
+        if (!Array.isArray(rawPlaceIds)) {
+          return jsonResponse({ error: "place_ids is required" }, 400);
+        }
+
+        // Deduplicate, type-guard, and trim before any Redis/DB work so that
+        // duplicate entries from the client don't double the pipeline size or
+        // cause redundant DB rows to be fetched and cached.
+        const placeIds = [...new Set(
+          rawPlaceIds
+            .filter((id): id is string => typeof id === "string")
+            .map((id) => id.trim())
+            .filter(Boolean),
+        )];
+
+        if (placeIds.length === 0) {
+          return jsonResponse({ error: "place_ids is required" }, 400);
+        }
+        if (placeIds.length > 100) {
+          return jsonResponse({ error: "max 100 place_ids per batch" }, 400);
+        }
+
+        const keys = placeIds.map((id) => `city_place:v1:${id}`);
+        const cached = await redisPipelineGet(keys);
+
+        const enrichments: Record<string, unknown> = {};
+        const missIds: string[] = [];
+
+        for (let i = 0; i < placeIds.length; i++) {
+          const raw = cached[i];
+          if (raw) {
+            try {
+              enrichments[placeIds[i]] = JSON.parse(raw);
+            } catch {
+              missIds.push(placeIds[i]);
+            }
+          } else {
+            missIds.push(placeIds[i]);
+          }
+        }
+
+        if (missIds.length > 0) {
+          const { data: rows, error } = await admin
+            .from("city_places")
+            .select(
+              `place_id,rating,user_ratings_total,price_level,thumbnail_url,` +
+              `ai_short_summary,subtypes,time_spent_min,time_spent_max,` +
+              `website,formatted_phone_number,opening_hours,` +
+              `ai_editorial_summary,ai_review_summary,ai_why_go,ai_know_before_you_go,` +
+              `details_enriched_at,ai_enriched_at,` +
+              `image_source,images_refreshed_at,thumbnail_attribution,images,` +
+              `popular_times,ai_source_attribution`,
+            )
+            .in("place_id", missIds);
+
+          if (!error && rows) {
+            for (const row of rows) {
+              // First-row-wins: city_places can have duplicate place_id rows due
+              // to seeding bugs (same Google place cached under multiple city
+              // profiles). Matches iOS Swift's `uniquingKeysWith: { existing, _ in
+              // existing }` so the cached value is always the same row both paths
+              // would have returned.
+              if (!enrichments[row.place_id]) {
+                enrichments[row.place_id] = row;
+                redisSet(`city_place:v1:${row.place_id}`, JSON.stringify(row), 86400);
+              }
+            }
+          }
+        }
+
+        return jsonResponse({ enrichments });
       }
 
       default:

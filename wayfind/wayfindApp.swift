@@ -385,12 +385,12 @@ private struct AppRootTabView: View {
                     dataService: dataService
                 )
                 activeBudgetViewModel = budget
-                // Eager reload removed: `attachRealtimeIfReady()` calls
-                // `realtimeService.bindBudget(budget)` synchronously before
-                // `startSubscription` opens the channel. By the time the
-                // channel reaches `.subscribed` (~200-500ms), `budgetViewModel`
-                // is non-nil and `scheduleBudgetRefetch()` fires the first
-                // real load — no duplicate 5-request burst on trip open.
+                // `reloadIfNeeded()` is a no-op if the realtime `.subscribed`
+                // handler fires first and has already populated the snapshot.
+                // It provides a fallback first-load for cases where the
+                // realtime channel is slow or the subscription never fires
+                // (e.g. offline, reconnect delay).
+                Task { await budget.reloadIfNeeded() }
                 // Realtime binds lazily — wait for the detail viewmodel
                 // to land via `activeTripDetailViewModel` (set below).
             } else {

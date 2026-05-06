@@ -114,6 +114,19 @@ final class BudgetViewModel {
         }
     }
 
+    /// Loads budget data only if no successful fetch has completed yet.
+    ///
+    /// Use this for eager startup calls where the realtime subscription's
+    /// `.subscribed` handler will also fire `reload()` shortly after.
+    /// If realtime fires first, `hasLoadedAtLeastOnce` will already be `true`
+    /// and this becomes a no-op — no duplicate burst. If realtime is delayed
+    /// or never fires (e.g. no connection), this ensures the first paint shows
+    /// real data rather than an empty snapshot.
+    func reloadIfNeeded() async {
+        guard !hasLoadedAtLeastOnce else { return }
+        await reload()
+    }
+
     /// Marks the last reload as failed without replacing the snapshot. Wired
     /// from places where the fetch surface is `try`-throwing (e.g. when the
     /// caller needs to differentiate "empty result" from "RLS denied"). The
