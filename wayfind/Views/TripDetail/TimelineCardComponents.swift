@@ -146,7 +146,7 @@ struct TimePinView: View {
                 )
             if let symbol {
                 Image(systemName: symbol)
-                    .font(.appCaption.weight(.bold))
+                    .font(.timelineSpinePinIcon)
                     .symbolRenderingMode(.monochrome)
                     .foregroundStyle(AppColors.iconOnColoredSurface)
                     .accessibilityHidden(true)
@@ -196,7 +196,7 @@ struct UnscheduledMarkerView: View {
                 )
             if let symbol {
                 Image(systemName: symbol)
-                    .font(.appCaption.weight(.bold))
+                    .font(.timelineSpinePinIcon)
                     .symbolRenderingMode(.monochrome)
                     .foregroundStyle(AppColors.iconOnColoredSurface)
                     .accessibilityHidden(true)
@@ -221,8 +221,8 @@ struct UnscheduledMarkerView: View {
 
 /// Shared timeline row layout tokens (activity + booking pass bodies).
 enum TimelineCardLayoutMetrics {
-    static let contentHorizontalPadding: CGFloat = AppSpacing.sm
-    static let contentVerticalPadding: CGFloat = AppSpacing.sm
+    static let contentHorizontalPadding: CGFloat = AppSpacing.md
+    static let contentVerticalPadding: CGFloat = AppSpacing.md
 
     /// Raised timeline cards — soften shadow footprint so stacks read closer than before.
     static let cardShadowOpacity: Double = 0.048

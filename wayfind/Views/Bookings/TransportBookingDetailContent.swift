@@ -2,8 +2,9 @@
 //  TransportBookingDetailContent.swift
 //  wayfind
 //
-//  Transport booking detail for `PlaceDetailSheet` — from/to schedule,
-//  optional service rows, optional address.
+//  Transport booking detail for `PlaceDetailSheet` — identity header,
+//  departure / arrival strip with times, operator / service / seat, and
+//  optional stop address (with empty state), using trip timezone.
 //
 
 import SwiftUI
@@ -27,33 +28,51 @@ struct TransportBookingDetailContent: View {
         details.seat.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var hasServiceDetails: Bool {
-        !operatorTrimmed.isEmpty || !serviceTrimmed.isEmpty || !seatTrimmed.isEmpty
+    private var trimmedAddress: String? {
+        let a = address?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return a.isEmpty ? nil : a
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            scheduleCard
-            if hasServiceDetails {
-                serviceDetailsCard
-            }
-            if let trimmed = address?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
-                locationCard(trimmed)
-            }
+            transportSummaryCard
+            locationCard
         }
+        .padding(.top, AppSpacing.md)
     }
 
-    // MARK: - Schedule
+    // MARK: - Summary
 
-    private var scheduleCard: some View {
+    private var transportSummaryCard: some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("Schedule")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(AppColors.textSecondary)
-                .textCase(.uppercase)
-                .kerning(0.5)
+            HStack(alignment: .center, spacing: AppSpacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(accent.opacity(0.14))
+                        .frame(width: 56, height: 56)
+                    Image(systemName: BookingCategory.transport.sfSymbol)
+                        .font(.sectionHeader)
+                        .foregroundStyle(accent)
+                        .accessibilityHidden(true)
+                }
 
-            HStack(alignment: .top, spacing: AppSpacing.md) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text(String(localized: "Your trip"))
+                        .font(.sectionHeader)
+                        .foregroundStyle(AppColors.textPrimary)
+
+                    Text(identitySubtitle)
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textTertiary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            detailDivider
+
+            HStack(alignment: .top, spacing: AppSpacing.sm) {
                 stationColumn(
                     title: String(localized: "From"),
                     stationRaw: details.departureStation,
@@ -62,18 +81,7 @@ struct TransportBookingDetailContent: View {
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(spacing: AppSpacing.xs) {
-                    Image(systemName: BookingCategory.transport.sfSymbol)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(accent)
-                        .accessibilityHidden(true)
-                    Capsule()
-                        .fill(AppColors.appDivider)
-                        .frame(width: 28, height: 3)
-                }
-                .padding(.top, AppSpacing.md)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(String(localized: "Transport"))
+                routeConnector
 
                 stationColumn(
                     title: String(localized: "To"),
@@ -83,12 +91,85 @@ struct TransportBookingDetailContent: View {
                 )
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
+
+            if let duration = journeyDurationLabel {
+                HStack {
+                    Spacer(minLength: 0)
+                    Text(duration)
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(AppColors.textSecondary)
+                        .padding(.horizontal, AppSpacing.md)
+                        .padding(.vertical, AppSpacing.sm)
+                        .background(accent.opacity(0.1), in: Capsule())
+                        .accessibilityLabel(String(localized: "Journey time"))
+                        .accessibilityValue(duration)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, AppSpacing.xs)
+            }
+
+            detailDivider
+
+            detailRow(
+                icon: "building.2.fill",
+                title: String(localized: "Operator"),
+                value: operatorTrimmed.isEmpty ? String(localized: "Not specified") : operatorTrimmed
+            )
+
+            detailDivider
+
+            detailRow(
+                icon: "number",
+                title: String(localized: "Service"),
+                value: serviceTrimmed.isEmpty ? String(localized: "Not specified") : serviceTrimmed
+            )
+
+            detailDivider
+
+            detailRow(
+                icon: "rectangle.inset.filled.and.person.filled",
+                title: String(localized: "Seat"),
+                value: seatTrimmed.isEmpty ? String(localized: "Not specified") : seatTrimmed
+            )
         }
         .padding(AppSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppColors.appSurface)
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                .strokeBorder(accent.opacity(0.2), lineWidth: 1)
+        )
         .padding(.horizontal, AppSpacing.lg)
-        .padding(.top, AppSpacing.md)
+    }
+
+    private var identitySubtitle: String {
+        switch (operatorTrimmed.isEmpty, serviceTrimmed.isEmpty) {
+        case (false, false):
+            return "\(operatorTrimmed) · \(serviceTrimmed)"
+        case (false, true):
+            return operatorTrimmed
+        case (true, false):
+            return serviceTrimmed
+        case (true, true):
+            return String(localized: "Operator & service not set")
+        }
+    }
+
+    private var routeConnector: some View {
+        VStack(spacing: AppSpacing.xs) {
+            Image(systemName: BookingCategory.transport.sfSymbol)
+                .font(.sectionHeader)
+                .foregroundStyle(accent)
+                .accessibilityHidden(true)
+            Capsule()
+                .fill(AppColors.appDivider)
+                .frame(width: 32, height: 3)
+        }
+        .padding(.top, AppSpacing.sm)
+        .frame(minWidth: 72)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(String(localized: "Transport"))
     }
 
     private func stationColumn(
@@ -112,15 +193,17 @@ struct TransportBookingDetailContent: View {
 
             if let instant {
                 Text(instant.timeFormatted(timeZone: timeZone))
-                    .font(.sectionHeader)
+                    .font(.tripDetailHeroTitle)
                     .foregroundStyle(AppColors.textPrimary)
-                    .minimumScaleFactor(0.8)
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.75)
+                    .lineLimit(1)
 
                 Text(dateSubtitle(for: instant))
                     .font(.appCaption)
                     .foregroundStyle(AppColors.textSecondary)
             } else {
-                Text("Time TBD")
+                Text(String(localized: "Time TBD"))
                     .font(.appBody.weight(.medium))
                     .foregroundStyle(AppColors.textSecondary)
             }
@@ -142,68 +225,40 @@ struct TransportBookingDetailContent: View {
         return trimmed
     }
 
-    // MARK: - Service details
-
-    private var serviceDetailsCard: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("Service details")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(AppColors.textSecondary)
-                .textCase(.uppercase)
-                .kerning(0.5)
-
-            VStack(spacing: 0) {
-                if !operatorTrimmed.isEmpty {
-                    transportDetailRow(
-                        icon: "building.2.fill",
-                        title: String(localized: "Operator"),
-                        value: operatorTrimmed
-                    )
-                    if !serviceTrimmed.isEmpty || !seatTrimmed.isEmpty {
-                        transportDivider
-                    }
-                }
-                if !serviceTrimmed.isEmpty {
-                    transportDetailRow(
-                        icon: "number",
-                        title: String(localized: "Service"),
-                        value: serviceTrimmed
-                    )
-                    if !seatTrimmed.isEmpty {
-                        transportDivider
-                    }
-                }
-                if !seatTrimmed.isEmpty {
-                    transportDetailRow(
-                        icon: "rectangle.inset.filled.and.person.filled",
-                        title: String(localized: "Seat"),
-                        value: seatTrimmed
-                    )
-                }
-            }
+    /// Wall-clock span between departure and arrival when both are set (same idea as timeline transport card).
+    private var journeyDurationLabel: String? {
+        guard let dep = details.departureTime,
+              let arr = details.arrivalTime,
+              arr > dep else { return nil }
+        let minutes = max(0, Int(arr.timeIntervalSince(dep) / 60))
+        guard minutes > 0 else { return nil }
+        let h = minutes / 60
+        let m = minutes % 60
+        if h == 0 {
+            return String(format: String(localized: "%d min"), m)
         }
-        .padding(AppSpacing.lg)
-        .background(AppColors.appSurface)
-        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-        .padding(.horizontal, AppSpacing.lg)
+        if m == 0 {
+            return String(format: String(localized: "%d hr"), h)
+        }
+        return String(format: String(localized: "%1$d hr %2$d min"), h, m)
     }
 
-    private var transportDivider: some View {
-        Divider()
-            .background(AppColors.appDivider.opacity(0.6))
-            .padding(.vertical, AppSpacing.sm)
+    private var detailDivider: some View {
+        Rectangle()
+            .fill(AppColors.appDivider.opacity(0.85))
+            .frame(height: 1)
     }
 
-    private func transportDetailRow(icon: String, title: String, value: String) -> some View {
+    private func detailRow(icon: String, title: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
             Image(systemName: icon)
-                .font(.body.weight(.medium))
+                .font(.appBody.weight(.medium))
                 .foregroundStyle(accent)
                 .frame(width: 22, alignment: .center)
             Text(title)
                 .font(.appCaption.weight(.medium))
                 .foregroundStyle(AppColors.textSecondary)
-                .frame(width: 76, alignment: .leading)
+                .frame(width: 88, alignment: .leading)
             Text(value)
                 .font(.appBody.weight(.medium))
                 .foregroundStyle(AppColors.textPrimary)
@@ -212,30 +267,48 @@ struct TransportBookingDetailContent: View {
         .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Address
+    // MARK: - Location
 
-    private func locationCard(_ line: String) -> some View {
+    private var locationCard: some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("Address")
+            Text(String(localized: "Location"))
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(AppColors.textSecondary)
                 .textCase(.uppercase)
                 .kerning(0.5)
 
-            HStack(alignment: .top, spacing: AppSpacing.md) {
-                Image(systemName: "mappin.and.ellipse")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 22, alignment: .center)
+            if let line = trimmedAddress {
+                HStack(alignment: .top, spacing: AppSpacing.md) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .frame(width: 22, alignment: .center)
 
-                Text(line)
-                    .font(.appBody)
-                    .foregroundStyle(AppColors.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Text(line)
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(String(localized: "Address"))
+                .accessibilityValue(line)
+            } else {
+                HStack(alignment: .top, spacing: AppSpacing.md) {
+                    Image(systemName: "mappin.slash")
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textTertiary)
+                        .frame(width: 22, alignment: .center)
+
+                    Text(String(localized: "No address on this booking yet"))
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
             }
-            .accessibilityElement(children: .combine)
         }
         .padding(AppSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppColors.appSurface)
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
         .padding(.horizontal, AppSpacing.lg)

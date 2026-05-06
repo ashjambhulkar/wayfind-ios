@@ -40,24 +40,28 @@ struct AIPlanWizardSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    if vm.isDaysLoading {
-                        ProgressView()
-                            .padding(.vertical, AppSpacing.xxl)
-                    } else if vm.hasPreview {
-                        previewBody
-                    } else if vm.isEmpty {
-                        emptyPreviewState
-                    } else {
-                        // .idle, .loading, .applying, .error, .applied all
-                        // show the configurator. Loading / applying just
-                        // disable the bottom bar; applied is handled by
-                        // the handoff before this branch ever renders.
-                        configuratorSection
+            Group {
+                if vm.isDaysLoading {
+                    ProgressView()
+                        .tint(AppColors.appPrimary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if vm.hasPreview {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            previewBody
+                        }
+                        .padding(.bottom, AppSpacing.xl)
                     }
+                } else if vm.isEmpty {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            emptyPreviewState
+                        }
+                        .padding(.bottom, AppSpacing.xl)
+                    }
+                } else {
+                    configuratorForm
                 }
-                .padding(.bottom, AppSpacing.xl)
             }
             .background(AppColors.appBackground)
             .navigationTitle(navTitle)
@@ -68,15 +72,22 @@ struct AIPlanWizardSheet: View {
                         attemptDismiss()
                     }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    generateToolbarButton
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                AIPlanWizardBottomBar(
-                    vm: vm,
-                    onGenerate: { Task { await vm.generate() } },
-                    onApply: { Task { await vm.applyPreview() } },
-                    onReset: { vm.reset() },
-                    onUpgradeTap: { presentAIUpsell(surface: "quota_exhausted_cta") }
-                )
+                // Bottom bar only shown when there is a preview to act on
+                // or quota is exhausted — never shown in idle/loading.
+                if vm.hasPreview || vm.plannerState == .quotaExhausted {
+                    AIPlanWizardBottomBar(
+                        vm: vm,
+                        onGenerate: { Task { await vm.generate() } },
+                        onApply: { Task { await vm.applyPreview() } },
+                        onReset: { vm.reset() },
+                        onUpgradeTap: { presentAIUpsell(surface: "quota_exhausted_cta") }
+                    )
+                }
             }
             .interactiveDismissDisabled(needsDiscardConfirmation)
             // Drag indicator is part of "this sheet looks dismissible"
@@ -281,116 +292,170 @@ struct AIPlanWizardSheet: View {
         }
     }
 
-    // MARK: - Configurator (idle / loading)
+    // MARK: - Generate toolbar button
 
-    private var configuratorSection: some View {
-        VStack(spacing: AppSpacing.lg) {
-            // Hero — emotional anchor that says "this is a creative
-            // tool" not a settings form.
-            configuratorHero
-
-            // Primary inputs — day + stay area. These are required
-            // before Generate becomes available, so they live in the
-            // most prominent card.
-            SettingsCard {
-                DayPickerRow(vm: vm)
-                CardDivider()
-                StayAreaRow(
-                    label: vm.stayAreaLabel,
-                    needsPlaceId: vm.needsStayAreaPlaceId,
-                    onTap: { showStayAreaPicker = true }
-                )
-            }
-
-            // Preferences — optional tweaks. Grouped in a second card
-            // to visually subordinate them to the day/area selection.
-            SettingsCard {
-                PacePickerRow(selection: $vm.pace)
-                CardDivider()
-                TimeWindowRow(timeStart: $vm.timeStart, timeEnd: $vm.timeEnd)
-                CardDivider()
-                ExplorationScopeRow(selection: $vm.explorationScope)
-                CardDivider()
-                MealsToggleRow(isOn: $vm.includeMeals)
-            }
-
-            if let errorMessage = vm.errorMessage {
-                inlineError(errorMessage)
-            }
-        }
-        .padding(.horizontal, AppSpacing.lg)
-        .padding(.top, AppSpacing.md)
-    }
-
-    private var configuratorHero: some View {
-        VStack(spacing: AppSpacing.sm) {
-            MapStyleIcon(
-                systemName: "sparkles",
-                size: .large,
-                accent: AppColors.appPrimary,
-                accessibilityLabel: "AI planner"
-            )
-            Text("Build your perfect day")
-                .font(.sectionHeader)
-                .foregroundStyle(AppColors.textPrimary)
-            Text("Pick a day and area, tweak preferences, and we'll craft a personalised itinerary.")
-                .font(.appBody)
-                .foregroundStyle(AppColors.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            // Wave 4.2 — quota badge. Free users see "X of 3 free
-            // remaining" and the badge doubles as a soft upsell tap
-            // target that fires `pro_gate_attempted`. Pro users see
-            // "Unlimited" with no tap affordance.
-            quotaBadge
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, AppSpacing.md)
-    }
-
-    /// Wave 4.2 — the remaining-credits chip rendered under the hero.
-    /// Free users get a tappable variant that surfaces the upsell sheet
-    /// and logs intent; Pro users see a static "Unlimited" pill so the
-    /// value of the entitlement stays visible.
     @ViewBuilder
-    private var quotaBadge: some View {
-        let isPro = vm.isProUser
-        let label = vm.quotaBadgeText
-
-        Group {
-            if isPro {
+    private var generateToolbarButton: some View {
+        switch vm.plannerState {
+        case .loading:
+            ProgressView()
+                .controlSize(.small)
+                .tint(AppColors.appPrimary)
+        case .preview, .applying, .applied:
+            EmptyView()
+        case .quotaExhausted:
+            Button {
+                presentAIUpsell(surface: "quota_exhausted_cta")
+            } label: {
+                Text("Upgrade")
+                    .font(.appBody.weight(.semibold))
+            }
+            .tint(AppColors.appPrimary)
+        default:
+            Button {
+                Task { await vm.generate() }
+            } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: "infinity")
-                        .font(.appSmall.weight(.semibold))
-                    Text(label)
-                        .font(.appCaption.weight(.semibold))
+                    Image(systemName: "sparkles")
+                    Text("Plan")
                 }
+                .font(.appBody.weight(.semibold))
+            }
+            .disabled(!vm.canGenerate)
+            .tint(AppColors.appPrimary)
+        }
+    }
+
+    // MARK: - Configurator (Form layout)
+
+    private var configuratorForm: some View {
+        Form {
+            // ── Stay area — top, separate, required ──────────────────────
+            // This is the single most important input: the AI radiates the
+            // whole itinerary outward from this anchor. It must be blank on
+            // open and cannot be bypassed — Generate is gated on it.
+            Section {
+                stayAreaHeroRow
+            } header: {
+                Text("Starting point")
+            } footer: {
+                Text("Your hotel, Airbnb, or neighbourhood. The plan is built around this location.")
+            }
+
+            // ── Day ──────────────────────────────────────────────────────
+            Section {
+                DayPickerRow(vm: vm)
+            } header: {
+                Text("Which day?")
+            }
+
+            // ── Preferences ──────────────────────────────────────────────
+            Section {
+                PacePickerRow(selection: $vm.pace)
+                TimeWindowRow(timeStart: $vm.timeStart, timeEnd: $vm.timeEnd)
+                ExplorationScopeRow(selection: $vm.explorationScope)
+                MealsToggleRow(isOn: $vm.includeMeals)
+            } header: {
+                Text("Preferences")
+            }
+
+            // ── Quota badge ───────────────────────────────────────────────
+            Section {
+                quotaBadgeRow
+            }
+            .listRowBackground(Color.clear)
+
+            // ── Error ─────────────────────────────────────────────────────
+            if let errorMessage = vm.errorMessage {
+                Section {
+                    inlineError(errorMessage)
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+            }
+        }
+        .scrollContentBackground(.hidden)
+    }
+
+    /// Full-width stay area hero row — large tap target with strong empty state.
+    private var stayAreaHeroRow: some View {
+        Button(action: { showStayAreaPicker = true }) {
+            HStack(spacing: AppSpacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(vm.stayAreaPlaceId != nil
+                              ? AppColors.appPrimary
+                              : AppColors.appPrimaryLight)
+                        .frame(width: 38, height: 38)
+                    Image(systemName: vm.stayAreaPlaceId != nil
+                          ? "mappin.circle.fill"
+                          : "mappin.and.ellipse")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(vm.stayAreaPlaceId != nil
+                                         ? .white
+                                         : AppColors.appPrimary)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    if vm.stayAreaLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Where are you staying?")
+                            .font(.appBody.weight(.semibold))
+                            .foregroundStyle(AppColors.textTertiary)
+                        Text("Tap to search your hotel or area")
+                            .font(.appCaption)
+                            .foregroundStyle(AppColors.textTertiary.opacity(0.8))
+                    } else {
+                        Text(vm.stayAreaLabel)
+                            .font(.appBody.weight(.semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                            .lineLimit(1)
+                        if vm.stayAreaPlaceId == nil {
+                            Text("Tap to confirm location")
+                                .font(.appCaption)
+                                .foregroundStyle(AppColors.appWarning)
+                        } else {
+                            Text("Starting point set")
+                                .font(.appCaption)
+                                .foregroundStyle(AppColors.appPrimary)
+                        }
+                    }
+                }
+
+                Spacer(minLength: AppSpacing.xs)
+                Image(systemName: "chevron.right")
+                    .font(.appSmall.weight(.semibold))
+                    .foregroundStyle(AppColors.textTertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Compact quota row at the bottom of the configurator Form.
+    private var quotaBadgeRow: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: vm.isProUser ? "infinity" : "sparkles")
+                .font(.appCaption.weight(.semibold))
                 .foregroundStyle(AppColors.appPrimary)
-                .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, AppSpacing.xs)
-                .background(AppColors.appPrimaryLight, in: Capsule())
-            } else {
+            Text(vm.quotaBadgeText)
+                .font(.appCaption.weight(.medium))
+                .foregroundStyle(AppColors.appPrimary)
+            Spacer()
+            if !vm.isProUser {
                 Button {
                     presentAIUpsell(surface: "configurator_badge")
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                            .font(.appSmall.weight(.semibold))
-                        Text(label)
-                            .font(.appCaption.weight(.semibold))
-                        Image(systemName: "chevron.right")
-                            .font(.appSmall)
-                    }
-                    .foregroundStyle(AppColors.appPrimary)
-                    .padding(.horizontal, AppSpacing.sm)
-                    .padding(.vertical, AppSpacing.xs)
-                    .background(AppColors.appPrimaryLight, in: Capsule())
+                    Text("Upgrade")
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(AppColors.appPrimary)
+                        .padding(.horizontal, AppSpacing.sm)
+                        .padding(.vertical, AppSpacing.xs)
+                        .background(AppColors.appPrimaryLight, in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Upgrade to Pro for unlimited AI day plans")
             }
         }
-        .padding(.top, AppSpacing.xs)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func inlineError(_ message: String) -> some View {
@@ -584,23 +649,17 @@ private struct AIPlanWizardBottomBar: View {
                 .padding(.horizontal, AppSpacing.lg)
                 .padding(.vertical, AppSpacing.md)
         }
-        .background(.regularMaterial)
+        .background(AppColors.appSurface)
         .animation(.snappy(duration: 0.2), value: vm.plannerState)
     }
 
     @ViewBuilder
     private var content: some View {
         switch vm.plannerState {
-        case .idle:
-            primaryButton(
-                title: "Generate My Day",
-                icon: "sparkles",
-                enabled: vm.canGenerate,
-                action: onGenerate
-            )
-
-        case .loading:
-            progressButton(title: "Planning your day…")
+        case .idle, .loading, .error, .empty:
+            // Generate is now in the toolbar; the bottom bar stays hidden
+            // for these states (parent gates rendering with vm.hasPreview).
+            EmptyView()
 
         case .preview:
             // Asymmetric layout by design: Add to Itinerary owns the
@@ -638,28 +697,7 @@ private struct AIPlanWizardBottomBar: View {
         case .applying:
             progressButton(title: "Adding to itinerary…")
 
-        case .empty:
-            primaryButton(
-                title: "Adjust Settings",
-                icon: "slider.horizontal.3",
-                enabled: true,
-                action: onReset
-            )
-
-        case .error:
-            primaryButton(
-                title: "Try Again",
-                icon: "arrow.clockwise",
-                enabled: vm.canGenerate,
-                action: onGenerate
-            )
-
         case .quotaExhausted:
-            // Wave 4.2 — server returned `free_limit_reached`. Skip the
-            // generic "Try Again" and route the user straight to the
-            // paywall. The CTA copy intentionally references the value
-            // they're unlocking ("Unlimited AI day plans"), not the
-            // price — the paywall itself handles billing optics.
             primaryButton(
                 title: "Upgrade for unlimited plans",
                 icon: "sparkles",
@@ -669,8 +707,6 @@ private struct AIPlanWizardBottomBar: View {
             )
 
         case .applied:
-            // Parent dismisses on `.applied`. We render an empty footer
-            // for the brief frame between state flip and tear-down.
             Color.clear.frame(height: 1)
         }
     }
@@ -689,7 +725,7 @@ private struct AIPlanWizardBottomBar: View {
                 Text(title)
                     .font(.appBody.weight(.semibold))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(AppColors.iconOnColoredSurface)
             .frame(maxWidth: .infinity)
             .frame(minHeight: tall ? 54 : 0)
             .padding(.vertical, tall ? 0 : AppSpacing.md)
@@ -699,66 +735,19 @@ private struct AIPlanWizardBottomBar: View {
         .disabled(!enabled)
     }
 
-    private func secondaryButton(title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: AppSpacing.sm) {
-                Image(systemName: icon)
-                Text(title)
-                    .font(.appBody.weight(.semibold))
-            }
-            .foregroundStyle(AppColors.appPrimary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, AppSpacing.md)
-            .background(AppColors.appPrimaryLight)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium))
-        }
-    }
-
     private func progressButton(title: String) -> some View {
         HStack(spacing: AppSpacing.sm) {
-            ProgressView().tint(.white).scaleEffect(0.85)
+            ProgressView()
+                .tint(AppColors.iconOnColoredSurface)
+                .scaleEffect(0.85)
             Text(title)
                 .font(.appBody.weight(.semibold))
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(AppColors.iconOnColoredSurface)
         .frame(maxWidth: .infinity)
         .padding(.vertical, AppSpacing.md)
         .background(AppColors.appPrimary.opacity(0.7))
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium))
-    }
-}
-
-// MARK: - Settings Card (grouped material surface)
-
-/// Material-backed card container — the Airbnb "white card on warm
-/// background" pattern that groups related controls and gives the
-/// configurator visual hierarchy. Each card insets its children so
-/// the individual rows don't need their own horizontal padding.
-private struct SettingsCard<Content: View>: View {
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        VStack(spacing: 0) {
-            content()
-        }
-        .padding(.horizontal, AppSpacing.lg)
-        .padding(.vertical, AppSpacing.md)
-        .background(AppColors.appSurface)
-        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large))
-        .overlay(
-            RoundedRectangle(cornerRadius: AppCornerRadius.large)
-                .strokeBorder(AppColors.appDivider.opacity(0.85), lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 3)
-    }
-}
-
-/// Thin inset divider used between rows inside a `SettingsCard`.
-private struct CardDivider: View {
-    var body: some View {
-        Divider()
-            .background(AppColors.appDivider)
-            .padding(.vertical, AppSpacing.xs)
     }
 }
 
@@ -769,17 +758,6 @@ private struct DayPickerRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            HStack(spacing: AppSpacing.sm) {
-                MapStyleIcon(
-                    systemName: "calendar",
-                    size: .small,
-                    accent: AppColors.appPrimary,
-                    accessibilityLabel: "Trip day"
-                )
-                Text("Which day?")
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-            }
             if vm.scheduledDays.isEmpty {
                 Text("No days found for this trip.")
                     .font(.appCaption)
@@ -805,7 +783,6 @@ private struct DayPickerRow: View {
                 }
             }
         }
-        .padding(.vertical, AppSpacing.xs)
     }
 }
 
@@ -820,7 +797,7 @@ private struct DayChip: View {
         Button(action: action) {
             Text(label)
                 .font(.appCaption.weight(isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .white : AppColors.textSecondary)
+                .foregroundStyle(isSelected ? AppColors.iconOnColoredSurface : AppColors.textSecondary)
                 .padding(.horizontal, AppSpacing.md)
                 .padding(.vertical, AppSpacing.sm)
                 .background(isSelected ? color : Color.clear)
@@ -834,95 +811,18 @@ private struct DayChip: View {
     }
 }
 
-// MARK: - Stay Area Row
-
-private struct StayAreaRow: View {
-    let label: String
-    let needsPlaceId: Bool
-    let onTap: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            Button(action: onTap) {
-                HStack(spacing: AppSpacing.md) {
-                    HStack(spacing: AppSpacing.sm) {
-                        MapStyleIcon(
-                            systemName: "mappin.and.ellipse",
-                            size: .small,
-                            accent: AppColors.appPrimary,
-                            accessibilityLabel: "Stay area"
-                        )
-                        Text("Stay area")
-                            .font(.appBody.weight(.semibold))
-                            .foregroundStyle(AppColors.textPrimary)
-                    }
-                    .layoutPriority(1)
-                    Spacer(minLength: AppSpacing.sm)
-                    Text(displayLabel)
-                        .font(.appBody)
-                        .foregroundStyle(displayLabel == "Choose area" ? AppColors.textTertiary : AppColors.textSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Image(systemName: "chevron.right")
-                        .font(.appSmall.weight(.semibold))
-                        .foregroundStyle(AppColors.textTertiary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if needsPlaceId {
-                HStack(alignment: .center, spacing: AppSpacing.xs) {
-                    Image(systemName: "info.circle.fill")
-                        .font(.appSmall)
-                        .foregroundStyle(AppColors.appWarning)
-                    Text("Pick a neighborhood or lodging area to start.")
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
-                }
-                .padding(.horizontal, AppSpacing.sm)
-                .padding(.vertical, AppSpacing.xs)
-                .background(AppColors.appWarning.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.small))
-            }
-        }
-        .padding(.vertical, AppSpacing.xs)
-    }
-
-    private var displayLabel: String {
-        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Choose area" : trimmed
-    }
-}
-
 // MARK: - Pace Picker Row
 
 private struct PacePickerRow: View {
     @Binding var selection: PlanPace
 
     var body: some View {
-        HStack {
-            HStack(spacing: AppSpacing.sm) {
-                MapStyleIcon(
-                    systemName: "gauge.with.dots.needle.33percent",
-                    size: .small,
-                    accent: AppColors.appPrimary,
-                    accessibilityLabel: "Pace"
-                )
-                Text("Pace")
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
+        Picker("Pace", selection: $selection) {
+            ForEach(PlanPace.allCases) { pace in
+                Text(pace.displayName).tag(pace)
             }
-            Spacer()
-            Picker("Pace", selection: $selection) {
-                ForEach(PlanPace.allCases) { pace in
-                    Text(pace.displayName).tag(pace)
-                }
-            }
-            .pickerStyle(.menu)
-            .tint(AppColors.appPrimary)
         }
-        .padding(.vertical, AppSpacing.xs)
+        .tint(AppColors.appPrimary)
     }
 }
 
@@ -936,51 +836,16 @@ private struct TimeWindowRow: View {
     @State private var endDate: Date = defaultDate(from: "21:00")
 
     var body: some View {
-        VStack(spacing: AppSpacing.sm) {
-            HStack {
-                HStack(spacing: AppSpacing.sm) {
-                    MapStyleIcon(
-                        systemName: "clock",
-                        size: .small,
-                        accent: AppColors.appPrimary,
-                        accessibilityLabel: "Day window"
-                    )
-                    Text("Day window")
-                        .font(.appBody.weight(.semibold))
-                        .foregroundStyle(AppColors.textPrimary)
-                }
-                Spacer()
-            }
-            HStack(spacing: AppSpacing.xl) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Start")
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textTertiary)
-                    DatePicker("Start", selection: $startDate, displayedComponents: .hourAndMinute)
-                        .labelsHidden()
-                        .tint(AppColors.appPrimary)
-                        .onChange(of: startDate) { _, v in
-                            timeStart = formatHHmm(v)
-                        }
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("End")
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textTertiary)
-                    DatePicker("End", selection: $endDate, displayedComponents: .hourAndMinute)
-                        .labelsHidden()
-                        .tint(AppColors.appPrimary)
-                        .onChange(of: endDate) { _, v in
-                            timeEnd = formatHHmm(v)
-                        }
-                }
-                Spacer()
-            }
-        }
-        .padding(.vertical, AppSpacing.xs)
-        .onAppear {
-            startDate = Self.defaultDate(from: timeStart)
-            endDate = Self.defaultDate(from: timeEnd)
+        Group {
+            DatePicker("Start time", selection: $startDate, displayedComponents: .hourAndMinute)
+                .tint(AppColors.appPrimary)
+                .onChange(of: startDate) { _, v in timeStart = formatHHmm(v) }
+                .onAppear { startDate = Self.defaultDate(from: timeStart) }
+
+            DatePicker("End time", selection: $endDate, displayedComponents: .hourAndMinute)
+                .tint(AppColors.appPrimary)
+                .onChange(of: endDate) { _, v in timeEnd = formatHHmm(v) }
+                .onAppear { endDate = Self.defaultDate(from: timeEnd) }
         }
     }
 
@@ -1006,28 +871,12 @@ private struct ExplorationScopeRow: View {
     @Binding var selection: ExplorationScope
 
     var body: some View {
-        HStack {
-            HStack(spacing: AppSpacing.sm) {
-                MapStyleIcon(
-                    systemName: "map",
-                    size: .small,
-                    accent: AppColors.appPrimary,
-                    accessibilityLabel: "Range"
-                )
-                Text("Range")
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
+        Picker("Range", selection: $selection) {
+            ForEach(ExplorationScope.allCases) { scope in
+                Text(scope.displayName).tag(scope)
             }
-            Spacer()
-            Picker("Range", selection: $selection) {
-                ForEach(ExplorationScope.allCases) { scope in
-                    Text(scope.displayName).tag(scope)
-                }
-            }
-            .pickerStyle(.menu)
-            .tint(AppColors.appPrimary)
         }
-        .padding(.vertical, AppSpacing.xs)
+        .tint(AppColors.appPrimary)
     }
 }
 
@@ -1037,21 +886,8 @@ private struct MealsToggleRow: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        Toggle(isOn: $isOn) {
-            HStack(spacing: AppSpacing.sm) {
-                MapStyleIcon(
-                    systemName: "fork.knife",
-                    size: .small,
-                    accent: AppColors.appPrimary,
-                    accessibilityLabel: "Meals"
-                )
-                Text("Include meals")
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-            }
-        }
-        .tint(AppColors.appPrimary)
-        .padding(.vertical, AppSpacing.xs)
+        Toggle("Include meals", isOn: $isOn)
+            .tint(AppColors.appPrimary)
     }
 }
 

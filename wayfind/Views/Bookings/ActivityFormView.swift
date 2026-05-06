@@ -1,170 +1,78 @@
 import SwiftUI
 
+/// Activity booking fields — native grouped-Form sections.
+/// Rendered inside a `Form {}` in `AddBookingView`.
 struct ActivityFormView: View {
     @Binding var activityName: String
     @Binding var location: String
     @Binding var activityDate: Date?
     @Binding var duration: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            ActivityMapSectionCard(title: "Activity") {
-                ActivityMapTextRow(
-                    icon: "ticket.fill",
-                    title: "Name",
-                    placeholder: "Seine River Cruise",
-                    text: $activityName
-                )
-
-                ActivityMapDivider()
-
-                ActivityMapTextRow(
-                    icon: "location.fill",
-                    title: "Location",
-                    placeholder: "Address or venue",
-                    text: $location
-                )
-            }
-
-            ActivityMapSectionCard(title: "Schedule") {
-                OptionalBookingDateRow(
-                    icon: "calendar.badge.clock",
-                    rowTitle: String(localized: "Starts"),
-                    accent: BookingCategory.activity.color,
-                    selection: $activityDate,
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-
-                ActivityMapDivider()
-
-                ActivityMapTextRow(
-                    icon: "clock.fill",
-                    title: "Duration",
-                    placeholder: "2 hours",
-                    text: $duration
-                )
-            }
-        }
-    }
-}
-
-// =============================================================================
-
-struct ActivityOptionalDetailsSection: View {
     @Binding var provider: String
     @Binding var ticketNumber: String
 
+    @Environment(\.calendar) private var calendar
+
+    private var accent: Color { BookingCategory.activity.color }
+
     var body: some View {
-        DisclosureGroup {
-            ActivityMapSectionCard(title: nil) {
-                ActivityMapTextRow(
-                    icon: "person.crop.circle.fill",
-                    title: "Provider",
-                    placeholder: "Viator",
-                    text: $provider
-                )
-
-                ActivityMapDivider()
-
-                ActivityMapTextRow(
-                    icon: "number",
-                    title: "Ticket Number",
-                    placeholder: "Ticket #",
-                    text: $ticketNumber
-                )
+        Section(String(localized: "Activity")) {
+            LabeledContent(String(localized: "Name")) {
+                TextField(String(localized: "e.g. Seine River Cruise"), text: $activityName)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
             }
-            .padding(.top, AppSpacing.md)
-        } label: {
-            HStack(spacing: AppSpacing.sm) {
-                MapStyleIcon(
-                    systemName: "ellipsis.circle.fill",
-                    size: .small,
-                    accent: BookingCategory.activity.color,
-                    accessibilityLabel: "Optional activity details"
-                )
-
-                Text("Optional Details")
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
+            LabeledContent(String(localized: "Location")) {
+                TextField(String(localized: "Address or venue"), text: $location)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
             }
         }
-        .tint(AppColors.appPrimary)
-    }
-}
 
-private struct ActivityMapSectionCard<Content: View>: View {
-    let title: String?
-    let content: Content
-
-    init(title: String?, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            if let title {
-                FormSectionTitle(title)
-            }
-
-            VStack(spacing: 0) {
-                content
-            }
-            .background(AppColors.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
-            }
-        }
-    }
-}
-
-private struct ActivityMapTextRow: View {
-    let icon: String
-    let title: String
-    let placeholder: String
-    @Binding var text: String
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.activity.color,
-                accessibilityLabel: title
+        Section {
+            DatePicker(
+                String(localized: "Starts"),
+                selection: Binding(
+                    get: { activityDate ?? defaultAnchor() },
+                    set: { activityDate = $0 }
+                ),
+                displayedComponents: [.date, .hourAndMinute]
             )
+            .tint(accent)
 
-            Text(title)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
+            LabeledContent(String(localized: "Duration")) {
+                TextField(String(localized: "e.g. 2 hours"), text: $duration)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled()
+            }
+        } header: {
+            Text(String(localized: "Schedule"))
+        } 
 
-            Spacer(minLength: AppSpacing.md)
-
-            TextField(placeholder, text: $text)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-                .multilineTextAlignment(.trailing)
-                .textInputAutocapitalization(.words)
-                .autocorrectionDisabled()
-                .frame(minWidth: ActivityMapFormMetrics.trailingFieldMinWidth)
+        Section {
+            LabeledContent(String(localized: "Provider")) {
+                TextField(String(localized: "e.g. Viator"), text: $provider)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+            }
+            LabeledContent(String(localized: "Ticket number")) {
+                TextField(String(localized: "e.g. TKT-12345"), text: $ticketNumber)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+            }
+        } header: {
+            Text(String(localized: "Optional details"))
+        } footer: {
+            Text(String(localized: "Provider and ticket number are optional."))
+                .font(.appFootnote)
         }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: ActivityMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
+    }
+
+    private func defaultAnchor() -> Date {
+        calendar.date(bySettingHour: 10, minute: 0, second: 0, of: Date()) ?? Date()
     }
 }
-
-private struct ActivityMapDivider: View {
-    var body: some View {
-        Divider()
-            .background(AppColors.appDivider)
-            .padding(.leading, AppSpacing.xxxl + AppSpacing.md)
-    }
-}
-
-private enum ActivityMapFormMetrics {
-    static let rowMinHeight: CGFloat = 56
-    static let trailingFieldMinWidth: CGFloat = 128
-}
-

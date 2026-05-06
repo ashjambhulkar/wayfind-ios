@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Transport booking on the trip timeline: route, operator + service, then start/end times.
+/// Transport booking on the trip timeline: confirmation header, route, date/time, then operator / service.
 struct TimelineTransportBookingCard: View {
     let details: TransportDetails
     var placeStartTime: Date?
@@ -9,16 +9,34 @@ struct TimelineTransportBookingCard: View {
     var stripeAccent: Color
     var confirmationChip: String?
 
-    private var categoryTint: Color {
-        TimelineCategoryChroma.pinColor(for: .transport)
+    private var categoryTint: Color { BookingCategory.transport.color }
+
+    private var confirmationTrailingDisplay: String {
+        let raw = confirmationChip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if raw.isEmpty { return String(localized: "Confirmation TBD") }
+        return raw
     }
 
-    private var routeLine: String {
+    private var fromToLine: String {
         let from = trimmed(details.departureStation)
         let to = trimmed(details.arrivalStation)
         let fromDisplay = from.isEmpty ? String(localized: "Departure TBD") : from
         let toDisplay = to.isEmpty ? String(localized: "Arrival TBD") : to
-        return "\(fromDisplay) → \(toDisplay)"
+        return String(
+            format: String(localized: "From %1$@ to %2$@"),
+            locale: .current,
+            fromDisplay,
+            toDisplay
+        )
+    }
+
+    private var timesRowText: String {
+        Self.scheduleRowDisplay(
+            details: details,
+            placeStartTime: placeStartTime,
+            placeEndTime: placeEndTime,
+            displayTimeZone: displayTimeZone
+        )
     }
 
     private var operatorServiceLine: String {
@@ -32,44 +50,44 @@ struct TimelineTransportBookingCard: View {
         return "\(op) · \(svc)"
     }
 
-    private var scheduleLine: String {
-        let start = details.departureTime ?? placeStartTime
-        let end = details.arrivalTime ?? placeEndTime
-        if let start, let end, end > start {
-            return "\(start.timeFormatted(timeZone: displayTimeZone)) – \(end.timeFormatted(timeZone: displayTimeZone))"
-        }
-        if let start {
-            return start.timeFormatted(timeZone: displayTimeZone)
-        }
-        if let end {
-            return end.timeFormatted(timeZone: displayTimeZone)
-        }
-        return String(localized: "Times not set")
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            eyebrowRow
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+                Text(BookingCategory.transport.label)
+                    .font(.appFootnote.weight(.semibold))
+                    .foregroundStyle(categoryTint)
+                    .lineLimit(1)
+                Text("·")
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .accessibilityHidden(true)
+                Text(confirmationTrailingDisplay)
+                    .font(.appFootnote.weight(.medium))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: 0)
+            }
 
-            Text(routeLine)
+            Text(fromToLine)
                 .font(.timelineRowTitle)
-                .foregroundStyle(Color.primary)
-                .lineLimit(2)
-                .minimumScaleFactor(0.85)
+                .foregroundStyle(AppColors.textPrimary)
+                .lineLimit(3)
+                .minimumScaleFactor(0.82)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text(operatorServiceLine)
-                .font(.appBody)
+            Text(timesRowText)
+                .font(.appFootnote.weight(.medium))
                 .foregroundStyle(AppColors.textSecondary)
+                .monospacedDigit()
+                .lineLimit(3)
+                .minimumScaleFactor(0.82)
+
+            Text(operatorServiceLine)
+                .font(.appFootnote)
+                .foregroundStyle(AppColors.textTertiary)
                 .lineLimit(2)
                 .minimumScaleFactor(0.88)
-
-            Text(scheduleLine)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(AppColors.textTertiary)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .timelineCardChassis(
@@ -82,33 +100,49 @@ struct TimelineTransportBookingCard: View {
         .accessibilityLabel(accessibilitySummary)
     }
 
-    private var eyebrowRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
-            Text(BookingCategory.transport.label)
-                .font(.appSmall.weight(.semibold))
-                .foregroundStyle(categoryTint)
-                .lineLimit(1)
-
-            if let chip = confirmationChip?.trimmingCharacters(in: .whitespacesAndNewlines), !chip.isEmpty {
-                Text("·")
-                    .font(.appSmall)
-                    .foregroundStyle(AppColors.textTertiary)
-                    .accessibilityHidden(true)
-                Text(chip)
-                    .font(.appSmall.weight(.medium))
-                    .foregroundStyle(AppColors.textSecondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
     private var accessibilitySummary: String {
-        let conf = confirmationChip.map { ", \($0)" } ?? ""
-        return "\(BookingCategory.transport.label)\(conf): \(routeLine). \(operatorServiceLine). \(scheduleLine)"
+        [
+            "\(BookingCategory.transport.label) \(confirmationTrailingDisplay)",
+            fromToLine,
+            timesRowText,
+            operatorServiceLine
+        ].joined(separator: ", ")
     }
 
     private func trimmed(_ value: String?) -> String {
         value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    /// Date + time segments without "Departure"/"Arrival" labels so the row fits the card; shared with timeline accessibility.
+    static func scheduleRowDisplay(
+        details: TransportDetails,
+        placeStartTime: Date?,
+        placeEndTime: Date?,
+        displayTimeZone tz: TimeZone
+    ) -> String {
+        let start = details.departureTime ?? placeStartTime
+        let end = details.arrivalTime ?? placeEndTime
+
+        func segment(_ d: Date) -> String {
+            "\(d.shortFormatted(timeZone: tz)) · \(d.timeFormatted(timeZone: tz))"
+        }
+
+        switch (start, end) {
+        case let (s?, e?) where e > s:
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = tz
+            if cal.isDate(s, inSameDayAs: e) {
+                return "\(s.shortFormatted(timeZone: tz)) · \(s.timeFormatted(timeZone: tz)) – \(e.timeFormatted(timeZone: tz))"
+            }
+            return "\(segment(s)) – \(segment(e))"
+        case let (s?, e?):
+            return "\(segment(s)) – \(segment(e))"
+        case let (s?, _):
+            return segment(s)
+        case let (_, e?):
+            return segment(e)
+        default:
+            return String(localized: "Times not set")
+        }
     }
 }

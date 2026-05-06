@@ -513,16 +513,17 @@ struct PlaceDetailSheet: View {
     @ToolbarContentBuilder
     private var placeDetailDismissToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
-            Button {
+            // Avoid a fixed-size frame on the label — it fights `UINavigationBar` layout
+            // and makes the xmark glyph look off-center (“crooked”).
+            Button(role: .cancel) {
                 dismiss()
             } label: {
-                Image(systemName: "xmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .frame(width: 44, height: 44)
+                Label(String(localized: "Close"), systemImage: "xmark")
+                    .labelStyle(.iconOnly)
+                    .font(.appBody.weight(.medium))
+                    // System primary keeps contrast over the map hero; booking sheet uses the same control.
+                    .foregroundStyle(Color.primary)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(String(localized: "Close"))
         }
     }
 
@@ -548,7 +549,7 @@ struct PlaceDetailSheet: View {
             .tint(Color.primary)
             .accessibilityLabel(String(localized: "Edit"))
 
-            if tripId != nil {
+            if !place.isBooking, tripId != nil {
                 Button {
                     showingPhotosSheet = true
                 } label: {
@@ -559,17 +560,34 @@ struct PlaceDetailSheet: View {
                 .accessibilityLabel(String(localized: "Photos"))
             }
 
-            Button {
-                onMove()
-                dismiss()
-            } label: {
-                Image(systemName: "arrow.right.circle")
-                    .symbolRenderingMode(.monochrome)
+            if !place.isBooking {
+                Button {
+                    onMove()
+                    dismiss()
+                } label: {
+                    Image(systemName: "arrow.right.circle")
+                        .symbolRenderingMode(.monochrome)
+                }
+                .tint(Color.primary)
+                .accessibilityLabel(String(localized: "Move"))
             }
-            .tint(Color.primary)
-            .accessibilityLabel(String(localized: "Move"))
 
             Menu {
+                if place.isBooking {
+                    if tripId != nil {
+                        Button {
+                            showingPhotosSheet = true
+                        } label: {
+                            Label(String(localized: "Photos"), systemImage: "photo.on.rectangle.angled")
+                        }
+                    }
+                    Button {
+                        onMove()
+                        dismiss()
+                    } label: {
+                        Label(String(localized: "Move to Day"), systemImage: "arrow.right.circle")
+                    }
+                }
                 if place.googlePlaceId?.isEmpty == false {
                     Button {
                         showingReportSheet = true
@@ -1049,11 +1067,25 @@ struct PlaceDetailSheet: View {
 
     // MARK: - Booking Detail Body
 
+    /// When `false`, the scroll starts with `bookingContent` only — categories whose `*BookingDetailContent` includes its own identity header. Car rental still uses the hero strip.
+    private var shouldShowBookingHeroStrip: Bool {
+        guard let category = place.bookingCategoryEnum else { return true }
+        switch category {
+        case .flight, .restaurant, .activity, .transport, .hotel:
+            return false
+        case .carRental:
+            return true
+        }
+    }
+
     private var bookingDetailBody: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                    bookingHeroStrip
+                    // Skip the generic hero when the category’s `*BookingDetailContent` already opens with its own identity header (same idea as flight).
+                    if shouldShowBookingHeroStrip {
+                        bookingHeroStrip
+                    }
                     bookingContent
                 }
                 .padding(.bottom, AppSpacing.xl)
@@ -1067,7 +1099,7 @@ struct PlaceDetailSheet: View {
             }
         }
         .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
+        .presentationDragIndicator(.visible)
     }
 
     private var bookingHeroStrip: some View {
@@ -1163,13 +1195,19 @@ struct PlaceDetailSheet: View {
     }
 
     private func flightContent(_ f: FlightDetails) -> some View {
-        FlightBookingDetailContent(details: f, timeZone: bookingDisplayTimeZone)
+        FlightBookingDetailContent(
+            details: f,
+            timeZone: bookingDisplayTimeZone,
+            confirmationNumber: place.confirmationNumber
+        )
     }
 
     private func hotelContent(_ h: HotelDetails) -> some View {
         HotelBookingDetailContent(
             details: h,
             timeZone: bookingDisplayTimeZone,
+            propertyName: place.name,
+            confirmationNumber: place.confirmationNumber,
             address: place.address
         )
     }

@@ -196,10 +196,10 @@ final class TripDetailViewModel {
     }
 
     /// Places and bookings for the day section UI — expands each **hotel**
-    /// into check-in / check-out rows when those dates match this day’s
-    /// calendar (in `timelineTimeZone`), and appends “detached” hotel rows
-    /// when check-in or check-out falls on this day but the booking lives on
-    /// another itinerary day in the database.
+    /// into check-in / check-out rows and each **car rental** into pickup /
+    /// drop-off rows when those instants match this day’s calendar (in
+    /// `timelineTimeZone`). Appends “detached” rows when a leg falls on this
+    /// day but the booking’s home day is different.
     func timelineDisplayRows(for day: ItineraryDay, timelineTimeZone: TimeZone) -> [TripTimelineDisplayRow] {
         let anchor = resolvedTimelineAnchorDate(for: day)
         let dayPlaces = places(for: day)
@@ -235,39 +235,90 @@ final class TripDetailViewModel {
                         nativeRows.append(TripTimelineDisplayRow(id: rowId, place: place, hotelTimelineRole: role))
                     }
                 }
+            } else if place.isBooking,
+                      place.bookingCategoryEnum == .carRental,
+                      case .carRental(let c) = place.bookingDetails {
+                var splitRoles: [(CarRentalTimelineDisplayRole, String)] = []
+                if TripTimelineRowCalendar.isSameCalendarDay(
+                    hotelDate: c.pickupTime,
+                    itineraryAnchor: anchor,
+                    timelineTimeZone: timelineTimeZone
+                ) {
+                    splitRoles.append((.pickup, "\(place.id.uuidString)-car-pickup"))
+                }
+                if TripTimelineRowCalendar.isSameCalendarDay(
+                    hotelDate: c.dropoffTime,
+                    itineraryAnchor: anchor,
+                    timelineTimeZone: timelineTimeZone
+                ) {
+                    splitRoles.append((.dropoff, "\(place.id.uuidString)-car-dropoff"))
+                }
+                if splitRoles.isEmpty {
+                    nativeRows.append(TripTimelineDisplayRow(id: "\(place.id.uuidString)-car-rental", place: place))
+                } else {
+                    for (role, rowId) in splitRoles {
+                        nativeRows.append(TripTimelineDisplayRow(id: rowId, place: place, carRentalTimelineRole: role))
+                    }
+                }
             } else {
-                nativeRows.append(TripTimelineDisplayRow(id: place.id.uuidString, place: place, hotelTimelineRole: nil))
+                nativeRows.append(TripTimelineDisplayRow(id: place.id.uuidString, place: place))
             }
         }
 
         var seenIds = Set(nativeRows.map(\.id))
         var injected: [TripTimelineDisplayRow] = []
         for place in allScheduledPlaces() {
-            guard place.isBooking,
-                  place.bookingCategoryEnum == .hotel,
-                  place.itineraryDayId != day.id,
-                  case .hotel(let h) = place.bookingDetails else { continue }
+            guard place.isBooking, place.itineraryDayId != day.id else { continue }
 
-            if TripTimelineRowCalendar.isSameCalendarDay(
-                hotelDate: h.checkInDate,
-                itineraryAnchor: anchor,
-                timelineTimeZone: timelineTimeZone
-            ) {
-                let rowId = "\(place.id.uuidString)-hotel-checkin"
-                if !seenIds.contains(rowId) {
-                    injected.append(TripTimelineDisplayRow(id: rowId, place: place, hotelTimelineRole: .checkIn))
-                    seenIds.insert(rowId)
+            if place.bookingCategoryEnum == .hotel,
+               case .hotel(let h) = place.bookingDetails {
+                if TripTimelineRowCalendar.isSameCalendarDay(
+                    hotelDate: h.checkInDate,
+                    itineraryAnchor: anchor,
+                    timelineTimeZone: timelineTimeZone
+                ) {
+                    let rowId = "\(place.id.uuidString)-hotel-checkin"
+                    if !seenIds.contains(rowId) {
+                        injected.append(TripTimelineDisplayRow(id: rowId, place: place, hotelTimelineRole: .checkIn))
+                        seenIds.insert(rowId)
+                    }
+                }
+                if TripTimelineRowCalendar.isSameCalendarDay(
+                    hotelDate: h.checkOutDate,
+                    itineraryAnchor: anchor,
+                    timelineTimeZone: timelineTimeZone
+                ) {
+                    let rowId = "\(place.id.uuidString)-hotel-checkout"
+                    if !seenIds.contains(rowId) {
+                        injected.append(TripTimelineDisplayRow(id: rowId, place: place, hotelTimelineRole: .checkOut))
+                        seenIds.insert(rowId)
+                    }
                 }
             }
-            if TripTimelineRowCalendar.isSameCalendarDay(
-                hotelDate: h.checkOutDate,
-                itineraryAnchor: anchor,
-                timelineTimeZone: timelineTimeZone
-            ) {
-                let rowId = "\(place.id.uuidString)-hotel-checkout"
-                if !seenIds.contains(rowId) {
-                    injected.append(TripTimelineDisplayRow(id: rowId, place: place, hotelTimelineRole: .checkOut))
-                    seenIds.insert(rowId)
+
+            if place.bookingCategoryEnum == .carRental,
+               case .carRental(let c) = place.bookingDetails {
+                if TripTimelineRowCalendar.isSameCalendarDay(
+                    hotelDate: c.pickupTime,
+                    itineraryAnchor: anchor,
+                    timelineTimeZone: timelineTimeZone
+                ) {
+                    let rowId = "\(place.id.uuidString)-car-pickup"
+                    if !seenIds.contains(rowId) {
+                        injected.append(TripTimelineDisplayRow(id: rowId, place: place, carRentalTimelineRole: .pickup))
+                        seenIds.insert(rowId)
+                    }
+                }
+                if TripTimelineRowCalendar.isSameCalendarDay(
+                    hotelDate: c.dropoffTime,
+                    itineraryAnchor: anchor,
+                    timelineTimeZone: timelineTimeZone
+                ) {
+                    let rowId = "\(place.id.uuidString)-car-dropoff"
+                    if !seenIds.contains(rowId) {
+                        injected.append(TripTimelineDisplayRow(id: rowId, place: place, carRentalTimelineRole: .dropoff))
+                        seenIds.insert(rowId)
+                    }
                 }
             }
         }

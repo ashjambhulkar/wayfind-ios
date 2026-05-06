@@ -92,15 +92,17 @@ struct BookingsScreenView: View {
                                         )
                                     }
                                     .buttonStyle(.plain)
+                                    .accessibilityIdentifier("booking.row.\(place.id.uuidString)")
                                         .listRowInsets(EdgeInsets(top: AppSpacing.sm, leading: AppSpacing.lg, bottom: AppSpacing.sm, trailing: AppSpacing.lg))
                                         .listRowSeparator(.hidden)
-                                        .listRowBackground(Color.clear)
+                                        .listRowBackground(AppColors.appBackground)
                                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                             Button(role: .destructive) {
                                                 deleteBooking(place)
                                             } label: {
                                                 Label("Delete", systemImage: "trash")
                                             }
+                                            .tint(AppColors.swipeDestructiveTint)
                                         }
                                 }
                             } header: {
@@ -132,6 +134,7 @@ struct BookingsScreenView: View {
                         Label("Add \(category.label)", systemImage: category.sfSymbol)
                     }
                     .tint(AppColors.textPrimary)
+                    .accessibilityIdentifier("bookings.add.\(category.rawValue)")
                 }
             }
         }
@@ -418,7 +421,7 @@ private struct BookingListRow: View {
                 eyebrow: "Stay Pass",
                 symbol: "bed.double.fill",
                 title: place.name,
-                subtitle: hotelStaySubtitle(details),
+                subtitle: clean(place.address, fallback: hotelStaySubtitle(details)),
                 statusText: hotelStayStatus(details),
                 metrics: [
                     BookingPassMetric(title: "Check-in", value: details.checkInDate?.shortFormatted(timeZone: tz) ?? "TBD"),
@@ -621,7 +624,6 @@ private struct BookingPassCard: View {
                     .background(.white.opacity(0.12), in: Capsule())
             }
 
-            passPerforation
         }
         .padding(AppSpacing.lg)
         .background(passHeaderBackground)
@@ -674,18 +676,6 @@ private struct BookingPassCard: View {
                 Circle()
                     .strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
             }
-    }
-
-    private var passPerforation: some View {
-        HStack(spacing: AppSpacing.xs) {
-            ForEach(0..<18, id: \.self) { _ in
-                Circle()
-                    .fill(.white.opacity(0.16))
-                    .frame(width: 3, height: 3)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityHidden(true)
     }
 
     private func metricColumn(_ metric: BookingPassMetric) -> some View {

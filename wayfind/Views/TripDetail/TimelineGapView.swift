@@ -1,4 +1,5 @@
 import CoreLocation
+import MapKit
 import SwiftUI
 
 /// Connector between two consecutive itinerary rows: route summary (time + distance), optional multi-mode picker, and Maps directions A → B.
@@ -12,6 +13,7 @@ struct TimelineGapView: View {
     @State private var isExpanded = false
     @State private var userPickedMode: AppleTravelTimesService.Mode?
     @State private var legRenderTick = 0
+    @Environment(\.colorScheme) private var colorScheme
 
     private var fromCoordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: fromPlace.lat!, longitude: fromPlace.lng!)
@@ -53,21 +55,42 @@ struct TimelineGapView: View {
             }
 
             Spacer(minLength: AppSpacing.xs)
+
+            if fromPlace.hasUsableCoordinate && toPlace.hasUsableCoordinate {
+                openDirectionsInMapsButton
+            }
         }
         .frame(minHeight: TimelineBetweenStopsMetrics.minRowHeight)
     }
 
+    private var openDirectionsInMapsButton: some View {
+        Button {
+            openDirectionsInMaps()
+        } label: {
+            Image(systemName: "arrow.up.right")
+                .font(.timelineSpineTravelModeIcon)
+                .foregroundStyle(AppColors.textTertiary)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "Open directions in Maps"))
+        .accessibilityHint(String(localized: "Opens Apple Maps with directions between the previous itinerary stop and the next."))
+    }
+
     private var modeSpineCircle: some View {
         let side = TimelineBetweenStopsMetrics.modeCircleSide
+        let railTint = TimelineSpineMetrics.continuousRailColor(colorScheme: colorScheme)
         return ZStack {
+            // Background punches a hole in the vertical rail; thick ring matches rail width so the spine reads as looping around the icon.
             Circle()
                 .fill(AppColors.appBackground)
                 .frame(width: side, height: side)
                 .overlay {
                     Circle()
                         .strokeBorder(
-                            TimelineSpineMetrics.continuousRailColor.opacity(0.6),
-                            lineWidth: TimelineBetweenStopsMetrics.modeCircleStrokeWidth
+                            railTint,
+                            lineWidth: TimelineSpineMetrics.continuousRailLineWidth
                         )
                 }
 
@@ -76,7 +99,8 @@ struct TimelineGapView: View {
                     .controlSize(.mini)
             } else {
                 Image(systemName: TimelineBetweenStopsPresentation.sfSymbol(for: effectiveMode))
-                    .font(.system(size: TimelineBetweenStopsMetrics.modeIconSize, weight: .regular))
+                    .font(.timelineSpineTravelModeIcon)
+                    .imageScale(.small)
                     .foregroundStyle(AppColors.textTertiary)
                     .accessibilityHidden(true)
             }
@@ -114,7 +138,7 @@ struct TimelineGapView: View {
     private var summaryClusterLabel: some View {
         HStack(spacing: AppSpacing.xs) {
             Text(summaryLine)
-                .font(.appCaption)
+                .font(.appFootnote)
                 .foregroundStyle(AppColors.textTertiary)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -122,7 +146,7 @@ struct TimelineGapView: View {
 
             if modesForExpansion.count > 1 {
                 Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
+                    .font(.appFootnote.weight(.semibold))
                     .foregroundStyle(AppColors.textTertiary.opacity(0.85))
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
                     .animation(AppSpring.smooth, value: isExpanded)
@@ -150,18 +174,18 @@ struct TimelineGapView: View {
         } label: {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: TimelineBetweenStopsPresentation.sfSymbol(for: mode))
-                    .font(.caption2.weight(.semibold))
+                    .font(.appFootnote.weight(.semibold))
                     .foregroundStyle(isSelected ? AppColors.textSecondary : AppColors.textTertiary)
 
                 if let durationText {
                     Text(durationText)
-                        .font(.caption2.weight(.medium))
+                        .font(.appFootnote.weight(.medium))
                         .foregroundStyle(isSelected ? AppColors.textSecondary : AppColors.textTertiary)
                         .monospacedDigit()
                 }
             }
             .padding(.horizontal, AppSpacing.sm)
-            .padding(.vertical, AppSpacing.xs)
+            .padding(.vertical, AppSpacing.xxs)
             .background(isSelected ? AppColors.textPrimary.opacity(0.06) : AppColors.textPrimary.opacity(0.035), in: Capsule())
             .overlay(
                 Capsule()
@@ -192,19 +216,54 @@ struct TimelineGapView: View {
     }
 
     private var fastestCachedAppleMode: AppleTravelTimesService.Mode? {
-        let pairs: [(AppleTravelTimesService.Mode, Int)] = AppleTravelTimesService.Mode.allCases.compactMap { mode in
-            guard let minutes = appleMinutes(for: mode) else { return nil }
-            return (mode, minutes)
+        let walk = appleMinutes(for: .walking)
+        let drive = appleMinutes(for: .driving)
+        let transit = appleMinutes(for: .transit)
+        guard walk != nil || drive != nil || transit != nil else { return nil }
+
+        // Rule 1: Short walk — always walk, nobody drives or takes transit ≤ 10 min on foot.
+        if let w = walk, w <= Self.alwaysWalkThresholdMinutes { return .walking }
+
+        // Rule 2: Medium walk — walk unless an alternative saves ≥ 35% of the time.
+        // e.g. walk 12 min vs drive 8 min → walk (8 >= 12 * 0.65 = 7.8)
+        //      walk 15 min vs drive 5 min → drive (5 < 15 * 0.65 = 9.75)
+        if let w = walk, w <= Self.mediumWalkThresholdMinutes {
+            let fastestAlt = [drive, transit].compactMap { $0 }.min()
+            if let alt = fastestAlt, Double(alt) >= Double(w) * Self.walkPreferenceRatio {
+                return .walking
+            }
         }
-        guard !pairs.isEmpty else { return nil }
-        let tiePriority: [AppleTravelTimesService.Mode: Int] = [
-            .walking: 0, .driving: 1, .transit: 2,
-        ]
+
+        // Rule 3: Prefer transit over driving when transit is within 5 min of driving
+        // (urban itineraries: transit is often more practical even if slightly slower).
+        if let t = transit, let d = drive, t <= d + Self.transitVsDrivingToleranceMinutes {
+            return .transit
+        }
+
+        // Rule 4: Fastest available; on ties prefer walk > transit > driving.
+        let pairs: [(AppleTravelTimesService.Mode, Int)] = [
+            (.walking, walk), (.transit, transit), (.driving, drive),
+        ].compactMap { mode, minutes in
+            guard let m = minutes else { return nil }
+            return (mode, m)
+        }
+        let tiePriority: [AppleTravelTimesService.Mode: Int] = [.walking: 0, .transit: 1, .driving: 2]
         return pairs.min { a, b in
             if a.1 != b.1 { return a.1 < b.1 }
             return (tiePriority[a.0] ?? 99) < (tiePriority[b.0] ?? 99)
         }?.0
     }
+
+    // MARK: - Mode selection thresholds
+
+    /// Walk trips at or under this duration always show as walking regardless of driving/transit ETAs.
+    private static let alwaysWalkThresholdMinutes = 10
+    /// For walks up to this duration, walking is shown unless an alternative saves ≥ 35% of the time.
+    private static let mediumWalkThresholdMinutes = 20
+    /// Ratio used in the medium-walk rule: alt must be ≥ (walk * ratio) to still prefer walking.
+    private static let walkPreferenceRatio: Double = 0.65
+    /// Transit is preferred over driving when it's within this many minutes of the driving ETA.
+    private static let transitVsDrivingToleranceMinutes = 5
 
     private var modesWithAppleETA: Set<AppleTravelTimesService.Mode> {
         Set(AppleTravelTimesService.Mode.allCases.filter { appleMinutes(for: $0) != nil })
@@ -352,6 +411,27 @@ struct TimelineGapView: View {
             from: fromCoordinate,
             to: toCoordinate
         )
+    }
+
+    private func openDirectionsInMaps() {
+        guard fromPlace.hasUsableCoordinate, toPlace.hasUsableCoordinate,
+              let fromLat = fromPlace.lat, let fromLng = fromPlace.lng,
+              let toLat = toPlace.lat, let toLng = toPlace.lng else { return }
+
+        let fromCoord = CLLocationCoordinate2D(latitude: fromLat, longitude: fromLng)
+        let toCoord = CLLocationCoordinate2D(latitude: toLat, longitude: toLng)
+
+        let fromItem = MKMapItem(placemark: MKPlacemark(coordinate: fromCoord))
+        fromItem.name = fromPlace.name
+        let toItem = MKMapItem(placemark: MKPlacemark(coordinate: toCoord))
+        toItem.name = toPlace.name
+
+        let modeKey = TimelineBetweenStopsPresentation.mkLaunchDirectionsMode(for: effectiveMode)
+        MKMapItem.openMaps(
+            with: [fromItem, toItem],
+            launchOptions: [MKLaunchOptionsDirectionsModeKey: modeKey]
+        )
+        HapticManager.light()
     }
 
     private func storedTravelModeHint() -> AppleTravelTimesService.Mode? {

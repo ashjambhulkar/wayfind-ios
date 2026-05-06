@@ -32,15 +32,24 @@ struct TripNoteEditorView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                noteTitleSection
-
-                noteBodySection
+        Form {
+            Section(String(localized: "Title")) {
+                TextField(String(localized: "Give this note a title"), text: $title)
+                    .textInputAutocapitalization(.sentences)
+                    .disabled(!isEditable)
+                    .focused($focusedField, equals: .title)
             }
-            .padding(AppSpacing.lg)
+
+            Section(String(localized: "Note")) {
+                TextField(String(localized: "Write ideas, links, reminders, or plans…"), text: $bodyText, axis: .vertical)
+                    .lineLimit(8...24)
+                    .disabled(!isEditable)
+                    .focused($focusedField, equals: .body)
+            }
         }
+        .scrollContentBackground(.hidden)
         .background(AppColors.appBackground)
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle("Note")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
@@ -76,43 +85,6 @@ struct TripNoteEditorView: View {
         }
     }
 
-    private var noteTitleSection: some View {
-        TripNoteMapSectionCard(title: "Title") {
-            TextField("Give this note a title", text: $title)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-                .textInputAutocapitalization(.sentences)
-                .disabled(!isEditable)
-                .focused($focusedField, equals: .title)
-                .frame(minHeight: TripNoteMapFormMetrics.rowMinHeight)
-                .padding(.horizontal, AppSpacing.md)
-        }
-    }
-
-    private var noteBodySection: some View {
-        TripNoteMapSectionCard(title: "Note") {
-            ZStack(alignment: .topLeading) {
-                if bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Write ideas, links, reminders, or plans for this trip")
-                        .font(.appBody)
-                        .foregroundStyle(AppColors.textTertiary)
-                        .padding(.top, AppSpacing.sm)
-                        .allowsHitTesting(false)
-                }
-
-                TextField("", text: $bodyText, axis: .vertical)
-                    .font(.appBody)
-                    .foregroundStyle(AppColors.textPrimary)
-                    .lineLimit(8...24)
-                    .disabled(!isEditable)
-                    .focused($focusedField, equals: .body)
-            }
-            .padding(.horizontal, AppSpacing.md)
-            .padding(.vertical, AppSpacing.sm)
-            .frame(minHeight: TripNoteMapFormMetrics.bodyMinHeight, alignment: .top)
-        }
-    }
-
     @MainActor
     private func save() async {
         isSaving = true
@@ -143,40 +115,8 @@ struct TripNoteEditorView: View {
 
 // =============================================================================
 
-private struct TripNoteMapSectionCard<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            FormSectionTitle(title)
-
-            VStack(spacing: 0) {
-                content
-            }
-            .background(AppColors.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
-            }
-        }
-    }
-}
-
 private enum TripNoteEditorTiming {
-    /// Wait for sheet presentation before focusing the body field so the keyboard appears reliably.
     static let sheetBodyFocusDelay = Duration.milliseconds(350)
-}
-
-private enum TripNoteMapFormMetrics {
-    static let rowMinHeight: CGFloat = 56
-    static let bodyMinHeight: CGFloat = 220
 }
 
 private enum NoteEditorFocus: Hashable {

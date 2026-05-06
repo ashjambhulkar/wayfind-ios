@@ -37,6 +37,8 @@ struct HotelDetails: Codable, Hashable {
 struct RestaurantDetails: Codable, Hashable {
     var reservationTime: Date?
     var partySize: Int?
+    /// Street / neighborhood for the reservation (also mirrored on `Place.address` when saved from the app).
+    var address: String? = nil
 }
 
 struct CarRentalDetails: Codable, Hashable {
@@ -198,12 +200,14 @@ private struct RestaurantTagged: Encodable {
         try container.encode(BookingPayloadKind.restaurant, forKey: .type)
         try container.encodeIfPresent(details.reservationTime, forKey: .reservationTime)
         try container.encodeIfPresent(details.partySize, forKey: .partySize)
+        try container.encodeIfPresent(details.address, forKey: .address)
     }
 
     enum CodingKeys: String, CodingKey {
         case type
         case reservationTime
         case partySize
+        case address
     }
 }
 

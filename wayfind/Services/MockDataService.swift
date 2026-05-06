@@ -148,9 +148,26 @@ final class MockDataService {
     }
 
     func addPlace(_ place: Place) async {
+        if place.isBooking {
+            for key in dayPlaces.keys {
+                if let index = dayPlaces[key]?.firstIndex(where: { $0.id == place.id }) {
+                    dayPlaces[key]?[index] = place
+                    return
+                }
+            }
+        }
         var list = dayPlaces[place.itineraryDayId] ?? []
         list.append(place)
         dayPlaces[place.itineraryDayId] = list
+    }
+
+    /// Mock mirror of `SupabaseManager.ensureBookingPlaceholderExistsIfNeeded`.
+    func ensureBookingPlaceholderForAdd(_ place: Place) async {
+        guard place.isBooking else { return }
+        for list in dayPlaces.values where list.contains(where: { $0.id == place.id }) {
+            return
+        }
+        await addPlace(place)
     }
 
     func deletePlace(id: UUID) async {
@@ -941,7 +958,7 @@ final class MockDataService {
                 sortOrder: 1, startTime: dinnerTime, endTime: nil,
                 isBooking: true, bookingType: BookingCategory.restaurant.rawValue,
                 confirmationNumber: "SEP-4412",
-                bookingDetails: .restaurant(RestaurantDetails(reservationTime: dinnerTime, partySize: 2)),
+                bookingDetails: .restaurant(RestaurantDetails(reservationTime: dinnerTime, partySize: 2, address: "80 Rue de Charonne, 75011 Paris")),
                 heroImageUrl: "https://images.unsplash.com/photo-1600891964599-f61ba0e24092?w=800&q=80",
                 rating: 4.6, userRatingsTotal: 1_243, priceLevel: 3,
                 website: "https://www.septime-charonne.fr",
@@ -1024,9 +1041,25 @@ final class MockDataService {
         let t1Date = dayOffset(0, from: tokyoStart)
         let tokyoFlightDep = time(on: t1Date, hour: 11, minute: 0)
         let tokyoFlightArr = time(on: t1Date, hour: 15, minute: 30)
+        // Fixed UUIDs for booking E2E tests (`booking.row.<uuid>` identifiers).
+        let e2eTokyoRestaurantId = UUID(uuidString: "32222222-2222-3333-4444-55555555e201")!
+        let e2eTokyoCarRentalId = UUID(uuidString: "32222222-2222-3333-4444-55555555e202")!
+        let e2eTokyoActivityId = UUID(uuidString: "32222222-2222-3333-4444-55555555e203")!
+        let e2eTokyoTransportId = UUID(uuidString: "32222222-2222-3333-4444-55555555e204")!
+        let e2eRestaurantReservation = time(on: t1Date, hour: 19, minute: 0)
+        let e2eCarPickup = time(on: t1Date, hour: 17, minute: 0)
+        let e2eCarDropoff = time(on: t1Date, hour: 19, minute: 0)
+        let e2eActivityStart = time(on: t1Date, hour: 10, minute: 0)
+        let e2eTransportDep = time(on: t1Date, hour: 8, minute: 0)
+        let e2eTransportArr = time(on: t1Date, hour: 10, minute: 30)
+
         dayPlacesMap[tokyoDay1] = [
             Place(id: UUID(uuidString: "32222222-2222-3333-4444-555555550010")!, itineraryDayId: tokyoDay1, name: "UA 837 · SFO to NRT", address: "San Francisco International Airport", lat: 37.6213, lng: -122.3790, category: PlaceCategory.transport.rawValue, notes: nil, sortOrder: 0, startTime: tokyoFlightDep, endTime: tokyoFlightArr, isBooking: true, bookingType: BookingCategory.flight.rawValue, confirmationNumber: "UA837SFO", bookingDetails: .flight(FlightDetails(airline: "United Airlines", flightNumber: "837", departureAirport: "SFO", arrivalAirport: "NRT", departureTime: tokyoFlightDep, arrivalTime: tokyoFlightArr, terminal: "3", gate: "86", seat: "22A"))),
             Place(id: UUID(uuidString: "32222222-2222-3333-4444-555555550011")!, itineraryDayId: tokyoDay1, name: "Park Hyatt Tokyo", address: "3-7-1-2 Nishi-Shinjuku, Shinjuku City, Tokyo", lat: 35.6875, lng: 139.6920, category: PlaceCategory.hotel.rawValue, notes: nil, sortOrder: 1, startTime: nil, endTime: nil, isBooking: true, bookingType: BookingCategory.hotel.rawValue, confirmationNumber: "PHT-220011", bookingDetails: .hotel(HotelDetails(checkInDate: dayOffset(0, from: tokyoStart), checkInTime: "4:00 PM", checkOutDate: dayOffset(6, from: tokyoStart), checkOutTime: "11:00 AM", roomType: "Park King", nights: 6))),
+            Place(id: e2eTokyoRestaurantId, itineraryDayId: tokyoDay1, name: "Sukiyabashi Jiro", address: "4 Chome-5-4 Ginza, Chuo City, Tokyo", lat: nil, lng: nil, category: PlaceCategory.restaurant.rawValue, notes: nil, sortOrder: 2, startTime: e2eRestaurantReservation, endTime: nil, isBooking: true, bookingType: BookingCategory.restaurant.rawValue, confirmationNumber: "SJ-E2E-01", bookingDetails: .restaurant(RestaurantDetails(reservationTime: e2eRestaurantReservation, partySize: 2, address: "4 Chome-5-4 Ginza, Chuo City, Tokyo"))),
+            Place(id: e2eTokyoCarRentalId, itineraryDayId: tokyoDay1, name: "Toyota Rent a Car", address: "Narita Air Terminal 1", lat: nil, lng: nil, category: PlaceCategory.transport.rawValue, notes: nil, sortOrder: 3, startTime: e2eCarPickup, endTime: e2eCarDropoff, isBooking: true, bookingType: BookingCategory.carRental.rawValue, confirmationNumber: "TRC-E2E-01", bookingDetails: .carRental(CarRentalDetails(company: "Toyota Rent a Car", pickupLocation: "Narita Air Terminal 1", dropoffLocation: "Shinjuku Station", pickupTime: e2eCarPickup, dropoffTime: e2eCarDropoff, carType: "Prius"))),
+            Place(id: e2eTokyoActivityId, itineraryDayId: tokyoDay1, name: "TeamLab Planets", address: "6-1-16 Toyosu, Koto City, Tokyo", lat: nil, lng: nil, category: PlaceCategory.attraction.rawValue, notes: nil, sortOrder: 4, startTime: e2eActivityStart, endTime: nil, isBooking: true, bookingType: BookingCategory.activity.rawValue, confirmationNumber: "TLP-E2E-01", bookingDetails: .activity(ActivityDetails(provider: "teamLab", duration: "2 hours", ticketNumber: "TLP-E2E-001"))),
+            Place(id: e2eTokyoTransportId, itineraryDayId: tokyoDay1, name: "JR East Shinkansen N700", address: "Tokyo Station", lat: nil, lng: nil, category: PlaceCategory.transport.rawValue, notes: nil, sortOrder: 5, startTime: e2eTransportDep, endTime: e2eTransportArr, isBooking: true, bookingType: BookingCategory.transport.rawValue, confirmationNumber: "JR-E2E-01", bookingDetails: .transport(TransportDetails(operatorName: "JR East", serviceNumber: "Shinkansen N700", departureStation: "Tokyo", arrivalStation: "Kyoto", departureTime: e2eTransportDep, arrivalTime: e2eTransportArr, seat: "Car 8, Seat 12A"))),
         ]
 
         let t2Date = dayOffset(1, from: tokyoStart)
@@ -1191,14 +1224,14 @@ final class MockDataService {
         dayPlacesMap[londonDay2] = [
             Place(id: UUID(uuidString: "44444444-2222-3333-4444-555555550020")!, itineraryDayId: londonDay2, name: "British Museum", address: "Great Russell St, London WC1B 3DG", lat: 51.5194, lng: -0.1270, category: PlaceCategory.attraction.rawValue, notes: nil, sortOrder: 0, startTime: time(on: l2Date, hour: 10, minute: 0), endTime: time(on: l2Date, hour: 13, minute: 0), isBooking: false, bookingType: nil, confirmationNumber: nil, bookingDetails: nil),
             Place(id: UUID(uuidString: "44444444-2222-3333-4444-555555550021")!, itineraryDayId: londonDay2, name: "Covent Garden", address: "Covent Garden, London WC2E 8RF", lat: 51.5117, lng: -0.1240, category: PlaceCategory.shopping.rawValue, notes: nil, sortOrder: 1, startTime: time(on: l2Date, hour: 14, minute: 0), endTime: time(on: l2Date, hour: 16, minute: 0), isBooking: false, bookingType: nil, confirmationNumber: nil, bookingDetails: nil),
-            Place(id: UUID(uuidString: "44444444-2222-3333-4444-555555550022")!, itineraryDayId: londonDay2, name: "The Ivy Covent Garden", address: "1-5 West St, London WC2H 9NQ", lat: 51.5130, lng: -0.1262, category: PlaceCategory.restaurant.rawValue, notes: "Dinner reservation", sortOrder: 2, startTime: time(on: l2Date, hour: 19, minute: 0), endTime: time(on: l2Date, hour: 21, minute: 0), isBooking: true, bookingType: BookingCategory.restaurant.rawValue, confirmationNumber: "IVY-8812", bookingDetails: .restaurant(RestaurantDetails(reservationTime: time(on: l2Date, hour: 19, minute: 0), partySize: 2))),
+            Place(id: UUID(uuidString: "44444444-2222-3333-4444-555555550022")!, itineraryDayId: londonDay2, name: "The Ivy Covent Garden", address: "1-5 West St, London WC2H 9NQ", lat: 51.5130, lng: -0.1262, category: PlaceCategory.restaurant.rawValue, notes: "Dinner reservation", sortOrder: 2, startTime: time(on: l2Date, hour: 19, minute: 0), endTime: time(on: l2Date, hour: 21, minute: 0), isBooking: true, bookingType: BookingCategory.restaurant.rawValue, confirmationNumber: "IVY-8812", bookingDetails: .restaurant(RestaurantDetails(reservationTime: time(on: l2Date, hour: 19, minute: 0), partySize: 2, address: "1-5 West St, London WC2H 9NQ"))),
         ]
 
         let l3Date = dayOffset(2, from: londonStart)
         dayPlacesMap[londonDay3] = [
             Place(id: UUID(uuidString: "44444444-2222-3333-4444-555555550030")!, itineraryDayId: londonDay3, name: "Buckingham Palace", address: "Buckingham Palace, London SW1A 1AA", lat: 51.5014, lng: -0.1419, category: PlaceCategory.attraction.rawValue, notes: nil, sortOrder: 0, startTime: time(on: l3Date, hour: 10, minute: 0), endTime: time(on: l3Date, hour: 11, minute: 30), isBooking: false, bookingType: nil, confirmationNumber: nil, bookingDetails: nil),
             Place(id: UUID(uuidString: "44444444-2222-3333-4444-555555550031")!, itineraryDayId: londonDay3, name: "St James's Park", address: "St. James's Park, London SW1A 2BJ", lat: 51.5025, lng: -0.1340, category: PlaceCategory.nature.rawValue, notes: nil, sortOrder: 1, startTime: time(on: l3Date, hour: 11, minute: 45), endTime: time(on: l3Date, hour: 13, minute: 0), isBooking: false, bookingType: nil, confirmationNumber: nil, bookingDetails: nil),
-            Place(id: UUID(uuidString: "44444444-2222-3333-4444-555555550032")!, itineraryDayId: londonDay3, name: "Afternoon Tea at The Ritz", address: "150 Piccadilly, St. James's, London W1J 9BR", lat: 51.5071, lng: -0.1420, category: PlaceCategory.restaurant.rawValue, notes: "Dress code: smart attire", sortOrder: 2, startTime: time(on: l3Date, hour: 15, minute: 30), endTime: time(on: l3Date, hour: 17, minute: 30), isBooking: true, bookingType: BookingCategory.restaurant.rawValue, confirmationNumber: "RITZ-TEA991", bookingDetails: .restaurant(RestaurantDetails(reservationTime: time(on: l3Date, hour: 15, minute: 30), partySize: 2))),
+            Place(id: UUID(uuidString: "44444444-2222-3333-4444-555555550032")!, itineraryDayId: londonDay3, name: "Afternoon Tea at The Ritz", address: "150 Piccadilly, St. James's, London W1J 9BR", lat: 51.5071, lng: -0.1420, category: PlaceCategory.restaurant.rawValue, notes: "Dress code: smart attire", sortOrder: 2, startTime: time(on: l3Date, hour: 15, minute: 30), endTime: time(on: l3Date, hour: 17, minute: 30), isBooking: true, bookingType: BookingCategory.restaurant.rawValue, confirmationNumber: "RITZ-TEA991", bookingDetails: .restaurant(RestaurantDetails(reservationTime: time(on: l3Date, hour: 15, minute: 30), partySize: 2, address: "150 Piccadilly, St. James's, London W1J 9BR"))),
         ]
 
         let l4Date = dayOffset(3, from: londonStart)

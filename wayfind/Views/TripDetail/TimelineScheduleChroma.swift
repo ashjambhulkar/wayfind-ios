@@ -36,8 +36,11 @@ enum TimelineCategoryChroma {
         switch category {
         case .restaurant:           return AppColors.timelineCategoryFoodPin
         case .hotel:                return AppColors.timelineCategoryStayPin
-        case .flight, .carRental,
-             .transport:            return AppColors.timelineCategoryTransitPin
+        case .flight:
+            // Same transport-family hue as `PlaceDetailSheet` booking hero (`BookingCategory.color`).
+            return category.color
+        case .carRental, .transport:
+            return AppColors.timelineCategoryTransitPin
         case .activity:             return AppColors.timelineCategoryCulturePin
         }
     }
@@ -46,8 +49,11 @@ enum TimelineCategoryChroma {
         switch category {
         case .restaurant:           return AppColors.timelineCategoryFoodStripe
         case .hotel:                return AppColors.timelineCategoryStayStripe
-        case .flight, .carRental,
-             .transport:            return AppColors.timelineCategoryTransitStripe
+        case .flight:
+            // Drives `scheduleAccent` on `TimelineFlightBookingPassCard` (route + plane glyphs).
+            return category.color
+        case .carRental, .transport:
+            return AppColors.timelineCategoryTransitStripe
         case .activity:             return AppColors.timelineCategoryCultureStripe
         }
     }

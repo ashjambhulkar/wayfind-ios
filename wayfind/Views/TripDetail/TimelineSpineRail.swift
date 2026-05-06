@@ -49,8 +49,12 @@ enum TimelineSpineMetrics {
     /// Pulls rail + pin centerline slightly toward the leading edge so the spine lines up with the pins.
     static let spineCenterlineNudgeLeft: CGFloat = 6
 
-    static var continuousRailColor: Color {
-        AppColors.appDivider.opacity(continuousRailDividerOpacity)
+    /// `appDivider`-tinted rail reads well on dark grouped gray; on light cream it vanishes — use a neutral stroke instead.
+    static func continuousRailColor(colorScheme: ColorScheme) -> Color {
+        if colorScheme == .dark {
+            return AppColors.appDivider.opacity(continuousRailDividerOpacity)
+        }
+        return AppColors.textTertiary.opacity(0.34)
     }
 
     /// Horizontal offset from a timeline row’s outer leading edge (after `AppSpacing.lg`)
@@ -63,6 +67,8 @@ enum TimelineSpineMetrics {
 // MARK: - Continuous rail
 
 private struct TimelineSpineContinuousRailLayer: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         GeometryReader { proxy in
             let railX = AppSpacing.lg + TimelineSpineMetrics.railCenterXFromTimelineRowLeading
@@ -71,7 +77,7 @@ private struct TimelineSpineContinuousRailLayer: View {
                 path.addLine(to: CGPoint(x: railX, y: proxy.size.height))
             }
             .stroke(
-                TimelineSpineMetrics.continuousRailColor,
+                TimelineSpineMetrics.continuousRailColor(colorScheme: colorScheme),
                 style: StrokeStyle(
                     lineWidth: TimelineSpineMetrics.continuousRailLineWidth,
                     lineCap: .round

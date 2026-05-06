@@ -303,6 +303,26 @@ private struct AttachmentTile: View {
 
     @State private var image: UIImage?
 
+    init(
+        attachment: ActivityAttachment,
+        index: Int,
+        total: Int,
+        canEdit: Bool = true,
+        onSetCover: @escaping () -> Void,
+        onDelete: @escaping () -> Void
+    ) {
+        self.attachment = attachment
+        self.index = index
+        self.total = total
+        self.canEdit = canEdit
+        self.onSetCover = onSetCover
+        self.onDelete = onDelete
+        // Synchronous memory cache read so cached images appear without a skeleton flash.
+        self._image = State(
+            initialValue: ActivityAttachmentImageCache.shared.cachedImage(for: attachment.id)
+        )
+    }
+
     var body: some View {
         ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous)
@@ -343,7 +363,8 @@ private struct AttachmentTile: View {
                 }
             }
         }
-        .task(id: "\(attachment.id.uuidString)-\(attachment.signedURL?.absoluteString ?? "")") {
+        .task(id: attachment.signedURL == nil ? "pending" : attachment.id.uuidString) {
+            guard image == nil else { return }
             await loadImage()
         }
         .accessibilityElement(children: .ignore)
@@ -374,15 +395,16 @@ private struct AttachmentTile: View {
 
     private func loadImage() async {
         if let cached = await ActivityAttachmentImageCache.shared.image(for: attachment.id) {
-            await MainActor.run { self.image = cached }
+            if !Task.isCancelled { self.image = cached }
             return
         }
         guard let url = attachment.signedURL else { return }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
+            try Task.checkCancellation()
             guard !data.isEmpty, let img = UIImage(data: data) else { return }
-            await ActivityAttachmentImageCache.shared.store(data: data, for: attachment.id)
-            await MainActor.run { self.image = img }
+            ActivityAttachmentImageCache.shared.store(data: data, for: attachment.id)
+            if !Task.isCancelled { self.image = img }
         } catch {
             // Tile keeps skeleton; per-tile errors would be noisy.
         }

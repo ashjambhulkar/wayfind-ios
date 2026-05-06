@@ -32,6 +32,7 @@ struct BookingAttachmentsSheet: View {
 
     @State private var service: BookingAttachmentService?
     @State private var photoPickerItems: [PhotosPickerItem] = []
+    @State private var showingPhotosPicker: Bool = false
     @State private var showingDocumentPicker: Bool = false
     @State private var pendingUploads: [PendingAttachmentUpload] = []
     @State private var uploadError: String?
@@ -85,19 +86,8 @@ struct BookingAttachmentsSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        PhotosPicker(
-                            selection: $photoPickerItems,
-                            maxSelectionCount: remainingSlots,
-                            matching: .images,
-                            photoLibrary: .shared()
-                        ) {
-                            Label("Choose Photos", systemImage: "photo.on.rectangle.angled")
-                        }
-                        Button {
-                            showingDocumentPicker = true
-                        } label: {
-                            Label("Choose Files", systemImage: "doc.badge.plus")
-                        }
+                        Button("Choose Photo") { showingPhotosPicker = true }
+                        Button("Choose File") { showingDocumentPicker = true }
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .accessibilityLabel("Add attachment")
@@ -127,6 +117,13 @@ struct BookingAttachmentsSheet: View {
             } message: {
                 Text(uploadError ?? "")
             }
+            .photosPicker(
+                isPresented: $showingPhotosPicker,
+                selection: $photoPickerItems,
+                maxSelectionCount: remainingSlots,
+                matching: .images,
+                photoLibrary: .shared()
+            )
             .onChange(of: photoPickerItems) { _, items in
                 guard !items.isEmpty else { return }
                 Task { await handlePhotosPicked(items: items) }
@@ -296,7 +293,7 @@ private struct PreviewURLWrapper: Identifiable {
     var id: String { url.absoluteString }
 }
 
-private struct BookingUploadRow: View {
+struct BookingUploadRow: View {
     let upload: PendingAttachmentUpload
     let onClear: () -> Void
 

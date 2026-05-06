@@ -151,6 +151,24 @@ final class DataService {
         return true
     }
 
+    /// Inserts a minimal `trip_bookings` row when missing so booking
+    /// attachments can be uploaded before the user taps Add (FK requires the row).
+    func ensureBookingPlaceholderForAdd(_ place: Place) async -> Bool {
+        if let real {
+            do {
+                try await real.ensureBookingPlaceholderExistsIfNeeded(place)
+                return true
+            } catch {
+                #if DEBUG
+                print("[DataService] ensureBookingPlaceholderForAdd failed: \(error)")
+                #endif
+                return false
+            }
+        }
+        await mock!.ensureBookingPlaceholderForAdd(place)
+        return true
+    }
+
     func deletePlace(id: UUID) async {
         if let real { try? await real.deletePlace(id: id) }
         else { await mock!.deletePlace(id: id) }

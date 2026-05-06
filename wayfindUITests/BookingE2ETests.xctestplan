@@ -1,0 +1,34 @@
+{
+  "configurations" : [
+    {
+      "id" : "C3A88CF8-1E40-4BC3-B9DC-E78B97A6BF12",
+      "name" : "E2E Mock",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "testTimeoutsEnabled" : true
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:wayfind.xcodeproj",
+        "identifier" : "21CB280B2F7F0D8C00154A11",
+        "name" : "wayfindTests"
+      }
+    },
+    {
+      "skippedTests" : [
+        "ScreenshotUITests"
+      ],
+      "target" : {
+        "containerPath" : "container:wayfind.xcodeproj",
+        "identifier" : "21CB29152F7F0D8C00154A85",
+        "name" : "wayfindUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

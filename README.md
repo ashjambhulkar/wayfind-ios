@@ -28,13 +28,15 @@ For a fork or a new environment, replace those values with your own Supabase pro
 
 ## Project layout
 
-| Path | Role |
-|------|------|
-| `wayfind/` | App source (SwiftUI views, view models, services) |
-| `wayfind.xcodeproj/` | Xcode project and SPM resolution |
-| `InfoAdditions.plist` | Extra Info.plist entries referenced by the target |
-| `supabase/` | Database migrations, Edge Functions, config, tests, and seeds |
-| `docs/` | Living architecture, module, backend, and runbook documentation |
+
+| Path                  | Role                                                            |
+| --------------------- | --------------------------------------------------------------- |
+| `wayfind/`            | App source (SwiftUI views, view models, services)               |
+| `wayfind.xcodeproj/`  | Xcode project and SPM resolution                                |
+| `InfoAdditions.plist` | Extra Info.plist entries referenced by the target               |
+| `supabase/`           | Database migrations, Edge Functions, config, tests, and seeds   |
+| `docs/`               | Living architecture, module, backend, and runbook documentation |
+
 
 ## Project memory
 
@@ -61,35 +63,39 @@ For map-specific work, read `wayfind/Views/Map/README.md` before editing map sea
 All usage was **$0.00** this period because every line stayed within its free-tier cap.
 The table below shows the Google cost that kicks in once each cap is breached, and whether the service is already replaced by a native Apple Maps equivalent.
 
-| Google Service | Free Cap | Cost After Cap (per 1,000) | Apple Maps |
-|---|---|---|---|
-| Routes: Compute Routes Essentials | 10,000 | $5.00 | ✅ `MKDirections` |
-| Places API: Autocomplete Requests | 10,000 | $2.83 | ❌ |
-| Places API: Text Search Pro | 5,000 | $32.00 | ❌ |
-| Places API: Text Search Enterprise | 1,000 | $35.00 | ❌ |
-| Places API: Place Details Pro | 5,000 | $17.00 | ❌ |
-| Places API: Place Details Enterprise | 1,000 | $20.00 | ❌ |
-| Places API: Place Details Enterprise + Atmosphere | 1,000 | $25.00 | ❌ |
-| Places API: Place Details Essentials (IDs Only) | Unlimited | Free | ❌ |
-| Places API: Place Details Photos | 1,000 | $7.00 | ❌ |
-| Geocoding | 10,000 | $5.00 | ✅ `CLGeocoder` |
-| Legacy: Basic Data | Unlimited | Free | ❌ |
-| Legacy: Atmosphere Data | 1,000 | $5.00 | ❌ |
-| Legacy: Contact Data | 1,000 | $3.00 | ❌ |
-| Legacy: Text Search | 5,000 | $32.00 | ❌ |
-| Legacy: Places Details | 5,000 | $17.00 | ❌ |
-| Legacy: Places Photo | 1,000 | $7.00 | ❌ |
-| Time Zone | 10,000 | $5.00 | ✅ `CLPlacemark.timeZone` |
-| Distance Matrix | 10,000 | $5.00 | ✅ `MKDirections` |
+
+| Google Service                                    | Free Cap  | Cost After Cap (per 1,000) | Apple Maps               |
+| ------------------------------------------------- | --------- | -------------------------- | ------------------------ |
+| Routes: Compute Routes Essentials                 | 10,000    | $5.00                      | ✅ `MKDirections`         |
+| Places API: Autocomplete Requests                 | 10,000    | $2.83                      | ❌                        |
+| Places API: Text Search Pro                       | 5,000     | $32.00                     | ❌                        |
+| Places API: Text Search Enterprise                | 1,000     | $35.00                     | ❌                        |
+| Places API: Place Details Pro                     | 5,000     | $17.00                     | ❌                        |
+| Places API: Place Details Enterprise              | 1,000     | $20.00                     | ❌                        |
+| Places API: Place Details Enterprise + Atmosphere | 1,000     | $25.00                     | ❌                        |
+| Places API: Place Details Essentials (IDs Only)   | Unlimited | Free                       | ❌                        |
+| Places API: Place Details Photos                  | 1,000     | $7.00                      | ❌                        |
+| Geocoding                                         | 10,000    | $5.00                      | ✅ `CLGeocoder`           |
+| Legacy: Basic Data                                | Unlimited | Free                       | ❌                        |
+| Legacy: Atmosphere Data                           | 1,000     | $5.00                      | ❌                        |
+| Legacy: Contact Data                              | 1,000     | $3.00                      | ❌                        |
+| Legacy: Text Search                               | 5,000     | $32.00                     | ❌                        |
+| Legacy: Places Details                            | 5,000     | $17.00                     | ❌                        |
+| Legacy: Places Photo                              | 1,000     | $7.00                      | ❌                        |
+| Time Zone                                         | 10,000    | $5.00                      | ✅ `CLPlacemark.timeZone` |
+| Distance Matrix                                   | 10,000    | $5.00                      | ✅ `MKDirections`         |
+
 
 ### Cost at scale (projected)
 
-| Scale | Google Bill | After Full Apple Migration | Saving |
-|---|---|---|---|
-| 1× (current) | $0 | $0 | $0 |
-| 10× | ~$600 / mo | ~$15 / mo | ~$585 / mo |
-| 50× | ~$3,500 / mo | ~$100 / mo | ~$3,400 / mo |
-| 100× | ~$8,800 / mo | ~$350 / mo | ~$8,450 / mo |
+
+| Scale        | Google Bill  | After Full Apple Migration | Saving       |
+| ------------ | ------------ | -------------------------- | ------------ |
+| 1× (current) | $0           | $0                         | $0           |
+| 10×          | ~$600 / mo   | ~$15 / mo                  | ~$585 / mo   |
+| 50×          | ~$3,500 / mo | ~$100 / mo                 | ~$3,400 / mo |
+| 100×         | ~$8,800 / mo | ~$350 / mo                 | ~$8,450 / mo |
+
 
 ### Migration priority
 
@@ -147,19 +153,21 @@ Once a Google `place_id` is stored in Supabase next to your Apple-sourced `MKMap
 1. **Render the UI immediately** using free Apple data
 2. **Trigger Google Place Details Photos / Atmosphere** (`$7–25 / 1,000`) **only on demand** — when the user expands a destination card to research it
 3. **Cache aggressively** — Google's Terms of Service permit:
-   - **`place_id` cached indefinitely** (with periodic validity refresh)
-   - **Atmosphere data cached for up to 30 days** before requiring a refetch
+  - `**place_id` cached indefinitely** (with periodic validity refresh)
+  - **Atmosphere data cached for up to 30 days** before requiring a refetch
 4. Subsequent users viewing the same Parisian café pull cached reviews from Supabase, not Google's API
 
 ### Net cost impact
 
-| Layer | Before | After |
-|---|---|---|
-| Keystroke autocomplete | `$2.83 / 1,000` (Google) | **$0** (MapKit) |
-| Text search resolution | `$32–35 / 1,000` (Google Pro/Ent) | **$0** (MapKit) → optional `$5 / 1,000` for Google bridge |
-| Initial place details (name/coord/address/phone) | `$17–25 / 1,000` (Google) | **$0** (`MKMapItem`) |
-| Photos / reviews / hours | `$7–25 / 1,000` (Google) | Same — but called only on intent + cached 30 days |
-| Google `place_id` refresh | — | **$0** (IDs Only SKU) |
+
+| Layer                                            | Before                            | After                                                     |
+| ------------------------------------------------ | --------------------------------- | --------------------------------------------------------- |
+| Keystroke autocomplete                           | `$2.83 / 1,000` (Google)          | **$0** (MapKit)                                           |
+| Text search resolution                           | `$32–35 / 1,000` (Google Pro/Ent) | **$0** (MapKit) → optional `$5 / 1,000` for Google bridge |
+| Initial place details (name/coord/address/phone) | `$17–25 / 1,000` (Google)         | **$0** (`MKMapItem`)                                      |
+| Photos / reviews / hours                         | `$7–25 / 1,000` (Google)          | Same — but called only on intent + cached 30 days         |
+| Google `place_id` refresh                        | —                                 | **$0** (IDs Only SKU)                                     |
+
 
 This shifts Google from being the **discovery engine** (called on every keystroke) to a **deep-research bridge** (called only when a user commits to a place), reducing API spend by an estimated **85–95%** at scale while keeping the premium content layer available.
 
@@ -181,11 +189,13 @@ Most autocomplete traffic is redundant ("Pari" → "Paris" → "Paris, Fra" all 
 [Browser memory / IndexedDB] → [CDN edge cache] → [Server cache (Redis)] → MapKit JS
 ```
 
-| Layer | Tool | TTL | Purpose |
-|---|---|---|---|
-| Browser | `react-query`, IndexedDB | 10 min | Per-session deduplication |
-| Edge | Vercel Edge Config, Cloudflare KV | 24 h | Popular global queries (Paris, Tokyo, NYC) |
-| Server | Upstash Redis | 30 days | Resolved place data keyed by `lat,lng,name` |
+
+| Layer   | Tool                              | TTL     | Purpose                                     |
+| ------- | --------------------------------- | ------- | ------------------------------------------- |
+| Browser | `react-query`, IndexedDB          | 10 min  | Per-session deduplication                   |
+| Edge    | Vercel Edge Config, Cloudflare KV | 24 h    | Popular global queries (Paris, Tokyo, NYC)  |
+| Server  | Upstash Redis                     | 30 days | Resolved place data keyed by `lat,lng,name` |
+
 
 Apple's ToS permits caching place data, similar to Google's policy.
 

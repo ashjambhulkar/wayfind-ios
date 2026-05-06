@@ -38,8 +38,23 @@ extension Font {
         .system(.caption, design: .rounded)
     }
 
+    /// Dense secondary lines on timeline cards (eyebrow, subtitle, travel segment).
+    static var appFootnote: Font {
+        .system(.footnote, design: .rounded)
+    }
+
     static var appSmall: Font {
         .system(.caption2, design: .rounded).weight(.medium)
+    }
+
+    /// Category / booking SF Symbol inside the map-style timeline spine pin.
+    static var timelineSpinePinIcon: Font {
+        .system(.subheadline, design: .rounded).weight(.bold)
+    }
+
+    /// Travel mode SF Symbol (between-stops spine + directions). The hub uses this font with `Image.imageScale(.small)` so filled glyphs clear the ring.
+    static var timelineSpineTravelModeIcon: Font {
+        appSmall.weight(.semibold)
     }
 
     /// 12-hour spine teardrop — “AM/PM” under the clock digits (smaller than the `appSmall` time line).

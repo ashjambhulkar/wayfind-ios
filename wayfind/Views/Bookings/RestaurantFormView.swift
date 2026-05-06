@@ -1,153 +1,65 @@
 import SwiftUI
 
+/// Restaurant reservation fields — native grouped-Form sections.
+/// Rendered inside a `Form {}` in `AddBookingView`.
 struct RestaurantFormView: View {
     @Binding var restaurantName: String
+    @Binding var address: String
     @Binding var reservationDate: Date?
     @Binding var partySize: Int
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            RestaurantMapSectionCard(title: "Reservation") {
-                RestaurantMapTextRow(
-                    icon: "fork.knife",
-                    title: "Restaurant",
-                    placeholder: "Le Petit Cler",
-                    text: $restaurantName
-                )
+    @Environment(\.calendar) private var calendar
 
-                RestaurantMapDivider()
-
-                OptionalBookingDateRow(
-                    icon: "calendar.badge.clock",
-                    rowTitle: String(localized: "Reservation"),
-                    accent: BookingCategory.restaurant.color,
-                    selection: $reservationDate,
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-
-                RestaurantMapDivider()
-
-                RestaurantMapStepperRow(
-                    icon: "person.2.fill",
-                    title: "Party Size",
-                    value: $partySize
-                )
-            }
-        }
-    }
-}
-
-// =============================================================================
-
-private struct RestaurantMapSectionCard<Content: View>: View {
-    let title: String?
-    let content: Content
-
-    init(title: String?, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            if let title {
-                FormSectionTitle(title)
-            }
-
-            VStack(spacing: 0) {
-                content
-            }
-            .background(AppColors.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
-            }
-        }
-    }
-}
-
-private struct RestaurantMapTextRow: View {
-    let icon: String
-    let title: String
-    let placeholder: String
-    @Binding var text: String
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.restaurant.color,
-                accessibilityLabel: title
-            )
-
-            Text(title)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-
-            Spacer(minLength: AppSpacing.md)
-
-            TextField(placeholder, text: $text)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-                .multilineTextAlignment(.trailing)
-                .textInputAutocapitalization(.words)
-                .autocorrectionDisabled()
-                .frame(minWidth: RestaurantMapFormMetrics.trailingFieldMinWidth)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: RestaurantMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct RestaurantMapStepperRow: View {
-    let icon: String
-    let title: String
-    @Binding var value: Int
+    private var accent: Color { BookingCategory.restaurant.color }
 
     private var guestLabel: String {
-        "\(value) \(value == 1 ? "guest" : "guests")"
+        partySize == 1 ? String(localized: "1 guest") : String(localized: "\(partySize) guests")
     }
 
     var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.restaurant.color,
-                accessibilityLabel: title
-            )
+        Section {
+            LabeledContent(String(localized: "Restaurant")) {
+                TextField(String(localized: "e.g. Le Petit Cler"), text: $restaurantName)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+            }
 
-            Stepper(value: $value, in: 1...20) {
-                HStack {
-                    Text(title)
-                        .font(.appBody)
-                        .foregroundStyle(AppColors.textPrimary)
-                    Spacer(minLength: AppSpacing.md)
+            LabeledContent(String(localized: "Address")) {
+                TextField(String(localized: "Street, city"), text: $address)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+            }
+
+            DatePicker(
+                String(localized: "Reservation"),
+                selection: Binding(
+                    get: { reservationDate ?? defaultAnchor() },
+                    set: { reservationDate = $0 }
+                ),
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .tint(accent)
+
+            Stepper(value: $partySize, in: 1...20) {
+                LabeledContent(String(localized: "Party size")) {
                     Text(guestLabel)
-                        .font(.appBody)
                         .foregroundStyle(AppColors.textSecondary)
                 }
             }
+        } header: {
+            Text(String(localized: "Reservation"))
+        } footer: {
+            Text(String(localized: "Times shown in the trip's destination time zone."))
+                .font(.appFootnote)
         }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: RestaurantMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
+        .onAppear {
+            if reservationDate == nil { reservationDate = defaultAnchor() }
+        }
+    }
+
+    private func defaultAnchor() -> Date {
+        calendar.date(bySettingHour: 19, minute: 30, second: 0, of: Date()) ?? Date()
     }
 }
-
-private struct RestaurantMapDivider: View {
-    var body: some View {
-        Divider()
-            .background(AppColors.appDivider)
-            .padding(.leading, AppSpacing.xxxl + AppSpacing.md)
-    }
-}
-
-private enum RestaurantMapFormMetrics {
-    static let rowMinHeight: CGFloat = 56
-    static let trailingFieldMinWidth: CGFloat = 128
-}
-

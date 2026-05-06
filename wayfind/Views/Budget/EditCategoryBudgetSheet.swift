@@ -28,69 +28,43 @@ struct EditCategoryBudgetSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        FormSectionTitle("Category")
+            Form {
+                Section {
+                    ExpenseCategoryGrid(selection: $category)
+                        .listRowInsets(EdgeInsets(
+                            top: AppSpacing.sm,
+                            leading: AppSpacing.sm,
+                            bottom: AppSpacing.sm,
+                            trailing: AppSpacing.sm
+                        ))
+                } header: {
+                    Text(String(localized: "Category"))
+                }
 
-                        ExpenseCategoryGrid(selection: $category)
-                            .padding(AppSpacing.md)
-                            .background(AppColors.appSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
-                            }
-                    }
+                Section {
+                    categoryAmountRow
+                } header: {
+                    Text(String(localized: "Category Cap"))
+                } footer: {
+                    Text(String(localized: "Plan spending for this category."))
+                }
 
-                    BudgetMapSectionCard(title: "Category Cap") {
-                        BudgetMapAmountRow(
-                            icon: category.systemImage,
-                            title: "\(category.displayLabel) Cap",
-                            caption: "Plan spend for this category",
-                            accent: category.accentColor,
-                            amountText: $amountText,
-                            currency: $currency
-                        )
-                    }
-
-                    if existing != nil {
+                if existing != nil {
+                    Section {
                         Button(role: .destructive) {
                             Task { await deleteCap() }
                         } label: {
-                            HStack(spacing: AppSpacing.md) {
-                                MapStyleIcon(
-                                    systemName: "trash.fill",
-                                    size: .small,
-                                    accent: AppColors.appError,
-                                    accessibilityLabel: "Remove cap"
-                                )
-
-                                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                                    Text("Remove Cap")
-                                        .font(.appBody)
-                                        .foregroundStyle(AppColors.appError)
-                                    Text("Clear the \(category.displayLabel.lowercased()) budget")
-                                        .font(.appSmall)
-                                        .foregroundStyle(AppColors.textSecondary)
-                                }
-
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.horizontal, AppSpacing.md)
-                            .frame(minHeight: BudgetMapFormMetrics.rowMinHeight)
-                            .background(AppColors.appSurface)
-                            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
-                            }
+                            Label(
+                                "Remove \(category.displayLabel) Cap",
+                                systemImage: "trash.fill"
+                            )
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-                .padding(AppSpacing.lg)
             }
+            .scrollContentBackground(.hidden)
+            .background(AppColors.appBackground)
+            .tint(category.accentColor)
             .navigationTitle("Category Cap")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -105,6 +79,36 @@ struct EditCategoryBudgetSheet: View {
             .onAppear { seedFromInputs() }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var categoryAmountRow: some View {
+        HStack(spacing: AppSpacing.sm) {
+            TextField(String(localized: "0"), text: $amountText)
+                .keyboardType(.decimalPad)
+                .onChange(of: amountText) { _, newValue in
+                    amountText = MoneyField.sanitize(newValue)
+                }
+
+            Menu {
+                ForEach(MoneyField.commonCurrencies, id: \.self) { code in
+                    Button(code) { currency = code }
+                }
+            } label: {
+                HStack(spacing: AppSpacing.xs) {
+                    Text(currency.uppercased())
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.appSmall.weight(.semibold))
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+                .padding(.horizontal, AppSpacing.sm)
+                .padding(.vertical, AppSpacing.xs)
+                .background(AppColors.appBackground)
+                .clipShape(Capsule())
+            }
+            .accessibilityLabel("Currency: \(currency.uppercased())")
         }
     }
 

@@ -101,6 +101,34 @@ final class ActivityAttachmentService {
         self.activityId = activityId
         self.tripId = tripId
         self.dataService = dataService
+        // Pre-populate from feed photo stack cache so the gallery can render
+        // images immediately while reload() fetches the full attachment data.
+        if let cached = Self.cachedFeedPhotoStack(activityId: activityId) {
+            self.attachments = cached.map { item in
+                ActivityAttachment(
+                    id: item.id,
+                    activityId: activityId,
+                    storagePath: "",
+                    mimeType: "image/jpeg",
+                    attachmentType: "photo",
+                    originalFilename: nil,
+                    fileSizeBytes: nil,
+                    isCover: false,
+                    createdAt: .distantPast,
+                    signedURL: item.url
+                )
+            }
+        }
+    }
+
+    /// Returns cached feed photo stack metadata for the activity if present and unexpired.
+    /// Used to seed the gallery so it doesn't show a skeleton while reload() runs.
+    @MainActor
+    static func cachedFeedPhotoStack(activityId: UUID) -> [ActivityFeedPhotoStackItem]? {
+        guard let entry = feedPhotoStackCache[activityId], entry.expiry > Date(), !entry.items.isEmpty else {
+            return nil
+        }
+        return entry.items
     }
 
     // MARK: – Reads
@@ -287,7 +315,7 @@ final class ActivityAttachmentService {
                 .execute()
             attachments.removeAll { $0.id == attachmentId }
             signedURLCache.removeValue(forKey: attachmentId)
-            await ActivityAttachmentImageCache.shared.remove(for: attachmentId)
+            ActivityAttachmentImageCache.shared.remove(for: attachmentId)
         } catch {
             lastError = error.localizedDescription
         }
@@ -413,9 +441,40 @@ final class ActivityAttachmentService {
                     result[activityId] = stack
                 }
             }
+
+            // Warm ActivityAttachmentImageCache so CachedAttachmentImage
+            // renders instantly when the timeline scrolls into view.
+            let itemsToWarm: [(id: UUID, url: URL)] = fetchedStacks.values.flatMap { stack in
+                stack.map { (id: $0.id, url: $0.url) }
+            }
+            Task.detached(priority: .utility) {
+                await Self.prefetchAttachmentImages(itemsToWarm)
+            }
+
             return result
         } catch {
             return [:]
+        }
+    }
+
+    // MARK: – Image prefetch
+
+    /// Downloads attachment images into `ActivityAttachmentImageCache` keyed by
+    /// stable attachment UUID. Skips items that are already cached.
+    static func prefetchAttachmentImages(_ items: [(id: UUID, url: URL)]) async {
+        let cache = ActivityAttachmentImageCache.shared
+        let session = URLSession.shared
+        await withTaskGroup(of: Void.self) { group in
+            for item in items {
+                group.addTask {
+                    guard await cache.image(for: item.id) == nil else { return }
+                    guard let (data, response) = try? await session.data(from: item.url),
+                          let http = response as? HTTPURLResponse,
+                          (200...299).contains(http.statusCode)
+                    else { return }
+                    cache.store(data: data, for: item.id)
+                }
+            }
         }
     }
 

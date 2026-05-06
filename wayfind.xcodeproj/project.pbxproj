@@ -7,12 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1AAINJ032F7F0D8C00154B03 /* Inject in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAINJ022F7F0D8C00154B02 /* Inject */; };
 		210F8DA82F8D7EA1001E4E65 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAPRD032F7F0D8C00154A03 /* Supabase */; };
 		210F8DA92F8D7EA1001E4E65 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAPRD042F7F0D8C00154A04 /* GoogleSignIn */; };
 		A1AA5E170000000000154A23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = A1AA5E170000000000154A22 /* Sentry */; };
 		A1AAC0DE2F7F0D8C00154A08 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAC0DE2F7F0D8C00154A06 /* RevenueCat */; };
 		A1AAC0DE2F7F0D8C00154A09 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAC0DE2F7F0D8C00154A07 /* RevenueCatUI */; };
+		A1AAINJ032F7F0D8C00154B03 /* Inject in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAINJ022F7F0D8C00154B02 /* Inject */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -357,6 +357,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -414,6 +415,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -429,11 +431,6 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7RNU3W6ND4;
 				ENABLE_PREVIEWS = YES;
-				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
-					"$(inherited)",
-					"-Xlinker",
-					"-interposable",
-				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InfoAdditions.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -447,6 +444,11 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.2;
+				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
+					"$(inherited)",
+					"-Xlinker",
+					"-interposable",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = app.wayfind.travel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -622,14 +624,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		A1AAINJ012F7F0D8C00154B01 /* XCRemoteSwiftPackageReference "Inject" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/krzysztofzablocki/Inject.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.5.0;
-			};
-		};
 		A1AA5E170000000000154A21 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
@@ -644,6 +638,14 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 5.69.0;
+			};
+		};
+		A1AAINJ012F7F0D8C00154B01 /* XCRemoteSwiftPackageReference "Inject" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/krzysztofzablocki/Inject.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.5.0;
 			};
 		};
 		A1AAPKG012F7F0D8C00154A01 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
@@ -665,11 +667,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A1AAINJ022F7F0D8C00154B02 /* Inject */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A1AAINJ012F7F0D8C00154B01 /* XCRemoteSwiftPackageReference "Inject" */;
-			productName = Inject;
-		};
 		A1AA5E170000000000154A22 /* Sentry */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A1AA5E170000000000154A21 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
@@ -684,6 +681,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A1AAC0DE2F7F0D8C00154A05 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
 			productName = RevenueCatUI;
+		};
+		A1AAINJ022F7F0D8C00154B02 /* Inject */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1AAINJ012F7F0D8C00154B01 /* XCRemoteSwiftPackageReference "Inject" */;
+			productName = Inject;
 		};
 		A1AAPRD032F7F0D8C00154A03 /* Supabase */ = {
 			isa = XCSwiftPackageProductDependency;

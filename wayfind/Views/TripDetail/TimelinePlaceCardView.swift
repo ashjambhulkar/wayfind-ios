@@ -1,8 +1,13 @@
 import SwiftUI
 
+private enum TimelinePlaceCardPhotoMetrics {
+    /// Trailing stacked thumbnails on timeline activity cards.
+    static let stackedTileSide: CGFloat = 44
+}
+
 /// Activity row in the trip-detail timeline. Same chassis as
 /// `TimelineBookingCardView` (see `timelineCardChassis`). The timeline marker
-/// carries the category icon; user photos live at the bottom of the card.
+/// carries the category icon; user photos stack on the trailing edge of the card.
 struct TimelinePlaceCardView: View {
     let place: Place
     let dayNumber: Int
@@ -19,7 +24,7 @@ struct TimelinePlaceCardView: View {
 
     /// Signed thumbnail URLs for `trip_activity_attachments` (same ids as `place.id`).
     var activityPhotoStack: [ActivityFeedPhotoStackItem] = []
-    /// Editors can add photos from the inline camera / plus affordances.
+    /// Editors can add photos from the inline camera when empty, or Photos in the context menu when attachments exist.
     var canEditActivityPhotos: Bool = false
     /// Tap on the stacked thumbnails — paged gallery only.
     var onOpenActivityPhotoGallery: (() -> Void)? = nil
@@ -79,10 +84,16 @@ struct TimelinePlaceCardView: View {
     var body: some View {
         rowCore
         .contextMenu {
-            Button("Edit", action: onEdit)
-            Button("Move to Day", action: onMoveToDay)
+            Button { onEdit() } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            Button { onMoveToDay() } label: {
+                Label("Move to Day", systemImage: "calendar.badge.plus")
+            }
             if dayNumber != 0 {
-                Button("Move to Ideas", action: onMoveToIdeas)
+                Button { onMoveToIdeas() } label: {
+                    Label("Move to Ideas", systemImage: "lightbulb")
+                }
             }
             if canEditActivityPhotos, let manage = onOpenActivityPhotoManage {
                 Button {
@@ -97,35 +108,43 @@ struct TimelinePlaceCardView: View {
                     Label("Photos", systemImage: "photo.on.rectangle.angled")
                 }
             }
-            Button("Delete", role: .destructive, action: onDelete)
+            Button(role: .destructive) { onDelete() } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityDescription)
     }
 
+    private var timelineCardHasTrailingPhotoStack: Bool {
+        !activityPhotoStack.isEmpty
+    }
+
     // MARK: - Card surface
 
     private var cardSurface: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            titleColumn
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .timelineRowSelect(onSelectRow)
+        HStack(alignment: .top, spacing: AppSpacing.sm) {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                titleColumn
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .timelineRowSelect(onSelectRow)
 
-            // Phase 3 — only renders when a recent realtime change has landed
-            // for this card. Layout-stable: the row collapses back to nothing
-            // once the flash expires.
-            if let flash {
-                CollaborativeAttributionPill(
-                    actorDisplayName: flash.displayActor,
-                    actorUserId: flash.actorUserId,
-                    kind: flash.kind
-                )
-                .contentShape(Rectangle())
-                .timelineRowSelect(onSelectRow)
+                if let flash {
+                    CollaborativeAttributionPill(
+                        actorDisplayName: flash.displayActor,
+                        actorUserId: flash.actorUserId,
+                        kind: flash.kind
+                    )
+                    .contentShape(Rectangle())
+                    .timelineRowSelect(onSelectRow)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            activityPhotosFooter
+            if timelineCardHasTrailingPhotoStack {
+                trailingStackedPhotosColumn
+            }
         }
         .timelineCardChassis(
             stripeColor: timelineScheduleAccent,
@@ -135,25 +154,39 @@ struct TimelinePlaceCardView: View {
         )
     }
 
-    /// "Market · 9:30 AM" — category label tinted to match the spine pin, time in grey.
+    @ViewBuilder
+    private var trailingStackedPhotosColumn: some View {
+        ActivityFeedPhotoStackView(
+            items: activityPhotoStack,
+            maxVisible: 4,
+            tileSize: TimelinePlaceCardPhotoMetrics.stackedTileSide,
+            arrangement: .timelineCardTrailing,
+            onTap: { onOpenActivityPhotoGallery?() }
+        )
+    }
+
+    // MARK: - Title column
+
+    /// "9:30 AM · Market" — time first, then category tinted to match the spine pin.
     private var eyebrowLine: some View {
         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
-            Text(activityTypeLabel)
-                .font(.appSmall.weight(.semibold))
-                .foregroundStyle(timelineSpinePinColor)
-                .lineLimit(1)
-
             if let time = startTimeText {
-                Text("·")
-                    .font(.appSmall)
-                    .foregroundStyle(AppColors.textTertiary)
-                    .accessibilityHidden(true)
                 Text(time)
-                    .font(.appSmall.weight(.medium))
+                    .font(.appFootnote.weight(.medium))
                     .foregroundStyle(AppColors.textSecondary)
                     .monospacedDigit()
                     .lineLimit(1)
+
+                Text("·")
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .accessibilityHidden(true)
             }
+
+            Text(activityTypeLabel)
+                .font(.appFootnote.weight(.semibold))
+                .foregroundStyle(timelineSpinePinColor)
+                .lineLimit(1)
 
             Spacer(minLength: 0)
         }
@@ -171,7 +204,7 @@ struct TimelinePlaceCardView: View {
 
             if isRestaurantActivityLayout {
                 Text(restaurantReservationDetailLine)
-                    .font(.footnote)
+                    .font(.appFootnote)
                     .foregroundStyle(AppColors.textSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
@@ -179,7 +212,7 @@ struct TimelinePlaceCardView: View {
                 HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
                     if !detailParts.isEmpty {
                         Text(detailParts.joined(separator: " · "))
-                            .font(.footnote)
+                            .font(.appFootnote)
                             .foregroundStyle(AppColors.textTertiary)
                             .lineLimit(1)
                     }
@@ -189,7 +222,7 @@ struct TimelinePlaceCardView: View {
                             onOpenActivityPhotoManage?(.openSystemPickerOnAppear)
                         } label: {
                             Image(systemName: "camera")
-                                .font(.caption2.weight(.semibold))
+                                .font(.appSmall.weight(.semibold))
                                 .foregroundStyle(AppColors.textSecondary)
                                 .frame(width: 24, height: 24)
                                 .contentShape(Rectangle())
@@ -209,43 +242,6 @@ struct TimelinePlaceCardView: View {
 
     private var canShowInlinePhotoUploadButton: Bool {
         canEditActivityPhotos && activityPhotoStack.isEmpty && onOpenActivityPhotoManage != nil
-    }
-
-    @ViewBuilder
-    private var activityPhotosFooter: some View {
-        if !activityPhotoStack.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: AppSpacing.sm) {
-                    ForEach(activityPhotoStack) { item in
-                        TimelineActivityPhotoThumbnail(item: item) {
-                            onOpenActivityPhotoGallery?()
-                        }
-                    }
-
-                    if canEditActivityPhotos, let manage = onOpenActivityPhotoManage {
-                        Button {
-                            manage(.openSystemPickerOnAppear)
-                        } label: {
-                            RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous)
-                                .fill(AppColors.textPrimary.opacity(0.05))
-                                .overlay {
-                                    Image(systemName: "plus")
-                                        .font(.appBody.weight(.semibold))
-                                        .foregroundStyle(AppColors.appPrimary)
-                                }
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous)
-                                        .strokeBorder(AppColors.appDivider, lineWidth: 0.75)
-                                }
-                                .frame(width: 58, height: 58)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(String(localized: "Add photos"))
-                    }
-                }
-                .padding(.vertical, 1)
-            }
-        }
     }
 
     /// Restaurant subtitle without repeating the start time already shown in the title row.
@@ -418,49 +414,6 @@ func neighborhood(from address: String?) -> String? {
     let candidate = deduped[deduped.count - 2]
     if candidate.caseInsensitiveCompare(city) == .orderedSame { return nil }
     return candidate
-}
-
-/// Small user-photo thumbnail in the bottom row of an activity card.
-private struct TimelineActivityPhotoThumbnail: View {
-    let item: ActivityFeedPhotoStackItem
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            AsyncImage(url: item.url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .empty:
-                    placeholder
-                case .failure:
-                    placeholder
-                @unknown default:
-                    placeholder
-                }
-            }
-            .frame(width: 58, height: 58)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous)
-                    .strokeBorder(AppColors.appDivider.opacity(0.9), lineWidth: 0.75)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(String(localized: "Open activity photo"))
-    }
-
-    private var placeholder: some View {
-        RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous)
-            .fill(AppColors.appDivider.opacity(0.35))
-            .overlay {
-                Image(systemName: "photo")
-                    .font(.appCaption.weight(.semibold))
-                    .foregroundStyle(AppColors.textTertiary)
-            }
-    }
 }
 
 private func activityTypeIcon(for label: String) -> String? {

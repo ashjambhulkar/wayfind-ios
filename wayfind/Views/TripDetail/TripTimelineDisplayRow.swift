@@ -7,6 +7,13 @@ enum HotelTimelineDisplayRole: Hashable {
     case checkOut
 }
 
+/// Distinguishes car rental **pickup** vs **drop-off** when those instants fall on
+/// different itinerary days (same pattern as split hotel stays).
+enum CarRentalTimelineDisplayRole: Hashable {
+    case pickup
+    case dropoff
+}
+
 /// One rendered row in a day’s timeline (place or booking), with optional hotel
 /// role when a single `Place` expands to multiple rows.
 struct TripTimelineDisplayRow: Identifiable {
@@ -14,11 +21,16 @@ struct TripTimelineDisplayRow: Identifiable {
     let place: Place
     /// Set for hotel rows created from `checkInDate` / `checkOutDate`; `nil`
     /// for all non-hotel content and for legacy single-card hotel fallback.
-    var hotelTimelineRole: HotelTimelineDisplayRole?
+    var hotelTimelineRole: HotelTimelineDisplayRole? = nil
+    /// Set for car rental rows created from `pickupTime` / `dropoffTime` on this day.
+    var carRentalTimelineRole: CarRentalTimelineDisplayRole? = nil
 
     /// Sort key for ordering mixed native + injected rows within a day.
     var timelineSortInstant: Date? {
-        place.timelineSpineSortInstant(hotelTimelineRole: hotelTimelineRole)
+        place.timelineSpineSortInstant(
+            hotelTimelineRole: hotelTimelineRole,
+            carRentalTimelineRole: carRentalTimelineRole
+        )
     }
 
     /// Sort key for ordering rows by the clock time shown inside a specific
@@ -33,13 +45,19 @@ struct TripTimelineDisplayRow: Identifiable {
             + (components.second ?? 0)
     }
 
-    /// Tie-break check-in before check-out when instants are equal.
+    /// Tie-break split legs when instants are equal (check-in / pickup first).
     var roleOrderingIndex: Int {
         switch hotelTimelineRole {
         case .checkIn: return 0
         case .checkOut: return 1
-        case nil: return 0
+        case nil: break
         }
+        switch carRentalTimelineRole {
+        case .pickup: return 0
+        case .dropoff: return 1
+        case nil: break
+        }
+        return 0
     }
 }
 

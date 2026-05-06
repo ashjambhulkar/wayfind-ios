@@ -135,8 +135,13 @@ final class AIDayPlannerViewModel {
 
     init(trip: Trip) {
         self.trip = trip
-        self.stayAreaLabel = trip.destination
-        self.stayAreaPlaceId = trip.destinationPlaceId
+        // Stay area must be chosen by the user each session — we never
+        // pre-fill it from the trip destination because the AI generates
+        // the itinerary radiating outward from this exact anchor, and a
+        // wrong anchor produces a wrong plan. Users must consciously pick
+        // a hotel, neighbourhood, or landmark as their starting point.
+        self.stayAreaLabel = ""
+        self.stayAreaPlaceId = nil
     }
 
     // MARK: - Stay area mutation

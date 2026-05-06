@@ -57,44 +57,73 @@ struct EditProfileView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: AppSpacing.lg) {
-                if isLoading {
-                    ProfileInfoBanner(
-                        message: "Loading your profile...",
-                        systemName: "person.crop.circle",
-                        tint: AppColors.appPrimary,
-                        showsProgress: true
-                    )
-                }
-
-                if let errorMessage, !errorMessage.isEmpty, !isLoading {
-                    ProfileInfoBanner(
-                        message: errorMessage,
-                        systemName: "exclamationmark.circle.fill",
-                        tint: AppColors.appError
-                    )
-                }
-
-                avatarSection
-
-                identitySection
-
-                accountSection
-
-                if let saveError, !saveError.isEmpty {
-                    ProfileInfoBanner(
-                        message: saveError,
-                        systemName: "exclamationmark.circle.fill",
-                        tint: AppColors.appError
-                    )
+        Form {
+            if isLoading {
+                Section {
+                    HStack(spacing: AppSpacing.sm) {
+                        ProgressView().tint(AppColors.appPrimary).controlSize(.small)
+                        Text("Loading your profile…")
+                            .font(.appBody)
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
                 }
             }
-            .padding(.horizontal, AppSpacing.lg)
-            .padding(.vertical, AppSpacing.xl)
+
+            if let errorMessage, !errorMessage.isEmpty, !isLoading {
+                Section {
+                    Label(errorMessage, systemImage: "exclamationmark.circle.fill")
+                        .foregroundStyle(AppColors.appError)
+                        .font(.appBody)
+                }
+            }
+
+            Section {
+                avatarSection
+                    .listRowInsets(EdgeInsets())
+                    .frame(maxWidth: .infinity)
+            }
+
+            Section(String(localized: "Profile")) {
+                LabeledContent(String(localized: "Display name")) {
+                    TextField(String(localized: "Enter display name"), text: $displayName)
+                        .multilineTextAlignment(.trailing)
+                        .textContentType(.name)
+                }
+                LabeledContent(String(localized: "Username")) {
+                    TextField(String(localized: "Choose a username"), text: $username)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textContentType(.username)
+                }
+                TextField(String(localized: "Bio (optional)"), text: $bio, axis: .vertical)
+                    .lineLimit(3...6)
+            }
+
+            Section(String(localized: "Account")) {
+                Button(role: .destructive) {
+                    showDeleteAccountConfirm = true
+                } label: {
+                    HStack {
+                        Label("Delete account", systemImage: "trash.fill")
+                            .foregroundStyle(AppColors.appError)
+                        Spacer()
+                        if isDeletingAccount { ProgressView().tint(AppColors.appError) }
+                    }
+                }
+                .disabled(isDeletingAccount)
+            }
+
+            if let saveError, !saveError.isEmpty {
+                Section {
+                    Label(saveError, systemImage: "exclamationmark.circle.fill")
+                        .foregroundStyle(AppColors.appError)
+                        .font(.appBody)
+                }
+            }
         }
+        .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(AppColors.appBackground)
         .navigationTitle("Edit profile")
         .navigationBarTitleDisplayMode(.inline)
@@ -133,52 +162,51 @@ struct EditProfileView: View {
 
     @ViewBuilder
     private var avatarSection: some View {
-        ProfileMapSectionCard(title: nil) {
-            VStack(spacing: AppSpacing.md) {
-                avatarImage
+        VStack(spacing: AppSpacing.md) {
+            avatarImage
 
-                VStack(spacing: AppSpacing.xs) {
-                    Text(displayNamePreview)
-                        .font(.cardTitle.weight(.semibold))
-                        .foregroundStyle(AppColors.textPrimary)
-                        .lineLimit(1)
+            VStack(spacing: AppSpacing.xs) {
+                Text(displayNamePreview)
+                    .font(.cardTitle.weight(.semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+                    .lineLimit(1)
 
-                    Text(usernamePreview)
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textSecondary)
-                        .lineLimit(1)
-                }
+                Text(usernamePreview)
+                    .font(.appCaption)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(1)
+            }
 
-                if AppConfig.useRealBackend {
-                    HStack(spacing: AppSpacing.sm) {
-                        PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                            Label("Choose photo", systemImage: "photo.on.rectangle.angled")
-                                .font(.appBody.weight(.semibold))
-                                .foregroundStyle(AppColors.appPrimary)
-                                .frame(maxWidth: .infinity)
-                                .frame(minHeight: EditProfileLayout.buttonMinHeight)
-                                .background(AppColors.appPrimaryLight)
-                                .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-
-                        if pickedAvatarJPEG != nil {
-                            Button("Clear") {
-                                photoPickerItem = nil
-                                pickedAvatarJPEG = nil
-                            }
+            if AppConfig.useRealBackend {
+                HStack(spacing: AppSpacing.sm) {
+                    PhotosPicker(selection: $photoPickerItem, matching: .images) {
+                        Label("Choose photo", systemImage: "photo.on.rectangle.angled")
                             .font(.appBody.weight(.semibold))
-                            .foregroundStyle(AppColors.appError)
+                            .foregroundStyle(AppColors.appPrimary)
+                            .frame(maxWidth: .infinity)
                             .frame(minHeight: EditProfileLayout.buttonMinHeight)
-                            .padding(.horizontal, AppSpacing.md)
-                            .background(AppColors.appError.opacity(0.08))
+                            .background(AppColors.appPrimaryLight)
                             .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+
+                    if pickedAvatarJPEG != nil {
+                        Button("Clear") {
+                            photoPickerItem = nil
+                            pickedAvatarJPEG = nil
                         }
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.appError)
+                        .frame(minHeight: EditProfileLayout.buttonMinHeight)
+                        .padding(.horizontal, AppSpacing.md)
+                        .background(AppColors.appError.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.medium, style: .continuous))
                     }
                 }
             }
-            .frame(maxWidth: .infinity)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, AppSpacing.md)
     }
 
     @ViewBuilder
@@ -231,91 +259,6 @@ struct EditProfileView: View {
 
     private var usernamePreview: String {
         trimmedUsername.isEmpty ? "Choose a username" : "@\(trimmedUsername)"
-    }
-
-    private var identitySection: some View {
-        ProfileMapSectionCard(title: "Profile") {
-            ProfileMapTextRow(
-                title: "Display name",
-                subtitle: "This is how friends recognize you in the app.",
-                systemName: "person.text.rectangle",
-                accessibilityLabel: "Display name"
-            ) {
-                TextField("Enter display name", text: $displayName)
-                    .textContentType(.name)
-            }
-
-            ProfileMapDivider()
-
-            ProfileMapTextRow(
-                title: "Username",
-                subtitle: "Letters, numbers, and underscores work best.",
-                systemName: "at",
-                accessibilityLabel: "Username"
-            ) {
-                TextField("Choose a username", text: $username)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .textContentType(.username)
-            }
-
-            ProfileMapDivider()
-
-            ProfileMapTextRow(
-                title: "Bio",
-                subtitle: nil,
-                systemName: "text.alignleft",
-                accessibilityLabel: "Bio",
-                alignment: .top
-            ) {
-                TextField("A short line about you - optional", text: $bio, axis: .vertical)
-                    .lineLimit(3...8)
-            }
-        }
-    }
-
-    private var accountSection: some View {
-        ProfileMapSectionCard(title: "Account") {
-            Button(role: .destructive) {
-                showDeleteAccountConfirm = true
-            } label: {
-                HStack(alignment: .center, spacing: AppSpacing.md) {
-                    MapStyleIcon(
-                        systemName: "trash.fill",
-                        size: .small,
-                        accent: AppColors.appError,
-                        backgroundStyle: .soft,
-                        accessibilityLabel: "Delete account"
-                    )
-
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        Text("Delete account")
-                            .font(.appBody.weight(.semibold))
-                            .foregroundStyle(AppColors.appError)
-
-                        Text("Permanently remove your profile and app data.")
-                            .font(.appCaption)
-                            .foregroundStyle(AppColors.textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    if isDeletingAccount {
-                        ProgressView()
-                            .tint(AppColors.appError)
-                    } else {
-                        Image(systemName: "chevron.right")
-                            .font(.appCaption.weight(.semibold))
-                            .foregroundStyle(AppColors.textTertiary)
-                    }
-                }
-                .frame(minHeight: EditProfileLayout.rowMinHeight, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(isDeletingAccount)
-        }
     }
 
     @MainActor
@@ -432,93 +375,6 @@ struct EditProfileView: View {
         } catch {
             saveError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
-    }
-}
-
-private struct ProfileMapSectionCard<Content: View>: View {
-    let title: String?
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            if let title {
-                Text(title)
-                    .font(.appCaption.weight(.semibold))
-                    .foregroundStyle(AppColors.textSecondary)
-                    .textCase(.uppercase)
-                    .kerning(0.5)
-                    .padding(.horizontal, AppSpacing.xs)
-            }
-
-            VStack(spacing: 0) {
-                content()
-            }
-            .padding(.horizontal, AppSpacing.lg)
-            .padding(.vertical, AppSpacing.md)
-            .background(AppColors.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                    .strokeBorder(AppColors.appDivider.opacity(0.85), lineWidth: EditProfileLayout.cardBorderWidth)
-            )
-            .shadow(
-                color: .black.opacity(0.04),
-                radius: EditProfileLayout.cardShadowRadius,
-                x: 0,
-                y: EditProfileLayout.cardShadowYOffset
-            )
-        }
-    }
-}
-
-private struct ProfileMapDivider: View {
-    var body: some View {
-        Divider()
-            .background(AppColors.appDivider)
-            .padding(.leading, MapStyleIconSize.small.length + AppSpacing.md)
-            .padding(.vertical, AppSpacing.xs)
-    }
-}
-
-private struct ProfileMapTextRow<Content: View>: View {
-    let title: String
-    let subtitle: String?
-    let systemName: String
-    let accessibilityLabel: String
-    var accent: Color = AppColors.appPrimary
-    var alignment: VerticalAlignment = .center
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        HStack(alignment: alignment, spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: systemName,
-                size: .small,
-                accent: accent,
-                accessibilityLabel: accessibilityLabel
-            )
-
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                Text(title)
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-
-                content()
-                    .font(.appBody)
-                    .foregroundStyle(AppColors.textPrimary)
-                    .textFieldStyle(.plain)
-
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.appCaption)
-                        .foregroundStyle(AppColors.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(minHeight: EditProfileLayout.rowMinHeight, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }
 

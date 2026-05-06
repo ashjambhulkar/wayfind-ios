@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 
 /// User-entered cost surfaced through `AddBookingView.onSave`. The parent
@@ -30,6 +31,9 @@ struct AddBookingView: View {
     @State private var verifiedFlightLookup: VerifiedFlightLookup?
     @State private var flightLookupMessage: String?
     @State private var isLookingUpFlight = false
+    /// Dedupes automatic flight lookup when airline / number / date settle.
+    @State private var flightAutoLookupSignature: String?
+    @State private var showFlightAirlinePicker = false
 
     @State private var hotelName = ""
     @State private var hotelCheckIn: Date? = nil
@@ -40,6 +44,7 @@ struct AddBookingView: View {
     @State private var hotelCheckOutTime = ""
 
     @State private var restaurantName = ""
+    @State private var restaurantAddress = ""
     @State private var restaurantReservationDate: Date? = nil
     @State private var restaurantPartySize = 2
 
@@ -85,9 +90,14 @@ struct AddBookingView: View {
     /// timeline and detail sheet. Falls back to device TZ when no trip context
     /// is available (legacy callers / previews).
     var displayTimeZone: TimeZone = .current
-    /// When set, edit-mode flight bookings can attach documents via
-    /// `BookingDocumentsEditEntryRow` (same pipeline as detail + timeline).
+    /// When set, booking documents can attach via `BookingDocumentsInlineSection`
+    /// (same pipeline as detail + timeline). Add mode inserts a placeholder
+    /// `trip_bookings` row so uploads satisfy FK before the user taps Add.
     var tripId: UUID? = nil
+    @Environment(DataService.self) private var dataService
+    /// Stable `trip_bookings.id` for this form session (matches `editingPlace.id` in edit).
+    @State private var bookingRowId: UUID
+    @State private var didPersistBookingSuccessfully = false
     @State private var isSaving = false
     @State private var saveError: String?
     /// Snapshot of the form taken once after prefill in edit mode. Used to
@@ -118,64 +128,103 @@ struct AddBookingView: View {
         } else {
             _selectedType = State(initialValue: initialType)
         }
+        _bookingRowId = State(initialValue: editingPlace?.id ?? UUID())
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                bookingForm
-                    .padding(.horizontal, AppSpacing.lg)
-
-                BookingMapDetailsSection(
-                    accent: selectedType.color,
-                    amountText: $costAmountText,
-                    currency: $costCurrency,
-                    confirmationNumber: $confirmationNumber
-                )
-                .padding(.horizontal, AppSpacing.lg)
-
-                if let saveError {
-                    BookingSaveErrorBanner(message: saveError)
-                        .padding(.horizontal, AppSpacing.lg)
-                }
-
-                if selectedType == .flight {
-                    FlightOptionalDetailsSection(
+        Group {
+            Form {
+                switch selectedType {
+                case .flight:
+                    FlightFormView(
+                        airline: $flightAirline,
+                        carrierIATA: $flightCarrierIATA,
+                        flightNumber: $flightNumber,
+                        departureAirport: $flightDepartureAirport,
+                        arrivalAirport: $flightArrivalAirport,
+                        departureDate: $flightDepartureDate,
+                        arrivalDate: $flightArrivalDate,
                         terminal: $flightTerminal,
                         gate: $flightGate,
-                        seat: $flightSeat
+                        seat: $flightSeat,
+                        lookupState: flightLookupState,
+                        verifiedFlight: verifiedFlightLookup,
+                        lookupMessage: flightLookupMessage,
+                        onShowAirlinePicker: { showFlightAirlinePicker = true },
+                        onUseManualEntry: {
+                            flightLookupState = .manualFallback
+                            flightLookupMessage = nil
+                        },
+                        onResetLookup: resetFlightLookup
                     )
-                    .padding(.horizontal, AppSpacing.lg)
-
-                    if isEditMode, let tripId, let ep = editingPlace {
-                        BookingDocumentsEditEntryRow(
-                            bookingId: ep.id,
-                            tripId: tripId,
-                            bookingTitle: ep.name
-                        )
-                        .padding(.horizontal, AppSpacing.lg)
-                    }
-                } else if selectedType == .hotel {
-                    HotelOptionalDetailsSection(roomType: $hotelRoomType)
-                        .padding(.horizontal, AppSpacing.lg)
-                } else if selectedType == .carRental {
-                    CarRentalOptionalDetailsSection(carType: $carType)
-                        .padding(.horizontal, AppSpacing.lg)
-                } else if selectedType == .activity {
-                    ActivityOptionalDetailsSection(
+                case .hotel:
+                    HotelFormView(
+                        hotelName: $hotelName,
+                        address: $hotelAddress,
+                        checkInDate: $hotelCheckIn,
+                        checkOutDate: $hotelCheckOut,
+                        roomType: $hotelRoomType
+                    )
+                case .carRental:
+                    CarRentalFormView(
+                        company: $carCompany,
+                        pickupLocation: $carPickupLocation,
+                        dropoffLocation: $carDropoffLocation,
+                        pickupDate: $carPickupDate,
+                        dropoffDate: $carDropoffDate,
+                        carType: $carType
+                    )
+                case .activity:
+                    ActivityFormView(
+                        activityName: $activityName,
+                        location: $activityLocation,
+                        activityDate: $activityDate,
+                        duration: $activityDuration,
                         provider: $activityProvider,
                         ticketNumber: $activityTicketNumber
                     )
-                    .padding(.horizontal, AppSpacing.lg)
-                } else if selectedType == .transport {
-                    TransportOptionalDetailsSection(seat: $transportSeat)
-                        .padding(.horizontal, AppSpacing.lg)
+                case .transport:
+                    TransportFormView(
+                        operatorName: $transportOperator,
+                        serviceNumber: $transportServiceNumber,
+                        departureStation: $transportDepartureStation,
+                        arrivalStation: $transportArrivalStation,
+                        departureDate: $transportDepartureDate,
+                        arrivalDate: $transportArrivalDate,
+                        seat: $transportSeat
+                    )
+                case .restaurant:
+                    RestaurantFormView(
+                        restaurantName: $restaurantName,
+                        address: $restaurantAddress,
+                        reservationDate: $restaurantReservationDate,
+                        partySize: $restaurantPartySize
+                    )
+                }
+
+                if let saveError {
+                    Section {
+                        Text(saveError)
+                            .font(.appFootnote)
+                            .foregroundStyle(AppColors.appError)
+                    }
+                }
+
+                bookingCostAndConfirmationFormSection
+
+                if let tripId {
+                    BookingDocumentsInlineSection(
+                        bookingId: bookingRowId,
+                        tripId: tripId,
+                        bookingTitle: documentsSectionBookingTitle
+                    )
                 }
             }
-            .padding(.vertical, AppSpacing.lg)
+            .scrollContentBackground(.hidden)
+            .background(AppColors.appBackground)
+            .tint(selectedType.color)
+            .scrollDismissesKeyboard(.interactively)
         }
-        .scrollDismissesKeyboard(.interactively)
-        .background(AppColors.appBackground)
         .navigationTitle(isEditMode ? "Edit \(selectedType.label)" : "Add \(selectedType.label)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -192,11 +241,7 @@ struct AddBookingView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    if selectedType == .flight, shouldLookupFlight {
-                        Task { await lookupFlight() }
-                    } else {
-                        Task { await save() }
-                    }
+                    Task { await save() }
                 } label: {
                     if isSaving || isLookingUpFlight {
                         ProgressView()
@@ -206,6 +251,7 @@ struct AddBookingView: View {
                 }
                 .font(.appButton)
                 .disabled(isSaving || isLookingUpFlight || !canPerformToolbarAction)
+                .accessibilityIdentifier("addBooking.primaryAction")
                 .accessibilityLabel(isEditMode ? "Save booking" : "Add \(selectedType.label)")
             }
         }
@@ -215,8 +261,85 @@ struct AddBookingView: View {
                 initialSnapshot = currentSnapshot()
             }
         }
+        .onChange(of: flightCarrierIATA) { _, _ in tryAutoFlightLookup() }
+        .onChange(of: flightNumber) { _, _ in tryAutoFlightLookup() }
+        .onChange(of: flightDepartureDate) { _, _ in tryAutoFlightLookup() }
         .environment(\.timeZone, displayTimeZone)
         .environment(\.calendar, tripCalendar)
+        .sheet(isPresented: $showFlightAirlinePicker) {
+            FlightAirlinePickerSheet(
+                airline: $flightAirline,
+                carrierIATA: $flightCarrierIATA
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
+        .task(id: bookingRowId) {
+            guard !isEditMode, tripId != nil else { return }
+            await dataService.ensureBookingPlaceholderForAdd(bookingShellPlace())
+        }
+        .onDisappear {
+            guard !isEditMode, tripId != nil, !didPersistBookingSuccessfully else { return }
+            Task {
+                await dataService.deletePlace(id: bookingRowId)
+            }
+        }
+    }
+
+    private var bookingCostAndConfirmationFormSection: some View {
+        Section {
+            HStack {
+                Text(String(localized: "Amount"))
+                    .foregroundStyle(AppColors.textPrimary)
+                TextField(String(localized: "0.00"), text: $costAmountText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .onChange(of: costAmountText) { _, newValue in
+                        costAmountText = MoneyField.sanitize(newValue)
+                    }
+                Menu {
+                    ForEach(MoneyField.commonCurrencies, id: \.self) { code in
+                        Button(code) { costCurrency = code }
+                    }
+                } label: {
+                    HStack(spacing: AppSpacing.xs) {
+                        Text(costCurrency.uppercased())
+                            .font(.appBody.weight(.semibold))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.appCaption.weight(.semibold))
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
+                }
+                .accessibilityLabel(String(localized: "Currency"))
+            }
+
+            TextField(String(localized: "Confirmation (optional)"), text: $confirmationNumber)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        } header: {
+            Text(String(localized: "Booking details"))
+        } footer: {
+            Text(String(localized: "Cost tracks as a trip expense when amount is set."))
+                .font(.appFootnote)
+        }
+    }
+
+    private func tryAutoFlightLookup() {
+        guard selectedType == .flight else { return }
+        guard flightLookupState == .lookupInput else { return }
+        guard !isLookingUpFlight else { return }
+        guard canLookupFlight else { return }
+        let sig = flightLookupAutoSignature()
+        guard sig != flightAutoLookupSignature else { return }
+        flightAutoLookupSignature = sig
+        Task { await lookupFlight() }
+    }
+
+    private func flightLookupAutoSignature() -> String {
+        let carrier = normalizedCarrierIATA() ?? ""
+        let num = normalizedFlightNumberDisplay()
+        let dep = flightDepartureDate.map { "\($0.timeIntervalSince1970)" } ?? ""
+        return "\(carrier)|\(num)|\(dep)"
     }
 
     /// Calendar pinned to the trip's destination TZ. Surfaced so internal
@@ -284,6 +407,7 @@ struct AddBookingView: View {
             hotelCheckOutTime = h.checkOutTime ?? ""
         case .restaurant(let r):
             restaurantName = place.name
+            restaurantAddress = r.address ?? place.address ?? ""
             if let d = r.reservationTime { restaurantReservationDate = d }
             restaurantPartySize = r.partySize ?? 2
         case .carRental(let c):
@@ -329,9 +453,10 @@ struct AddBookingView: View {
                     lookupState: flightLookupState,
                     verifiedFlight: verifiedFlightLookup,
                     lookupMessage: flightLookupMessage,
+                    onShowAirlinePicker: { showFlightAirlinePicker = true },
                     onUseManualEntry: {
                         flightLookupState = .manualFallback
-                        flightLookupMessage = "We could not verify this flight. You can still save it, but live tracking will not start."
+                        flightLookupMessage = nil
                     },
                     onResetLookup: resetFlightLookup
                 )
@@ -340,11 +465,13 @@ struct AddBookingView: View {
                     hotelName: $hotelName,
                     address: $hotelAddress,
                     checkInDate: $hotelCheckIn,
-                    checkOutDate: $hotelCheckOut
+                    checkOutDate: $hotelCheckOut,
+                    roomType: $hotelRoomType
                 )
             case .restaurant:
                 RestaurantFormView(
                     restaurantName: $restaurantName,
+                    address: $restaurantAddress,
                     reservationDate: $restaurantReservationDate,
                     partySize: $restaurantPartySize
                 )
@@ -354,14 +481,17 @@ struct AddBookingView: View {
                     pickupLocation: $carPickupLocation,
                     dropoffLocation: $carDropoffLocation,
                     pickupDate: $carPickupDate,
-                    dropoffDate: $carDropoffDate
+                    dropoffDate: $carDropoffDate,
+                    carType: $carType
                 )
             case .activity:
                 ActivityFormView(
                     activityName: $activityName,
                     location: $activityLocation,
                     activityDate: $activityDate,
-                    duration: $activityDuration
+                    duration: $activityDuration,
+                    provider: $activityProvider,
+                    ticketNumber: $activityTicketNumber
                 )
             case .transport:
                 TransportFormView(
@@ -370,7 +500,8 @@ struct AddBookingView: View {
                     departureStation: $transportDepartureStation,
                     arrivalStation: $transportArrivalStation,
                     departureDate: $transportDepartureDate,
-                    arrivalDate: $transportArrivalDate
+                    arrivalDate: $transportArrivalDate,
+                    seat: $transportSeat
                 )
             }
         }
@@ -404,14 +535,7 @@ struct AddBookingView: View {
         }
     }
 
-    private var shouldLookupFlight: Bool {
-        flightLookupState == .lookupInput
-    }
-
     private var canPerformToolbarAction: Bool {
-        if selectedType == .flight, shouldLookupFlight {
-            return canLookupFlight
-        }
         guard canSave else { return false }
         if isEditMode {
             return hasChanges
@@ -454,6 +578,7 @@ struct AddBookingView: View {
             hotelCheckInTime: hotelCheckInTime,
             hotelCheckOutTime: hotelCheckOutTime,
             restaurantName: restaurantName,
+            restaurantAddress: restaurantAddress,
             restaurantReservationDate: restaurantReservationDate,
             restaurantPartySize: restaurantPartySize,
             carCompany: carCompany,
@@ -479,10 +604,7 @@ struct AddBookingView: View {
     }
 
     private var toolbarActionTitle: String {
-        if selectedType == .flight, shouldLookupFlight {
-            return "Find"
-        }
-        return isEditMode ? "Save" : "Add"
+        isEditMode ? "Save" : "Add"
     }
 
     private var canLookupFlight: Bool {
@@ -517,12 +639,12 @@ struct AddBookingView: View {
         case .notFound:
             verifiedFlightLookup = nil
             flightLookupState = .manualFallback
-            flightLookupMessage = "We could not verify this flight. You can still save it, but live tracking will not start."
+            flightLookupMessage = String(localized: "Flight not found. Please enter details manually.")
             HapticManager.warning()
         case .failed:
             verifiedFlightLookup = nil
             flightLookupState = .manualFallback
-            flightLookupMessage = "Could not check right now. You can still save this manually, but live tracking will not start."
+            flightLookupMessage = String(localized: "Could not check right now. Enter details manually — live tracking will not start until verified.")
             HapticManager.warning()
         }
     }
@@ -543,6 +665,7 @@ struct AddBookingView: View {
         verifiedFlightLookup = nil
         flightLookupMessage = nil
         flightLookupState = .lookupInput
+        flightAutoLookupSignature = nil
     }
 
     private func save() async {
@@ -558,6 +681,7 @@ struct AddBookingView: View {
         let didSave = await onSave?(place, cost) ?? true
         isSaving = false
         if didSave {
+            didPersistBookingSuccessfully = true
             HapticManager.success()
             dismiss()
         } else {
@@ -580,7 +704,7 @@ struct AddBookingView: View {
     private func makePlace() -> Place {
         let trimmedConfirmation = confirmationNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         let confirmation = trimmedConfirmation.isEmpty ? nil : trimmedConfirmation
-        let placeId = editingPlace?.id ?? UUID()
+        let placeId = bookingRowId
 
         switch selectedType {
         case .flight:
@@ -648,15 +772,17 @@ struct AddBookingView: View {
                 bookingDetails: .hotel(details)
             )
         case .restaurant:
+            let trimmedStreet = restaurantAddress.trimmingCharacters(in: .whitespacesAndNewlines)
             let details = RestaurantDetails(
                 reservationTime: restaurantReservationDate,
-                partySize: restaurantPartySize
+                partySize: restaurantPartySize,
+                address: trimmedStreet.nilIfEmpty
             )
             return Place(
                 id: placeId,
                 itineraryDayId: targetDayId,
                 name: restaurantName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Restaurant",
-                address: nil,
+                address: trimmedStreet.nilIfEmpty,
                 lat: nil,
                 lng: nil,
                 category: "restaurant",
@@ -815,6 +941,89 @@ struct AddBookingView: View {
         let start = tripCalendar.startOfDay(for: checkIn)
         let end = tripCalendar.startOfDay(for: checkOut)
         return tripCalendar.dateComponents([.day], from: start, to: end).day
+    }
+
+    private var documentsSectionBookingTitle: String {
+        if let ep = editingPlace { return ep.name }
+        switch selectedType {
+        case .flight:
+            let airline = flightAirline.trimmingCharacters(in: .whitespacesAndNewlines)
+            let number = flightNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+            if airline.isEmpty && number.isEmpty { return String(localized: "New booking") }
+            return flightDisplayName()
+        case .hotel:
+            let n = hotelName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? String(localized: "New booking") : n
+        case .restaurant:
+            let n = restaurantName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? String(localized: "New booking") : n
+        case .carRental:
+            let n = carCompany.trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? String(localized: "New booking") : n
+        case .activity:
+            let n = activityName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? String(localized: "New booking") : n
+        case .transport:
+            let op = transportOperator.trimmingCharacters(in: .whitespacesAndNewlines)
+            let svc = transportServiceNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+            if op.isEmpty && svc.isEmpty { return String(localized: "New booking") }
+            return transportDisplayName()
+        }
+    }
+
+    /// Minimal `Place` used only to insert the placeholder `trip_bookings` row for add-mode attachments.
+    private func bookingShellPlace() -> Place {
+        Place(
+            id: bookingRowId,
+            itineraryDayId: targetDayId,
+            name: String(localized: "New booking"),
+            address: nil,
+            lat: nil,
+            lng: nil,
+            category: shellCategoryForSelectedBookingType(),
+            notes: nil,
+            sortOrder: 0,
+            startTime: nil,
+            endTime: nil,
+            isBooking: true,
+            bookingType: selectedType.rawValue,
+            confirmationNumber: nil,
+            bookingDetails: nil,
+            googlePlaceId: nil,
+            bookingAmount: nil,
+            bookingCurrencyCode: nil,
+            heroImageUrl: nil,
+            rating: nil,
+            userRatingsTotal: nil,
+            priceLevel: nil,
+            website: nil,
+            phoneNumber: nil,
+            isOpenNow: nil,
+            openingHoursText: nil,
+            aiSummary: nil,
+            aiShortSummary: nil,
+            whyGo: nil,
+            knowBeforeYouGo: nil,
+            reviewsTags: nil,
+            durationMinutes: nil,
+            subtypes: nil,
+            travelFromPreviousMinutes: nil,
+            travelMode: nil,
+            thumbnailUrl: nil
+        )
+    }
+
+    private func shellCategoryForSelectedBookingType() -> String? {
+        switch selectedType {
+        case .flight, .carRental, .transport:
+            return "transport"
+        case .hotel:
+            return "hotel"
+        case .restaurant:
+            return "restaurant"
+        case .activity:
+            return "attraction"
+        }
     }
 }
 
@@ -1018,6 +1227,7 @@ private struct BookingFormSnapshot: Equatable {
     let hotelCheckOutTime: String
 
     let restaurantName: String
+    let restaurantAddress: String
     let restaurantReservationDate: Date?
     let restaurantPartySize: Int
 

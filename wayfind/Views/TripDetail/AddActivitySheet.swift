@@ -34,7 +34,6 @@ struct AddActivitySheet: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var selectedDraft: AddActivityDraft?
     @State private var selectedDayId: UUID?
-    @State private var includeTime = false
     @State private var startTime = Date()
     @State private var notes = ""
     @State private var manualName = ""
@@ -629,15 +628,8 @@ struct AddActivitySheet: View {
                 .pickerStyle(.menu)
                 .listRowBackground(AppColors.appSurface)
 
-                Toggle(isOn: $includeTime.animation(AppSpring.smooth)) {
-                    Label("Set start time", systemImage: "clock")
-                }
-                .listRowBackground(AppColors.appSurface)
-
-                if includeTime {
-                    DatePicker("Start time", selection: $startTime, displayedComponents: .hourAndMinute)
-                        .listRowBackground(AppColors.appSurface)
-                }
+                DatePicker("Start time", selection: $startTime, displayedComponents: .hourAndMinute)
+                    .listRowBackground(AppColors.appSurface)
             }
 
             if shouldShowScheduleDetails(for: draft) {
@@ -932,7 +924,7 @@ struct AddActivitySheet: View {
                 preview: preview,
                 dayId: dayId,
                 existingPlacesForDay: existingPlacesForDay,
-                startTime: includeTime ? startTime : nil,
+                startTime: startTime,
                 notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
                 cityProfileId: searchContext?.cityProfileId
             )
@@ -943,7 +935,7 @@ struct AddActivitySheet: View {
                 category: manualCategory,
                 dayId: dayId,
                 existingPlacesForDay: existingPlacesForDay,
-                startTime: includeTime ? startTime : nil,
+                startTime: startTime,
                 notes: trimmedNotes.isEmpty ? nil : trimmedNotes
             )
         }

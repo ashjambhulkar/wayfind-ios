@@ -6,14 +6,14 @@ enum TimelineBetweenStopsMetrics {
     static let shortWalkThresholdKm: Double = 1.0
     /// Matches `TimelineSpineMetrics.columnWidth` so travel rows align with the time-pin column.
     static var timePinGutterWidth: CGFloat { TimelineSpineMetrics.columnWidth }
-    /// Vertical padding on the full-width travel segment row.
-    static let gapRowVerticalPadding: CGFloat = AppSpacing.xs
-    static let minRowHeight: CGFloat = 28
+    /// Vertical padding on the full-width travel segment row (kept minimal so the timeline stays dense).
+    static let gapRowVerticalPadding: CGFloat = 0
 
-    /// Smaller, lower-contrast circle so travel rows read as connectors, not activities.
+    /// Hub diameter for the mode ring — intentionally a bit smaller than activity spine pins
+    /// (`2 * timePinBodyRadius`) so travel reads as a connector, not a full stop.
     static let modeCircleSide: CGFloat = 22
-    static let modeCircleStrokeWidth: CGFloat = 1.0
-    static let modeIconSize: CGFloat = 9
+
+    static var minRowHeight: CGFloat { modeCircleSide + AppSpacing.xs }
 }
 
 enum TimelineBetweenStopsPresentation {

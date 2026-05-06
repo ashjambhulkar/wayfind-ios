@@ -1669,8 +1669,23 @@ final class SupabaseManager {
         let (client, userId) = try await requireClientAndUserId()
         let tripId = try await requireTripIdForDay(client: client, dayId: place.itineraryDayId)
         if place.isBooking {
-            let row = try Self.buildBookingInsert(place: place, tripId: tripId, userId: userId)
-            try await client.from("trip_bookings").insert(row).execute()
+            if try await tripBookingRowExists(client: client, id: place.id) {
+                let nowIso = ISO8601DateFormatter().string(from: Date())
+                let row = try Self.buildBookingUpdate(
+                    place: place,
+                    tripId: tripId,
+                    userId: userId,
+                    updatedAt: nowIso
+                )
+                try await client
+                    .from("trip_bookings")
+                    .update(row)
+                    .eq("id", value: place.id.uuidString)
+                    .execute()
+            } else {
+                let row = try Self.buildBookingInsert(place: place, tripId: tripId, userId: userId)
+                try await client.from("trip_bookings").insert(row).execute()
+            }
             return
         }
         let row = Self.buildActivityInsert(place: place, tripId: tripId, userId: userId)
@@ -2438,6 +2453,7 @@ final class SupabaseManager {
         let room_type: String?
         let car_type: String?
         let address: String?
+        let service_number: String?
     }
 
     private struct TripBookingRow: Decodable, Sendable {
@@ -2668,15 +2684,15 @@ final class SupabaseManager {
 
     // MARK: - Booking row mapping
 
-    /// Resolves `Place.address` from `trip_bookings.start_location`, with a hotel-only
-    /// fallback on `details_json.address` when `start_location` was never populated.
+    /// Resolves `Place.address` from `trip_bookings.start_location`, with a fallback on
+    /// `details_json.address` for hotel and restaurant when `start_location` was never populated.
     private static func bookingDisplayAddress(
         category: BookingCategory?,
         startLocation: String?,
         detailsJSON: BookingJSONDetails?
     ) -> String? {
         if let line = trimmedOrNil(startLocation) { return line }
-        guard category == .hotel else { return nil }
+        guard category == .hotel || category == .restaurant else { return nil }
         return trimmedOrNil(detailsJSON?.address)
     }
 
@@ -2767,7 +2783,8 @@ final class SupabaseManager {
         case .restaurant:
             return .restaurant(RestaurantDetails(
                 reservationTime: start,
-                partySize: json?.party_size
+                partySize: json?.party_size,
+                address: trimmedOrNil(json?.address)
             ))
         case .carRental:
             return .carRental(CarRentalDetails(
@@ -2787,7 +2804,7 @@ final class SupabaseManager {
         case .transport:
             return .transport(TransportDetails(
                 operatorName: row.provider ?? "",
-                serviceNumber: "",
+                serviceNumber: json?.service_number ?? "",
                 departureStation: row.start_location ?? "",
                 arrivalStation: row.end_location ?? "",
                 departureTime: start,
@@ -2927,6 +2944,38 @@ final class SupabaseManager {
             .execute()
             .value
         return row.trip_id
+    }
+
+    /// Whether a `trip_bookings` row already exists (used for add-booking
+    /// flows that insert a placeholder row so attachments can satisfy FK).
+    private func tripBookingRowExists(client: SupabaseClient, id: UUID) async throws -> Bool {
+        struct IdRow: Decodable, Sendable {
+            let id: String
+        }
+        let rows: [IdRow] = try await client
+            .from("trip_bookings")
+            .select("id")
+            .eq("id", value: id.uuidString)
+            .limit(1)
+            .execute()
+            .value
+        return !rows.isEmpty
+    }
+
+    /// Inserts a minimal `trip_bookings` row when none exists so
+    /// `trip_booking_attachments` FK succeeds during add-booking document upload.
+    func ensureBookingPlaceholderExistsIfNeeded(_ place: Place) async throws {
+        guard place.isBooking else { return }
+        let (client, userId) = try await requireClientAndUserId()
+        if try await tripBookingRowExists(client: client, id: place.id) { return }
+        let tripId = try await requireTripIdForDay(client: client, dayId: place.itineraryDayId)
+        let row = try Self.buildBookingInsert(place: place, tripId: tripId, userId: userId)
+        do {
+            try await client.from("trip_bookings").insert(row).execute()
+        } catch {
+            if try await tripBookingRowExists(client: client, id: place.id) { return }
+            throw error
+        }
     }
 
     private static func buildActivityInsert(place: Place, tripId: UUID, userId: UUID) -> TripActivityInsert {
@@ -3117,10 +3166,11 @@ final class SupabaseManager {
                 )
             )
         case .restaurant(let restaurant):
+            let venueAddress = trimmedOrNil(place.address) ?? trimmedOrNil(restaurant.address)
             return BookingPayload(
                 kind: "restaurant",
                 provider: place.name,
-                startLocation: nil,
+                startLocation: venueAddress,
                 endLocation: nil,
                 details: TripBookingDetailsPayload(
                     airline: nil,
@@ -3142,7 +3192,7 @@ final class SupabaseManager {
                     duration: nil,
                     ticket_number: nil,
                     service_number: nil,
-                    address: nil
+                    address: venueAddress
                 )
             )
         case .carRental(let car):

@@ -40,13 +40,15 @@ Search Orchestrator Strategy
 Tackling the $32–35 per 1,000 cost of Google's Text Search and Autocomplete requires moving the entire top-of-the-funnel discovery flow over to Apple's ecosystem. For a travel planner like Wayfind, the vast majority of API calls happen while users are exploring — typing, deleting, panning the map. Those exploration costs can be driven to zero across both Next.js and Expo using the architecture below, while still preserving Google's premium "Atmosphere" data (reviews, ratings, photos) for moments where it actually matters.
 
 1. Apple-First Autocomplete Engine — Cost: $0
+
 Move all keystroke-level autocomplete to Apple.
 
 Mobile (Expo / React Native): MKLocalSearchCompleter natively handles typo tolerance, localized ranking, and region constraints with no billing dashboard.
 Web (Next.js): MapKit JS ships with a free quota of 25,000 service calls + 250,000 map views per day per Apple Developer Program membership (verified from Apple's official docs). This is more than enough to handle web-based itinerary planning before requesting a limit increase.
 ⚠️ Caveat: When MapKit JS exceeds 25k/day, Apple returns HTTP 429 (TooManyRequests) rather than auto-overage billing. This is great for cost predictability but means traffic spikes can hard-fail. Wrap requests with graceful error handling and a Google fallback for spike protection.
 
-2. POI Resolution Layer — Cost: $0
+1. POI Resolution Layer — Cost: $0
+
 When a user taps an autocomplete suggestion, do not send the text string to Google. Instead, hand the selected MKLocalSearchCompletion (or PlaceLookup on web) to MKLocalSearch. The returned MKMapItem instantly provides:
 
 Precise CLLocationCoordinate2D
@@ -56,7 +58,8 @@ Apple's native MKPointOfInterestCategory
 Phone number and website URL
 Following the KISS principle, this is enough to render destination cards and plot map markers immediately — no loading spinners, no upstream billable call.
 
-3. The Google Bridge — Targeted ID Matching
+1. The Google Bridge — Targeted ID Matching
+
 You still need Google for Atmosphere data (reviews, ratings) and Photos. The trick is to bridge from Apple data to a Google place_id only when user intent is confirmed (e.g., they tap "View Reviews" or commit a stop to their itinerary).
 
 Because you already have the exact name and coordinates from Apple, you can avoid Google's most expensive Text Search Pro tier:
@@ -66,7 +69,8 @@ Apply Field Masks to request only the id field on the response
 The Place Details Essentials (IDs Only) SKU is in the Unlimited / free tier, so any subsequent ID-refresh call costs nothing
 ⚠️ Caveat: The first-time discovery query that resolves name + coord → place_id still triggers a Text Search Essentials call ($5 / 1,000 post-cap). The "free IDs Only" SKU only applies when you already hold a place_id and need to validate it. Plan for ~$5 per 1,000 new place bridges, not per existing place lookup.
 
-4. Asynchronous Data Hydration
+1. Asynchronous Data Hydration
+
 Once a Google place_id is stored in Supabase next to your Apple-sourced MKMapItem data, you control the cost curve completely:
 
 Render the UI immediately using free Apple data
@@ -88,11 +92,13 @@ Spike Protection Playbook — Handling the MapKit JS 25k/day Ceiling
 When MapKit JS exceeds its daily quota, Apple returns HTTP 429 (TooManyRequests) with no auto-overage billing — requests just fail. The strategies below, applied together, can realistically push effective capacity from 25k/day → 200k–500k+/day on the free tier without ever hitting a hard failure.
 
 1. Request a Capacity Increase from Apple — Free, Official Path
+
 Submit the MapKit JS Increase Request form from your Apple Developer account. Increases to 100k–500k+ service calls/day are commonly granted within days for legitimate production traffic. There is no cost — Apple's MapKit JS remains free even at elevated quotas.
 
 Trigger this when sustained daily usage crosses ~60% of your current cap. Don't wait until you're already getting 429s.
 
-2. Multi-Layer Caching — Biggest ROI
+1. Multi-Layer Caching — Biggest ROI
+
 Most autocomplete traffic is redundant ("Pari" → "Paris" → "Paris, Fra" all in seconds). Aggressive caching cuts API calls 70%+ before they ever hit MapKit:
 
 [Browser memory / IndexedDB] → [CDN edge cache] → [Server cache (Redis)] → MapKit JS
@@ -102,7 +108,8 @@ Edge	Vercel Edge Config, Cloudflare KV	24 h	Popular global queries (Paris, Tokyo
 Server	Upstash Redis	30 days	Resolved place data keyed by lat,lng,name
 Apple's ToS permits caching place data, similar to Google's policy.
 
-3. Debouncing + Minimum Query Length
+1. Debouncing + Minimum Query Length
+
 Single biggest client-side optimization — typically cuts request volume 50–70%:
 
 const debouncedQuery = useDebounce(query, 300); // wait 300ms after last keystroke
@@ -115,7 +122,8 @@ useEffect(() => {
 }, [debouncedQuery]);
 Apply the same pattern in the Expo app via useDeferredValue or a debounce hook.
 
-4. Circuit Breaker with Google Fallback
+1. Circuit Breaker with Google Fallback
+
 Auto-failover to Google when Apple starts rejecting:
 
 class SearchOrchestrator {
@@ -128,21 +136,25 @@ class SearchOrchestrator {
       return this.googleSearch(query);
     }
 
-    try {
-      return await this.appleSearch(query);
-    } catch (err) {
-      if (err.status === 429 || err.code === 'TooManyRequests') {
-        this.appleCircuitOpen = true;
-        this.circuitResetAt = now + 60 * 60 * 1000;  // open 1 hour
-        return this.googleSearch(query);
-      }
-      throw err;
-    }
+```
+try {
+  return await this.appleSearch(query);
+} catch (err) {
+  if (err.status === 429 || err.code === 'TooManyRequests') {
+    this.appleCircuitOpen = true;
+    this.circuitResetAt = now + 60 * 60 * 1000;  // open 1 hour
+    return this.googleSearch(query);
+  }
+  throw err;
+}
+```
+
   }
 }
 Google cost is paid only during the fallback window — cheap insurance against hard failure.
 
-5. Real-Time Quota Telemetry + Soft-Limit Throttling
+1. Real-Time Quota Telemetry + Soft-Limit Throttling
+
 Don't wait for the 429. Track usage live and back off before the cliff:
 
 const todayCount = await redis.incr(`mapkit:calls:${today}`);
@@ -156,7 +168,8 @@ if (todayCount > SOFT_LIMIT) {
 }
 Smooths the cliff into a ramp — no users see hard failures, and the Google bill stays predictable.
 
-6. Server-Side Proxy with Smart Routing
+1. Server-Side Proxy with Smart Routing
+
 Route all MapKit JS calls through a Next.js API route or Edge Function rather than directly from the browser:
 
 Browser → Next.js API route → MapKit JS / Google / Cache
@@ -175,7 +188,8 @@ Absorbs 30–50% of total search traffic for a typical travel app
 8. Multiple Apple Developer Program Memberships
 The 25k/day quota is per Apple Developer Program membership, not per app. Multi-brand portfolios can route different products to different memberships for additional headroom. For a single product this is harder to justify, but it's a legitimate scaling lever for larger orgs.
 
-9. Last Resort: Web/Native Split
+1. Last Resort: Web/Native Split
+
 If web traffic genuinely cannot stay under quota even with the above:
 
 Native iOS → 100% MapKit (no web quota concern, on-device APIs)
@@ -184,9 +198,11 @@ Backend → store coordinates as the universal key so both clients write to the 
 You'd still eliminate Google cost on mobile (likely your majority traffic).
 
 Recommended Production Stack for Wayfind
+
 1. Debouncing + min-length on client       ← cuts traffic 50%
 2. Server-side proxy + Redis cache          ← cuts traffic another 60%
 3. Circuit breaker → Google fallback        ← spike insurance
 4. Quota telemetry + soft-limit throttling  ← prevents hard failures
 5. Apple capacity increase request          ← raises ceiling 4–20×
+
 With these five layers in place, 200k–500k effective daily searches become serviceable on the free MapKit tier, with Google as a $5/1,000 insurance policy for the rare overflow.

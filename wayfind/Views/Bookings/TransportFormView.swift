@@ -1,5 +1,7 @@
 import SwiftUI
 
+/// Train / bus / transport booking fields — native grouped-Form sections.
+/// Rendered inside a `Form {}` in `AddBookingView`.
 struct TransportFormView: View {
     @Binding var operatorName: String
     @Binding var serviceNumber: String
@@ -7,177 +9,88 @@ struct TransportFormView: View {
     @Binding var arrivalStation: String
     @Binding var departureDate: Date?
     @Binding var arrivalDate: Date?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            TransportMapSectionCard(title: "Transport") {
-                TransportMapTextRow(
-                    icon: "tram.fill",
-                    title: "Operator",
-                    placeholder: "Eurostar",
-                    text: $operatorName
-                )
-
-                TransportMapDivider()
-
-                TransportMapTextRow(
-                    icon: "number",
-                    title: "Service Number",
-                    placeholder: "9014",
-                    capitalization: .characters,
-                    text: $serviceNumber
-                )
-            }
-
-            TransportMapSectionCard(title: "Route") {
-                TransportMapTextRow(
-                    icon: "location.fill",
-                    title: "Departure Station",
-                    placeholder: "Station",
-                    text: $departureStation
-                )
-
-                TransportMapDivider()
-
-                TransportMapTextRow(
-                    icon: "mappin.circle.fill",
-                    title: "Arrival Station",
-                    placeholder: "Station",
-                    text: $arrivalStation
-                )
-            }
-
-            TransportMapSectionCard(title: "Schedule") {
-                OptionalBookingDateRow(
-                    icon: "tram.fill",
-                    rowTitle: String(localized: "Departs"),
-                    accent: BookingCategory.transport.color,
-                    selection: $departureDate,
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-
-                TransportMapDivider()
-
-                OptionalBookingDateRow(
-                    icon: "checkmark.circle.fill",
-                    rowTitle: String(localized: "Arrives"),
-                    accent: BookingCategory.transport.color,
-                    selection: $arrivalDate,
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-            }
-        }
-    }
-}
-
-// =============================================================================
-
-struct TransportOptionalDetailsSection: View {
     @Binding var seat: String
 
-    var body: some View {
-        DisclosureGroup {
-            TransportMapSectionCard(title: nil) {
-                TransportMapTextRow(
-                    icon: "rectangle.inset.filled.and.person.filled",
-                    title: "Seat",
-                    placeholder: "Car 4, Seat 12",
-                    text: $seat
-                )
-            }
-            .padding(.top, AppSpacing.md)
-        } label: {
-            HStack(spacing: AppSpacing.sm) {
-                MapStyleIcon(
-                    systemName: "ellipsis.circle.fill",
-                    size: .small,
-                    accent: BookingCategory.transport.color,
-                    accessibilityLabel: "Optional transport details"
-                )
+    @Environment(\.calendar) private var calendar
 
-                Text("Optional Details")
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
+    private var accent: Color { BookingCategory.transport.color }
+
+    var body: some View {
+        Section(String(localized: "Transport")) {
+            LabeledContent(String(localized: "Operator")) {
+                TextField(String(localized: "e.g. Eurostar"), text: $operatorName)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+            }
+            LabeledContent(String(localized: "Service number")) {
+                TextField(String(localized: "e.g. 9014"), text: $serviceNumber)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
             }
         }
-        .tint(AppColors.appPrimary)
-    }
-}
 
-private struct TransportMapSectionCard<Content: View>: View {
-    let title: String?
-    let content: Content
-
-    init(title: String?, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            if let title {
-                FormSectionTitle(title)
+        Section(String(localized: "Route")) {
+            LabeledContent(String(localized: "Departure station")) {
+                TextField(String(localized: "Station name"), text: $departureStation)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
             }
-
-            VStack(spacing: 0) {
-                content
-            }
-            .background(AppColors.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            LabeledContent(String(localized: "Arrival station")) {
+                TextField(String(localized: "Station name"), text: $arrivalStation)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
             }
         }
-    }
-}
 
-private struct TransportMapTextRow: View {
-    let icon: String
-    let title: String
-    let placeholder: String
-    var capitalization: TextInputAutocapitalization = .words
-    @Binding var text: String
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.transport.color,
-                accessibilityLabel: title
+        Section {
+            DatePicker(
+                String(localized: "Departs"),
+                selection: Binding(
+                    get: { departureDate ?? defaultAnchor() },
+                    set: { departureDate = $0 }
+                ),
+                displayedComponents: [.date, .hourAndMinute]
             )
+            .tint(accent)
 
-            Text(title)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-
-            Spacer(minLength: AppSpacing.md)
-
-            TextField(placeholder, text: $text)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-                .multilineTextAlignment(.trailing)
-                .textInputAutocapitalization(capitalization)
-                .autocorrectionDisabled()
-                .frame(minWidth: TransportMapFormMetrics.trailingFieldMinWidth)
+            DatePicker(
+                String(localized: "Arrives"),
+                selection: Binding(
+                    get: { arrivalDate ?? arrivalAnchor() },
+                    set: { arrivalDate = $0 }
+                ),
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .tint(accent)
+        } header: {
+            Text(String(localized: "Schedule"))
+        } footer: {
+            Text(String(localized: "Times shown in the trip's destination time zone."))
+                .font(.appFootnote)
         }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: TransportMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
+
+        Section {
+            LabeledContent(String(localized: "Seat")) {
+                TextField(String(localized: "e.g. Car 4, Seat 12"), text: $seat)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+            }
+        } header: {
+            Text(String(localized: "Optional details"))
+        }
+    }
+
+    private func defaultAnchor() -> Date {
+        calendar.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+
+    private func arrivalAnchor() -> Date {
+        let base = departureDate ?? defaultAnchor()
+        return calendar.date(byAdding: .hour, value: 2, to: base) ?? base
     }
 }
-
-private struct TransportMapDivider: View {
-    var body: some View {
-        Divider()
-            .background(AppColors.appDivider)
-            .padding(.leading, AppSpacing.xxxl + AppSpacing.md)
-    }
-}
-
-private enum TransportMapFormMetrics {
-    static let rowMinHeight: CGFloat = 56
-    static let trailingFieldMinWidth: CGFloat = 128
-}
-

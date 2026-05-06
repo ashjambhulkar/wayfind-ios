@@ -3,15 +3,17 @@ import SwiftUI
 /// Booking row in the trip-detail timeline. Sibling of `TimelinePlaceCardView`
 /// — same chassis, same pin column, same rhythm — distinguished by type-specific
 /// content: flights use `TimelineFlightBookingPassCard`, transport uses
-/// `TimelineTransportBookingCard` (route / operator / times), and other kinds use
-/// `TimelineBookingPassCard` with a compact subtitle. Full booking detail lives
-/// on the detail screen.
+/// `TimelineTransportBookingCard`, activity / restaurant / car rental use
+/// dedicated pass cards, and remaining kinds use `TimelineBookingPassCard`.
+/// Full booking detail lives on the detail screen.
 struct TimelineBookingCardView: View {
     let place: Place
     let dayNumber: Int
     var timelineDisplayTimeZone: TimeZone = .current
     /// When set, narrows the hotel card to check-in or check-out (split stay).
     var hotelTimelineRole: HotelTimelineDisplayRole? = nil
+    /// When set, narrows the car rental card to pickup or drop-off (split days).
+    var carRentalTimelineRole: CarRentalTimelineDisplayRole? = nil
 
     var onEdit: () -> Void = {}
     var onMoveToDay: () -> Void = {}
@@ -37,6 +39,7 @@ struct TimelineBookingCardView: View {
         dayNumber: Int,
         timelineDisplayTimeZone: TimeZone = .current,
         hotelTimelineRole: HotelTimelineDisplayRole? = nil,
+        carRentalTimelineRole: CarRentalTimelineDisplayRole? = nil,
         onEdit: @escaping () -> Void = {},
         onMoveToDay: @escaping () -> Void = {},
         onDelete: @escaping () -> Void = {},
@@ -53,6 +56,7 @@ struct TimelineBookingCardView: View {
         self.dayNumber = dayNumber
         self.timelineDisplayTimeZone = timelineDisplayTimeZone
         self.hotelTimelineRole = hotelTimelineRole
+        self.carRentalTimelineRole = carRentalTimelineRole
         self.onEdit = onEdit
         self.onMoveToDay = onMoveToDay
         self.onDelete = onDelete
@@ -70,12 +74,20 @@ struct TimelineBookingCardView: View {
         place.bookingCategoryEnum ?? .activity
     }
 
+    /// Car rental / activity: use booking family color instead of muted timeline chroma.
+    private var carRentalBookingChrome: Color { BookingCategory.carRental.color }
+    private var activityBookingChrome: Color { BookingCategory.activity.color }
+
     private var timelineScheduleAccent: Color {
-        TimelineCategoryChroma.stripeColor(for: bookingCategory)
+        if bookingCategory == .carRental { return carRentalBookingChrome }
+        if bookingCategory == .activity { return activityBookingChrome }
+        return TimelineCategoryChroma.stripeColor(for: bookingCategory)
     }
 
     private var timelineSpinePinColor: Color {
-        TimelineCategoryChroma.pinColor(for: bookingCategory)
+        if bookingCategory == .carRental { return carRentalBookingChrome }
+        if bookingCategory == .activity { return activityBookingChrome }
+        return TimelineCategoryChroma.pinColor(for: bookingCategory)
     }
 
     /// Wall-clock instant shown on the spine (start of the row); falls back to
@@ -86,7 +98,10 @@ struct TimelineBookingCardView: View {
             if let start = place.startTime { return start }
             return flightDepartureTime(details)
         }
-        return place.timelineSpineSortInstant(hotelTimelineRole: hotelTimelineRole)
+        return place.timelineSpineSortInstant(
+            hotelTimelineRole: hotelTimelineRole,
+            carRentalTimelineRole: carRentalTimelineRole
+        )
     }
 
     private var spineAccessibilityLabel: String {
@@ -180,6 +195,38 @@ struct TimelineBookingCardView: View {
                 stripeAccent: timelineScheduleAccent,
                 confirmationChip: confirmationCode
             )
+        } else if case .carRental(let carDetails) = place.bookingDetails {
+            TimelineCarRentalBookingPassCard(
+                stripeAccent: carRentalBookingChrome,
+                role: carRentalTimelineRole ?? .pickup,
+                companyName: clean(carDetails.company, fallback: TimelinePlaceDisplayName.timelineDisplay(place.name)),
+                pickupLocation: carDetails.pickupLocation,
+                dropoffLocation: carDetails.dropoffLocation,
+                pickupTime: carDetails.pickupTime ?? place.startTime,
+                dropoffTime: carDetails.dropoffTime ?? place.endTime,
+                carType: carDetails.carType,
+                displayTimeZone: timelineDisplayTimeZone,
+                confirmationCode: confirmationValue
+            )
+        } else if case .activity(let activityDetails) = place.bookingDetails {
+            TimelineActivityBookingPassCard(
+                stripeAccent: activityBookingChrome,
+                details: activityDetails,
+                activityName: TimelinePlaceDisplayName.timelineDisplay(place.name),
+                startTime: place.startTime,
+                address: place.address,
+                displayTimeZone: timelineDisplayTimeZone
+            )
+        } else if case .restaurant(let restaurantDetails) = place.bookingDetails {
+            TimelineRestaurantBookingPassCard(
+                stripeAccent: timelineScheduleAccent,
+                reservationTime: restaurantDetails.reservationTime ?? place.startTime,
+                displayTimeZone: timelineDisplayTimeZone,
+                venueName: TimelinePlaceDisplayName.timelineDisplay(place.name),
+                bookingAddress: restaurantDetails.address,
+                placeAddress: place.address,
+                partySize: restaurantDetails.partySize
+            )
         } else {
             TimelineBookingPassCard(
                 category: bookingCategory,
@@ -204,31 +251,11 @@ struct TimelineBookingCardView: View {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// Footer summary lines for timeline booking cards; `nil` falls back to metric columns.
-    private var timelineFooterSummaryLines: [String]? {
-        restaurantTimelineFooterSummaryLines
-    }
+    /// Footer summary lines for timeline booking cards; `nil` when unused.
+    private var timelineFooterSummaryLines: [String]? { nil }
 
     /// Status capsule on the eyebrow row — unused on `TimelineBookingPassCard` (title row is enough; flight uses its own card).
     private var passTimelineStatusChipText: String { "" }
-
-    /// Restaurant: party count on the same row as the venue title.
-    private var restaurantTitleTrailingText: String? {
-        guard case .restaurant(let r) = place.bookingDetails else { return nil }
-        if let party = r.partySize, party > 0 {
-            return party == 1 ? "1 guest" : "\(party) guests"
-        }
-        return nil
-    }
-
-    /// Event / activity ticket: start time on the title row (trailing).
-    private var activityTitleTrailingText: String? {
-        guard case .activity = place.bookingDetails else { return nil }
-        if let start = place.startTime {
-            return start.timeFormatted(timeZone: timelineDisplayTimeZone)
-        }
-        return String(localized: "Time TBD")
-    }
 
     /// Transit: departure time only on the title row (trailing); date belongs on the spine / detail.
     private var transportTitleTrailingText: String? {
@@ -249,22 +276,9 @@ struct TimelineBookingCardView: View {
             : String(format: String(localized: "%d nights"), n)
     }
 
-    /// Car rental: pickup time only on the title row (trailing); date belongs on the spine / detail.
-    private var carRentalTitleTrailingText: String? {
-        guard case .carRental(let c) = place.bookingDetails else { return nil }
-        let tz = timelineDisplayTimeZone
-        if let pickup = c.pickupTime {
-            return pickup.timeFormatted(timeZone: tz)
-        }
-        return String(localized: "Pickup TBD")
-    }
-
     private var passTitleTrailingText: String? {
         transportTitleTrailingText
             ?? hotelNightsTitleTrailingText
-            ?? carRentalTitleTrailingText
-            ?? activityTitleTrailingText
-            ?? restaurantTitleTrailingText
     }
 
     /// Timeline hotel rows: time only (date is implied by the day header / spine).
@@ -295,28 +309,6 @@ struct TimelineBookingCardView: View {
             if lines.isEmpty { return String(localized: "Dates TBD") }
             return lines.joined(separator: "\n")
         }
-    }
-
-    /// Restaurant: one scannable footer line — time · guests · confirmation.
-    private var restaurantTimelineFooterSummaryLines: [String]? {
-        guard case .restaurant(let r) = place.bookingDetails else { return nil }
-        let tz = timelineDisplayTimeZone
-        let timePart: String
-        if let t = r.reservationTime {
-            timePart = "Time \(t.timeFormatted(timeZone: tz))"
-        } else {
-            timePart = "Time TBD"
-        }
-        let partyPart: String
-        if let p = r.partySize, p > 0 {
-            partyPart = p == 1 ? "Guests 1" : "Guests \(p)"
-        } else {
-            partyPart = "Guests —"
-        }
-        let code = confirmationValue
-        let confirmPart = code == "—" ? "—" : code
-        let line = "\(timePart) · \(partyPart) · \(confirmPart)"
-        return [line]
     }
 
     /// Only render the badge for flight bookings — and even then only
@@ -381,32 +373,12 @@ struct TimelineBookingCardView: View {
             return flightCode(f)
         case .hotel(let h):
             return hotelTimelineSubtitle(h)
-        case .restaurant(let r):
-            if let t = r.reservationTime {
-                return "\(t.shortFormatted(timeZone: timelineDisplayTimeZone)) · \(t.timeFormatted(timeZone: timelineDisplayTimeZone))"
-            }
-            return "Reservation"
-        case .carRental(let c):
-            return "\(clean(c.pickupLocation, fallback: "Pickup TBD")) → \(clean(c.dropoffLocation, fallback: "Dropoff TBD"))"
+        case .restaurant:
+            return ""
+        case .carRental:
+            return ""
         case .activity:
-            let trimmed = place.address?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let kind = place.placeKindLabel ?? place.categoryEnum.label
-            let rawDetail = primaryDetail() ?? ""
-            let extra: String? = {
-                let d = rawDetail.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !d.isEmpty, d != kind, d != "Activity" else { return nil }
-                return d
-            }()
-            var segments: [String] = [kind]
-            if let extra {
-                segments.append(extra)
-            }
-            if !trimmed.isEmpty {
-                segments.append(trimmed)
-            } else if segments.count == 1 {
-                return String(localized: "Location not added")
-            }
-            return segments.joined(separator: " · ")
+            return ""
         case .transport(let t):
             return "\(clean(t.departureStation, fallback: "Departure TBD")) → \(clean(t.arrivalStation, fallback: "Arrival TBD"))"
         }
@@ -425,12 +397,8 @@ struct TimelineBookingCardView: View {
             return []
         case .hotel:
             return []
-        case .restaurant(let r):
-            return [
-                TimelineBookingPassMetric(title: "Time", value: r.reservationTime?.timeFormatted(timeZone: timelineDisplayTimeZone) ?? "TBD"),
-                TimelineBookingPassMetric(title: "Party", value: r.partySize.map { "\($0)" } ?? "—"),
-                TimelineBookingPassMetric(title: "Confirm", value: confirmationValue)
-            ]
+        case .restaurant:
+            return []
         case .carRental:
             return []
         case .activity:
@@ -572,6 +540,12 @@ struct TimelineBookingCardView: View {
         let tz = timelineDisplayTimeZone
         let from = clean(t.departureStation, fallback: String(localized: "Departure TBD"))
         let to = clean(t.arrivalStation, fallback: String(localized: "Arrival TBD"))
+        let fromToLine = String(
+            format: String(localized: "From %1$@ to %2$@"),
+            locale: .current,
+            from,
+            to
+        )
         let op = t.operatorName.trimmingCharacters(in: .whitespacesAndNewlines)
         let svc = t.serviceNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         let opLine: String = {
@@ -580,19 +554,22 @@ struct TimelineBookingCardView: View {
             if svc.isEmpty { return op }
             return "\(op) · \(svc)"
         }()
-        let start = t.departureTime ?? place.startTime
-        let end = t.arrivalTime ?? place.endTime
-        let timePart: String = {
-            if let s = start, let e = end, e > s {
-                return "\(s.timeFormatted(timeZone: tz)) to \(e.timeFormatted(timeZone: tz))"
-            }
-            if let s = start { return s.timeFormatted(timeZone: tz) }
-            if let e = end { return e.timeFormatted(timeZone: tz) }
-            return String(localized: "Times not set")
-        }()
+        let timePart = TimelineTransportBookingCard.scheduleRowDisplay(
+            details: t,
+            placeStartTime: place.startTime,
+            placeEndTime: place.endTime,
+            displayTimeZone: tz
+        )
         let confRaw = place.confirmationNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let confPart = confRaw.isEmpty ? "" : ", confirmation \(confRaw)"
-        return "\(label): \(from) to \(to). \(opLine). \(timePart)\(confPart). \(scheduling)"
+        let confSpeak = confRaw.isEmpty ? String(localized: "Confirmation TBD") : confRaw
+        return "\(label), \(confSpeak). \(fromToLine). \(timePart). \(opLine). \(scheduling)"
+    }
+
+    private func timelineRestaurantResolvedAddress(booking: RestaurantDetails, placeAddress: String?) -> String? {
+        let fromBooking = booking.address?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !fromBooking.isEmpty { return fromBooking }
+        let fromPlace = placeAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return fromPlace.isEmpty ? nil : fromPlace
     }
 
     private var accessibilityDescription: String {
@@ -606,17 +583,79 @@ struct TimelineBookingCardView: View {
             let addr = hotelTimelineAddressFootnote.map { ", \($0)" } ?? ""
             return "\(label): \(passTitle), \(nightsPart), \(passSubtitle)\(addr), \(scheduling)"
         }
-        if case .carRental = place.bookingDetails {
-            let schedule = passTitleTrailingText ?? String(localized: "Pickup TBD")
-            return "\(label): \(passTitle), \(schedule), \(passSubtitle), \(scheduling)"
+        if case .carRental(let c) = place.bookingDetails {
+            let role = carRentalTimelineRole ?? .pickup
+            let company = clean(c.company, fallback: place.name)
+            let locLine: String = {
+                switch role {
+                case .pickup:
+                    let loc = c.pickupLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return loc.isEmpty
+                        ? String(localized: "Pickup location not set")
+                        : String(format: String(localized: "Pickup from %@"), locale: .current, loc)
+                case .dropoff:
+                    let loc = c.dropoffLocation.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return loc.isEmpty
+                        ? String(localized: "Drop-off location not set")
+                        : String(format: String(localized: "Drop-off at %@"), locale: .current, loc)
+                }
+            }()
+            let timePart: String = {
+                let t = role == .pickup ? (c.pickupTime ?? place.startTime) : (c.dropoffTime ?? place.endTime)
+                let prefix = role == .pickup ? String(localized: "Pickup") : String(localized: "Drop-off")
+                if let t {
+                    return "\(prefix) \(t.timeFormatted(timeZone: timelineDisplayTimeZone))"
+                }
+                return "\(prefix) \(String(localized: "time TBD"))"
+            }()
+            let carLine: String = {
+                let t = c.carType.trimmingCharacters(in: .whitespacesAndNewlines)
+                return t.isEmpty ? String(localized: "Car type not set") : t
+            }()
+            let confRaw = place.confirmationNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let confPart = confRaw.isEmpty ? "" : ", confirmation \(confRaw)"
+            return "\(label): \(company). \(locLine). \(timePart). \(carLine)\(confPart). \(scheduling)"
         }
         if case .transport(let t) = place.bookingDetails {
             return transportAccessibilitySummary(label: label, details: t, scheduling: scheduling)
         }
-        if case .activity = place.bookingDetails {
-            let timePart = place.startTime.map { $0.timeFormatted(timeZone: timelineDisplayTimeZone) }
-                ?? String(localized: "Time TBD")
-            return "\(label): \(place.name), \(timePart), \(passSubtitle), \(scheduling)"
+        if case .activity(let a) = place.bookingDetails {
+            let ticket = a.ticketNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+            let provider = a.provider.trimmingCharacters(in: .whitespacesAndNewlines)
+            let headerTrail = !ticket.isEmpty ? ticket : (!provider.isEmpty ? provider : String(localized: "Details not set"))
+            let startsLabel = String(localized: "Starts at")
+            let timePart: String = {
+                if let t = place.startTime {
+                    return "\(startsLabel) · \(t.timeFormatted(timeZone: timelineDisplayTimeZone))"
+                }
+                return "\(startsLabel) · \(String(localized: "time TBD"))"
+            }()
+            let addr = place.address?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let addrPart = addr.isEmpty ? String(localized: "Address not set") : addr
+            return "\(label): \(headerTrail). \(place.name). \(timePart). \(addrPart). \(scheduling)"
+        }
+        if case .restaurant(let r) = place.bookingDetails {
+            let tz = timelineDisplayTimeZone
+            let category = BookingCategory.restaurant.label
+            let partyPart: String = {
+                guard let p = r.partySize, p > 0 else { return "" }
+                return p == 1 ? String(localized: "1 guest") : "\(p) guests"
+            }()
+            let headerPart = partyPart.isEmpty ? category : "\(category), \(partyPart)"
+            let schedulePart: String = {
+                let reservationLabel = String(localized: "Reservation")
+                guard let t = r.reservationTime ?? place.startTime else {
+                    return "\(reservationLabel) · \(String(localized: "time not set"))"
+                }
+                return "\(reservationLabel) · \(t.timeFormatted(timeZone: tz))"
+            }()
+            let addrPart: String = {
+                if let a = timelineRestaurantResolvedAddress(booking: r, placeAddress: place.address) {
+                    return a
+                }
+                return String(localized: "Address TBD")
+            }()
+            return "\(label): \(headerPart). \(place.name). \(schedulePart). \(addrPart). \(scheduling)"
         }
         var pieces: [String] = []
         pieces.append("\(label): \(place.name)")
@@ -688,18 +727,18 @@ private struct TimelineBookingPassCard: View {
     private var eyebrowRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
             Text(category.label)
-                .font(.appSmall.weight(.semibold))
+                .font(.appFootnote.weight(.semibold))
                 .foregroundStyle(TimelineCategoryChroma.pinColor(for: category))
                 .lineLimit(1)
 
             if let trailing = titleTrailing?.trimmingCharacters(in: .whitespacesAndNewlines),
                !trailing.isEmpty {
                 Text("·")
-                    .font(.appSmall)
+                    .font(.appFootnote)
                     .foregroundStyle(AppColors.textTertiary)
                     .accessibilityHidden(true)
                 Text(trailing)
-                    .font(.appSmall.weight(.medium))
+                    .font(.appFootnote.weight(.medium))
                     .foregroundStyle(AppColors.textSecondary)
                     .monospacedDigit()
                     .lineLimit(1)
@@ -723,7 +762,7 @@ private struct TimelineBookingPassCard: View {
         let trimmed = subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             Text(trimmed)
-                .font(.footnote)
+                .font(.appFootnote)
                 .foregroundStyle(AppColors.textTertiary)
                 .lineLimit(3)
                 .minimumScaleFactor(0.88)
@@ -737,12 +776,12 @@ private struct TimelineBookingPassCard: View {
         if !trimmed.isEmpty {
             HStack(alignment: .top, spacing: AppSpacing.xs) {
                 Image(systemName: "mappin.and.ellipse")
-                    .font(.footnote.weight(.semibold))
+                    .font(.appFootnote.weight(.semibold))
                     .foregroundStyle(AppColors.textTertiary)
                     .accessibilityHidden(true)
 
                 Text(trimmed)
-                    .font(.footnote)
+                    .font(.appFootnote)
                     .foregroundStyle(AppColors.textTertiary)
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
@@ -763,6 +802,389 @@ private struct TimelineBookingPassCard: View {
             return "\(category.label)\(trailing): \(title). \(detail)"
         }
         return "\(category.label)\(trailing): \(title). \(detail). \(addr)"
+    }
+}
+
+// MARK: - Car rental (timeline — pickup / drop-off cards)
+
+private struct TimelineCarRentalBookingPassCard: View {
+    let stripeAccent: Color
+    let role: CarRentalTimelineDisplayRole
+    let companyName: String
+    let pickupLocation: String
+    let dropoffLocation: String
+    let pickupTime: Date?
+    let dropoffTime: Date?
+    let carType: String
+    let displayTimeZone: TimeZone
+    let confirmationCode: String
+
+    private var categoryTint: Color { BookingCategory.carRental.color }
+
+    private func trimmed(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var displayCompany: String {
+        let t = trimmed(companyName)
+        return t.isEmpty ? String(localized: "Rental company TBD") : t
+    }
+
+    private var locationLine: String {
+        switch role {
+        case .pickup:
+            let loc = trimmed(pickupLocation)
+            if loc.isEmpty { return String(localized: "Pickup location TBD") }
+            return String(format: String(localized: "Pickup from %@"), locale: .current, loc)
+        case .dropoff:
+            let loc = trimmed(dropoffLocation)
+            if loc.isEmpty { return String(localized: "Drop-off location TBD") }
+            return String(format: String(localized: "Drop-off at %@"), locale: .current, loc)
+        }
+    }
+
+    private var legScheduleInstant: Date? {
+        switch role {
+        case .pickup: return pickupTime
+        case .dropoff: return dropoffTime
+        }
+    }
+
+    private var timeRowText: String {
+        let prefix = role == .pickup ? String(localized: "Pickup") : String(localized: "Drop-off")
+        if let t = legScheduleInstant {
+            return "\(prefix) · \(t.timeFormatted(timeZone: displayTimeZone))"
+        }
+        return "\(prefix) · \(String(localized: "time TBD"))"
+    }
+
+    private var carTypeLine: String {
+        let t = trimmed(carType)
+        if t.isEmpty { return String(localized: "Car type TBD") }
+        return String(format: String(localized: "Car type · %@"), locale: .current, t)
+    }
+
+    private var confirmationFootnote: String? {
+        let trimmedCode = confirmationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedCode != "—", !trimmedCode.isEmpty else { return nil }
+        return "#\(trimmedCode)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+                Text(BookingCategory.carRental.label)
+                    .font(.appFootnote.weight(.semibold))
+                    .foregroundStyle(categoryTint)
+                    .lineLimit(1)
+                Text("·")
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .accessibilityHidden(true)
+                Text(displayCompany)
+                    .font(.appFootnote.weight(.medium))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+
+            Text(locationLine)
+                .font(.timelineRowTitle)
+                .foregroundStyle(AppColors.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(timeRowText)
+                .font(.appFootnote.weight(.medium))
+                .foregroundStyle(AppColors.textSecondary)
+                .monospacedDigit()
+                .lineLimit(2)
+                .minimumScaleFactor(0.88)
+
+            Text(carTypeLine)
+                .font(.appFootnote)
+                .foregroundStyle(AppColors.textTertiary)
+                .lineLimit(2)
+
+            if let confDisplay = confirmationFootnote {
+                Text(confDisplay)
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .lineLimit(1)
+                    .accessibilityLabel(String(localized: "Confirmation"))
+                    .accessibilityValue(confDisplay)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .timelineCardChassis(
+            stripeColor: stripeAccent,
+            showsTopRail: false,
+            horizontalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding,
+            verticalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        var parts: [String] = [BookingCategory.carRental.label, displayCompany, locationLine, timeRowText, carTypeLine]
+        if let confirmationFootnote { parts.append(confirmationFootnote) }
+        return parts.joined(separator: ", ")
+    }
+}
+
+// MARK: - Activity (timeline-only layout)
+
+private struct TimelineActivityBookingPassCard: View {
+    let stripeAccent: Color
+    let details: ActivityDetails
+    let activityName: String
+    let startTime: Date?
+    let address: String?
+    let displayTimeZone: TimeZone
+
+    private var categoryTint: Color { BookingCategory.activity.color }
+
+    private func trimmed(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Ticket number when set; otherwise provider (e.g. Viator).
+    private var ticketOrProviderLine: String {
+        let ticket = trimmed(details.ticketNumber)
+        if !ticket.isEmpty { return ticket }
+        let provider = trimmed(details.provider)
+        if !provider.isEmpty { return provider }
+        return String(localized: "Details TBD")
+    }
+
+    private var displayActivityName: String {
+        let t = trimmed(activityName)
+        return t.isEmpty ? String(localized: "Activity TBD") : t
+    }
+
+    private var startsAtScheduleText: String {
+        let startsLabel = String(localized: "Starts at")
+        guard let t = startTime else {
+            return "\(startsLabel) · \(String(localized: "time TBD"))"
+        }
+        return "\(startsLabel) · \(t.timeFormatted(timeZone: displayTimeZone))"
+    }
+
+    private var resolvedAddress: String? {
+        let a = address?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return a.isEmpty ? nil : a
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+                Text(BookingCategory.activity.label)
+                    .font(.appFootnote.weight(.semibold))
+                    .foregroundStyle(categoryTint)
+                    .lineLimit(1)
+                Text("·")
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .accessibilityHidden(true)
+                Text(ticketOrProviderLine)
+                    .font(.appFootnote.weight(.medium))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+
+            Text(displayActivityName)
+                .font(.timelineRowTitle)
+                .foregroundStyle(AppColors.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+
+            Text(startsAtScheduleText)
+                .font(.appFootnote.weight(.medium))
+                .foregroundStyle(AppColors.textSecondary)
+                .monospacedDigit()
+                .lineLimit(2)
+                .minimumScaleFactor(0.88)
+                .accessibilityLabel(String(localized: "Starts at"))
+
+            if let line = resolvedAddress {
+                HStack(alignment: .top, spacing: AppSpacing.xs) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.appFootnote.weight(.semibold))
+                        .foregroundStyle(AppColors.textTertiary)
+                        .accessibilityHidden(true)
+                    Text(line)
+                        .font(.appFootnote)
+                        .foregroundStyle(AppColors.textTertiary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text(String(localized: "Address TBD"))
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .timelineCardChassis(
+            stripeColor: stripeAccent,
+            showsTopRail: false,
+            horizontalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding,
+            verticalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        var parts: [String] = [
+            BookingCategory.activity.label,
+            ticketOrProviderLine,
+            displayActivityName,
+            startsAtScheduleText
+        ]
+        if let resolvedAddress {
+            parts.append(resolvedAddress)
+        } else {
+            parts.append(String(localized: "Address TBD"))
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+// MARK: - Restaurant (timeline-only layout)
+
+private struct TimelineRestaurantBookingPassCard: View {
+    let stripeAccent: Color
+    let reservationTime: Date?
+    let displayTimeZone: TimeZone
+    let venueName: String
+    let bookingAddress: String?
+    let placeAddress: String?
+    let partySize: Int?
+
+    private var categoryTint: Color { TimelineCategoryChroma.pinColor(for: BookingCategory.restaurant) }
+
+    private var guestsLabel: String? {
+        guard let p = partySize, p > 0 else { return nil }
+        return p == 1 ? String(localized: "1 guest") : "\(p) guests"
+    }
+
+    /// Label + wall time for the reservation row (trip destination timezone).
+    private var reservationScheduleText: String {
+        let reservationLabel = String(localized: "Reservation")
+        guard let t = reservationTime else {
+            return "\(reservationLabel) · \(String(localized: "time TBD"))"
+        }
+        let timePart = t.timeFormatted(timeZone: displayTimeZone)
+        return "\(reservationLabel) · \(timePart)"
+    }
+
+    private var resolvedAddress: String? {
+        let b = bookingAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !b.isEmpty { return b }
+        let p = placeAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return p.isEmpty ? nil : p
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            categoryAndGuestsRow
+
+            Text(venueName)
+                .font(.timelineRowTitle)
+                .foregroundStyle(AppColors.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+
+            Text(reservationScheduleText)
+                .font(.appFootnote.weight(.medium))
+                .foregroundStyle(AppColors.textSecondary)
+                .monospacedDigit()
+                .lineLimit(2)
+                .minimumScaleFactor(0.88)
+                .accessibilityLabel(String(localized: "Reservation"))
+
+            addressRow
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .timelineCardChassis(
+            stripeColor: stripeAccent,
+            showsTopRail: false,
+            horizontalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding,
+            verticalContentPadding: TimelineCardLayoutMetrics.contentHorizontalPadding
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    /// Top line: **Restaurant · N guests** (guests omitted when party size unset).
+    private var categoryAndGuestsRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+            Text(BookingCategory.restaurant.label)
+                .font(.appFootnote.weight(.semibold))
+                .foregroundStyle(categoryTint)
+                .lineLimit(1)
+
+            if let guestsLabel {
+                Text("·")
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .accessibilityHidden(true)
+                Text(guestsLabel)
+                    .font(.appFootnote.weight(.medium))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Final row: venue address from booking or place, or placeholder when missing.
+    @ViewBuilder
+    private var addressRow: some View {
+        if let line = resolvedAddress {
+            HStack(alignment: .top, spacing: AppSpacing.xs) {
+                Image(systemName: "mappin.and.ellipse")
+                    .font(.appFootnote.weight(.semibold))
+                    .foregroundStyle(AppColors.textTertiary)
+                    .accessibilityHidden(true)
+
+                Text(line)
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textTertiary)
+                    .lineLimit(4)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(String(localized: "Address"))
+            .accessibilityValue(line)
+        } else {
+            Text(String(localized: "Address TBD"))
+                .font(.appFootnote)
+                .foregroundStyle(AppColors.textTertiary)
+                .lineLimit(2)
+                .accessibilityLabel(String(localized: "Address"))
+                .accessibilityValue(String(localized: "Address TBD"))
+        }
+    }
+
+    private var accessibilitySummary: String {
+        var parts: [String] = [BookingCategory.restaurant.label]
+        if let guestsLabel { parts.append(guestsLabel) }
+        parts.append(venueName)
+        parts.append(reservationScheduleText)
+        if let resolvedAddress {
+            parts.append(resolvedAddress)
+        } else {
+            parts.append(String(localized: "Address TBD"))
+        }
+        return parts.joined(separator: ", ")
     }
 }
 
@@ -847,7 +1269,7 @@ private struct TimelineFlightBookingPassCard: View {
                     variant: .timelineCard
                 )
                 Text(airlineName)
-                    .font(.appCaption.weight(.semibold))
+                    .font(.appFootnote.weight(.semibold))
                     .foregroundStyle(AppColors.textPrimary)
                     .lineLimit(2)
                     .minimumScaleFactor(0.78)
@@ -862,6 +1284,7 @@ private struct TimelineFlightBookingPassCard: View {
                     isStale: isFlightStale,
                     tint: flightTint,
                     isProUser: isProUser,
+                    showsSecondarySubtitle: false,
                     onUpsellTap: onFlightUpsellTap,
                     onTap: onFlightBadgeTap
                 )
@@ -875,27 +1298,27 @@ private struct TimelineFlightBookingPassCard: View {
         HStack(alignment: .center, spacing: AppSpacing.sm) {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "airplane.departure")
-                    .font(.appCaption.weight(.semibold))
+                    .font(.appFootnote.weight(.semibold))
                     .foregroundStyle(scheduleAccent)
                 Text(departureTime?.timeFormatted(timeZone: displayTimeZone) ?? "Time TBD")
-                    .font(.appSmall.weight(.semibold))
+                    .font(.appFootnote.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(AppColors.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Image(systemName: "airplane")
-                .font(.appCaption.weight(.semibold))
+                .font(.appFootnote.weight(.semibold))
                 .foregroundStyle(scheduleAccent)
                 .frame(width: LayoutMetrics.centerRouteColumnWidth, alignment: .center)
 
             HStack(spacing: AppSpacing.xs) {
                 Text(arrivalTime?.timeFormatted(timeZone: displayTimeZone) ?? "Time TBD")
-                    .font(.appSmall.weight(.semibold))
+                    .font(.appFootnote.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(AppColors.textSecondary)
                 Image(systemName: "airplane.arrival")
-                    .font(.appCaption.weight(.semibold))
+                    .font(.appFootnote.weight(.semibold))
                     .foregroundStyle(scheduleAccent)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -928,12 +1351,12 @@ private struct TimelineFlightBookingPassCard: View {
     private var rowAirportCaptionsAndDuration: some View {
         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
             Text("Airport")
-                .font(.appCaption)
+                .font(.appFootnote)
                 .foregroundStyle(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(duration ?? "—")
-                .font(.appCaption)
+                .font(.appFootnote)
                 .foregroundStyle(AppColors.textSecondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -941,7 +1364,7 @@ private struct TimelineFlightBookingPassCard: View {
                 .frame(width: LayoutMetrics.centerRouteColumnWidth, alignment: .center)
 
             Text("Airport")
-                .font(.appCaption)
+                .font(.appFootnote)
                 .foregroundStyle(AppColors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }

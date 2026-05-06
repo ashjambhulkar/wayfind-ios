@@ -10,8 +10,9 @@
 //      `FlightStatus.tint(...)`.
 //    • A pulsing dot for live flights — but only when the OS-level
 //      `accessibilityReduceMotion` flag is off, per HIG.
-//    • Stale subtitle (e.g. "Updated 35 min ago") when the latest
-//      poll is older than the freshness window.
+//    • Second-line hints: stale poll age ("Updated … ago"), gate, baggage belt.
+//      Timeline flight cards pass `showsSecondarySubtitle: false` so only
+//      the status headline shows.
 //    • Voice-Over reads the colour, flight number, and primary status
 //      reason ("On time", "Delayed 25 min", "Cancelled").
 //
@@ -31,6 +32,8 @@ struct FlightStatusBadge: View {
     let isStale: Bool
     let tint: FlightStatus.DisplayState.Tint
     let isProUser: Bool
+    /// When `false`, only the status headline shows (timeline flight card).
+    var showsSecondarySubtitle: Bool = true
     var onUpsellTap: (() -> Void)? = nil
     var onTap: (() -> Void)? = nil
 
@@ -106,6 +109,7 @@ struct FlightStatusBadge: View {
 
     private var subtitle: String? {
         guard let status else { return "Free preview" }
+        if !showsSecondarySubtitle { return nil }
         if isStale {
             let minutes = max(1, Int(Date().timeIntervalSince(status.polledAt) / 60))
             let age = Self.humanizedMinutesSinceUpdate(minutes)

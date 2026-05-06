@@ -48,67 +48,47 @@ struct ExpenseSplitEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        FormSectionTitle(String(localized: "Split method"))
-                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                            Picker("Split type", selection: $splitType) {
-                                ForEach(TripExpense.SplitType.allCases, id: \.self) { type in
-                                    Text(type.displayLabel).tag(type)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .onChange(of: splitType) { _, _ in
-                                recomputeAfterTypeChange()
-                            }
-                        }
-                        .padding(AppSpacing.md)
-                        .background(AppColors.appSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                                .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            Form {
+                Section(String(localized: "Split method")) {
+                    Picker(String(localized: "Type"), selection: $splitType) {
+                        ForEach(TripExpense.SplitType.allCases, id: \.self) { type in
+                            Text(type.displayLabel).tag(type)
                         }
                     }
-
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        FormSectionTitle(String(localized: "With"))
-                        VStack(spacing: 0) {
-                            if splitableMembers.isEmpty {
-                                emptyCollaboratorsCallout
-                            } else {
-                                ForEach(Array(splitableMembers.enumerated()), id: \.element.stableID) { index, member in
-                                    if index > 0 {
-                                        Divider()
-                                            .background(AppColors.appDivider)
-                                            .padding(.leading, AppSpacing.xxxl + AppSpacing.sm)
-                                    }
-                                    participantRow(for: member)
-                                }
-                            }
-                        }
-                        .background(AppColors.appSurface)
-                        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                                .strokeBorder(AppColors.appDivider, lineWidth: 1)
-                        }
+                    .pickerStyle(.segmented)
+                    .onChange(of: splitType) { _, _ in
+                        recomputeAfterTypeChange()
                     }
+                    .listRowInsets(EdgeInsets(
+                        top: AppSpacing.sm,
+                        leading: AppSpacing.md,
+                        bottom: AppSpacing.sm,
+                        trailing: AppSpacing.md
+                    ))
+                }
 
-                    if let summary = summaryFooter {
-                        Text(summary.text)
-                            .font(.appCaption)
-                            .foregroundStyle(summary.isError ? AppColors.appError : AppColors.textSecondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, AppSpacing.xs)
+                if splitableMembers.isEmpty {
+                    Section(String(localized: "With")) {
+                        emptyCollaboratorsCallout
+                    }
+                } else {
+                    Section {
+                        ForEach(splitableMembers, id: \.stableID) { member in
+                            participantRow(for: member)
+                        }
+                    } header: {
+                        Text(String(localized: "With"))
+                    } footer: {
+                        if let summary = summaryFooter {
+                            Text(summary.text)
+                                .foregroundStyle(summary.isError ? AppColors.appError : AppColors.textSecondary)
+                        }
                     }
                 }
-                .padding(.horizontal, AppSpacing.lg)
-                .padding(.vertical, AppSpacing.md)
             }
-            .scrollDismissesKeyboard(.interactively)
+            .scrollContentBackground(.hidden)
             .background(AppColors.appBackground)
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(String(localized: "Split"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

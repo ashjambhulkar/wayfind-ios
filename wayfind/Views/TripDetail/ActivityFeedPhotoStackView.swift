@@ -42,28 +42,36 @@ struct ActivityFeedPhotoStackView: View {
         case sheetRow
         /// Minimal offset, centered vertically with the headline row beside it.
         case timelineLeading
+        /// Centered polaroid-style stack (white mat, slight rotations) on the trailing edge of a timeline activity card.
+        case timelineCardTrailing
     }
 
     var arrangement: Arrangement = .sheetRow
     let onTap: () -> Void
 
+    private var zStackAlignment: Alignment {
+        switch arrangement {
+        case .sheetRow: .bottomTrailing
+        case .timelineLeading: .center
+        /// Shared center so rotations read like a scattered print stack (see timeline polaroid layout).
+        case .timelineCardTrailing: .center
+        }
+    }
+
     var body: some View {
         let visible = Array(items.prefix(maxVisible))
         let overflow = max(0, items.count - maxVisible)
         Button(action: onTap) {
-            ZStack(alignment: arrangement == .timelineLeading ? .center : .bottomTrailing) {
+            ZStack(alignment: zStackAlignment) {
                 // Draw back-to-front so the first model item (cover from the
                 // service) is the last subview and paints on top.
                 ForEach(Array(visible.enumerated().reversed()), id: \.element.id) { index, item in
-                    tile(for: item.url)
-                        .rotationEffect(.degrees(stackTilt(depth: index)))
-                        .offset(stackOffset(for: index, count: visible.count))
-                        .shadow(
-                            color: index == 0 ? Color.black.opacity(0.2) : Color.black.opacity(0.06),
-                            radius: index == 0 ? 4 : 2,
-                            x: 0,
-                            y: index == 0 ? 2 : 1
+                    stackedTile(for: item)
+                        .rotationEffect(
+                            .degrees(stackTilt(depth: index, visibleCount: visible.count)),
+                            anchor: .center
                         )
+                        .offset(stackOffset(for: index, count: visible.count))
                         .overlay(alignment: .bottomTrailing) {
                             if index == 0, overflow > 0 {
                                 Text("+\(overflow)")
@@ -80,7 +88,7 @@ struct ActivityFeedPhotoStackView: View {
             .frame(
                 width: frameWidth(for: visible.count),
                 height: frameHeight(for: visible.count),
-                alignment: arrangement == .timelineLeading ? .center : .bottomTrailing
+                alignment: frameAlignment
             )
         }
         .buttonStyle(.plain)
@@ -92,10 +100,19 @@ struct ActivityFeedPhotoStackView: View {
         .accessibilityHint(String(localized: "Opens gallery"))
     }
 
+    private var frameAlignment: Alignment {
+        switch arrangement {
+        case .sheetRow: .bottomTrailing
+        case .timelineLeading: .center
+        case .timelineCardTrailing: .center
+        }
+    }
+
     private var stackStepX: CGFloat {
         switch arrangement {
         case .sheetRow: return 7
         case .timelineLeading: return 2
+        case .timelineCardTrailing: return 0
         }
     }
 
@@ -103,6 +120,7 @@ struct ActivityFeedPhotoStackView: View {
         switch arrangement {
         case .sheetRow: return 2.5
         case .timelineLeading: return 1.25
+        case .timelineCardTrailing: return 0
         }
     }
 
@@ -120,6 +138,8 @@ struct ActivityFeedPhotoStackView: View {
             let x = -CGFloat(index) * stackStepX + midX
             let y = CGFloat(index) * stackStepY - midY
             return CGSize(width: x, height: y)
+        case .timelineCardTrailing:
+            return .zero
         }
     }
 
@@ -130,6 +150,8 @@ struct ActivityFeedPhotoStackView: View {
             return tileSize + spread + 6
         case .timelineLeading:
             return tileSize + spread + AppSpacing.xs
+        case .timelineCardTrailing:
+            return timelineTrailingStackFrameExtent(visibleCount: visibleCount)
         }
     }
 
@@ -140,10 +162,21 @@ struct ActivityFeedPhotoStackView: View {
             return tileSize + verticalSpread + 6 + 4
         case .timelineLeading:
             return tileSize + verticalSpread + AppSpacing.xs
+        case .timelineCardTrailing:
+            return timelineTrailingStackFrameExtent(visibleCount: visibleCount)
         }
     }
 
-    private func stackTilt(depth: Int) -> Double {
+    /// Square envelope so rotated polaroid tiles don’t clip; single photo stays compact.
+    private func timelineTrailingStackFrameExtent(visibleCount: Int) -> CGFloat {
+        guard visibleCount > 1 else { return tileSize }
+        let maxTiltDegrees: Double = 15.0
+        let maxTiltRadians = maxTiltDegrees * .pi / 180
+        let rotatedSquareSpan = tileSize * CGFloat(abs(cos(maxTiltRadians)) + abs(sin(maxTiltRadians)))
+        return rotatedSquareSpan + AppSpacing.sm
+    }
+
+    private func stackTilt(depth: Int, visibleCount: Int) -> Double {
         switch arrangement {
         case .sheetRow:
             switch depth {
@@ -159,24 +192,56 @@ struct ActivityFeedPhotoStackView: View {
             case 2: return 3
             default: return 0
             }
+        case .timelineCardTrailing:
+            return stackTiltTimelineTrailing(index: depth, count: visibleCount)
         }
     }
 
+    /// Front (index 0): level; each card behind tilts more so the whole stack fans out.
+    private func stackTiltTimelineTrailing(index: Int, count: Int) -> Double {
+        guard count > 1 else { return 0 }
+        if index == 0 { return 0 }
+        if index == count - 1 { return -15.0 }
+        return index % 2 == 1 ? 13.0 : -10.0
+    }
+
     @ViewBuilder
-    private func tile(for url: URL) -> some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let image):
-                image
-                    .resizable()
-                    .scaledToFill()
-            case .failure:
-                tilePlaceholder
-            case .empty:
-                tilePlaceholder
-            @unknown default:
+    private func stackedTile(for item: ActivityFeedPhotoStackItem) -> some View {
+        switch arrangement {
+        case .timelineCardTrailing:
+            timelineTrailingPolaroidTile(for: item)
+        case .sheetRow, .timelineLeading:
+            tile(for: item)
+        }
+    }
+
+    /// White mat + subtle outer stroke so the stack reads like layered prints (timeline trailing only).
+    private func timelineTrailingPolaroidTile(for item: ActivityFeedPhotoStackItem) -> some View {
+        let matInset = Self.timelineTrailingPolaroidMatInset
+        let inner = max(tileSize - matInset * 2, 1)
+        return ZStack {
+            RoundedRectangle(cornerRadius: tileCornerRadius + 1, style: .continuous)
+                .fill(Color.white)
+            CachedAttachmentImage(attachmentId: item.id, url: item.url) {
                 tilePlaceholder
             }
+            .frame(width: inner, height: inner)
+            .clipShape(RoundedRectangle(cornerRadius: max(tileCornerRadius - 1, 2), style: .continuous))
+        }
+        .frame(width: tileSize, height: tileSize)
+        .clipShape(RoundedRectangle(cornerRadius: tileCornerRadius + 1, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: tileCornerRadius + 1, style: .continuous)
+                .strokeBorder(AppColors.appDivider.opacity(0.55), lineWidth: 0.75)
+        )
+    }
+
+    private static let timelineTrailingPolaroidMatInset: CGFloat = 3
+
+    @ViewBuilder
+    private func tile(for item: ActivityFeedPhotoStackItem) -> some View {
+        CachedAttachmentImage(attachmentId: item.id, url: item.url) {
+            tilePlaceholder
         }
         .frame(width: tileSize, height: tileSize)
         .clipShape(RoundedRectangle(cornerRadius: tileCornerRadius, style: .continuous))
@@ -201,7 +266,7 @@ private struct PhotoStackOuterInsets: ViewModifier {
             content
                 .padding(.top, 4)
                 .padding(.leading, 3)
-        case .timelineLeading:
+        case .timelineLeading, .timelineCardTrailing:
             content
         }
     }

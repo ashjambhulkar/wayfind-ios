@@ -40,44 +40,62 @@ struct CreateTripView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                    CreateTripMapSectionCard(title: "Destination") {
-                        CreateTripMapTextRow(
-                            icon: "mappin.circle.fill",
-                            title: "Where",
-                            placeholder: "Where are you going?",
-                            text: $destination,
-                            isFocused: $isDestinationFocused
-                        )
+            Form {
+                Section(String(localized: "Destination")) {
+                    TextField(String(localized: "Where are you going?"), text: $destination)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .focused($isDestinationFocused)
 
-                        if shouldShowDestinationPredictions {
-                            CreateTripMapDivider()
-
-                            VStack(spacing: 0) {
-                                ForEach(placeSearch.results) { prediction in
-                                    DestinationPredictionRow(prediction: prediction) {
-                                        Task { await selectDestinationPrediction(prediction) }
-                                    }
-
-                                    if prediction != placeSearch.results.last {
-                                        CreateTripMapDivider()
+                    if isResolvingDestination {
+                        HStack(spacing: AppSpacing.sm) {
+                            ProgressView()
+                                .tint(AppColors.appPrimary)
+                                .controlSize(.small)
+                            Text(String(localized: "Finding destination…"))
+                                .font(.appBody)
+                                .foregroundStyle(AppColors.textSecondary)
+                        }
+                    } else if shouldShowDestinationPredictions {
+                        ForEach(placeSearch.results) { prediction in
+                            Button {
+                                Task { await selectDestinationPrediction(prediction) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                                    Text(prediction.mainText)
+                                        .font(.appBody)
+                                        .foregroundStyle(AppColors.textPrimary)
+                                    if !prediction.secondaryText.isEmpty {
+                                        Text(prediction.secondaryText)
+                                            .font(.appSmall)
+                                            .foregroundStyle(AppColors.textSecondary)
                                     }
                                 }
                             }
-                        } else if isResolvingDestination {
-                            CreateTripMapDivider()
-
-                            DestinationStatusRow(message: "Finding destination…")
+                            .buttonStyle(.plain)
                         }
                     }
-
-                    dateRangeSection
                 }
-                .padding(AppSpacing.lg)
+
+                Section(String(localized: "Dates")) {
+                    DatePicker(
+                        String(localized: "Start"),
+                        selection: $startDate,
+                        displayedComponents: .date
+                    )
+                    .tint(AppColors.appPrimary)
+
+                    DatePicker(
+                        String(localized: "End"),
+                        selection: $endDate,
+                        displayedComponents: .date
+                    )
+                    .tint(AppColors.appPrimary)
+                }
             }
-            .scrollDismissesKeyboard(.interactively)
+            .scrollContentBackground(.hidden)
             .background(AppColors.appBackground)
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Plan a New Trip")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -99,34 +117,6 @@ struct CreateTripView: View {
         }
         .onChange(of: destination) { _, newValue in
             destinationTextChanged(newValue)
-        }
-    }
-
-    private var dateRangeSection: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            FormSectionTitle("Dates")
-
-            VStack(spacing: 0) {
-                CreateTripMapDateRow(
-                    icon: "calendar.badge.plus",
-                    title: "Start",
-                    selection: $startDate
-                )
-
-                CreateTripMapDivider()
-
-                CreateTripMapDateRow(
-                    icon: "calendar.badge.minus",
-                    title: "End",
-                    selection: $endDate
-                )
-            }
-            .background(AppColors.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
-            }
         }
     }
 
@@ -198,172 +188,6 @@ struct CreateTripView: View {
         placeSearch.clearResults()
         isDestinationFocused = false
     }
-}
-
-private struct CreateTripMapSectionCard<Content: View>: View {
-    let title: String?
-    let content: Content
-
-    init(title: String?, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            if let title {
-                FormSectionTitle(title)
-            }
-
-            VStack(spacing: 0) {
-                content
-            }
-            .background(AppColors.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
-            }
-        }
-    }
-}
-
-private struct CreateTripMapTextRow: View {
-    let icon: String
-    let title: String
-    let placeholder: String
-    @Binding var text: String
-    var isFocused: FocusState<Bool>.Binding
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: AppColors.appPrimary,
-                accessibilityLabel: title
-            )
-
-            Text(title)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-
-            Spacer(minLength: AppSpacing.md)
-
-            TextField(placeholder, text: $text)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-                .multilineTextAlignment(.trailing)
-                .textInputAutocapitalization(.words)
-                .autocorrectionDisabled()
-                .focused(isFocused)
-                .frame(minWidth: CreateTripMapFormMetrics.trailingFieldMinWidth)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: CreateTripMapFormMetrics.tallRowMinHeight)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct DestinationPredictionRow: View {
-    let prediction: PlaceAutocompleteResult
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: AppSpacing.md) {
-                MapStyleIcon(
-                    systemName: "mappin.and.ellipse",
-                    size: .small,
-                    accent: AppColors.appPrimary,
-                    accessibilityLabel: "Destination suggestion"
-                )
-
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text(prediction.mainText)
-                        .font(.appBody)
-                        .foregroundStyle(AppColors.textPrimary)
-                        .lineLimit(1)
-
-                    if !prediction.secondaryText.isEmpty {
-                        Text(prediction.secondaryText)
-                            .font(.appSmall)
-                            .foregroundStyle(AppColors.textSecondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppColors.textTertiary.opacity(0.55))
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, AppSpacing.md)
-            .frame(minHeight: CreateTripMapFormMetrics.tallRowMinHeight)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct DestinationStatusRow: View {
-    let message: String
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            ProgressView()
-                .tint(AppColors.appPrimary)
-
-            Text(message)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textSecondary)
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: CreateTripMapFormMetrics.tallRowMinHeight)
-    }
-}
-
-private struct CreateTripMapDateRow: View {
-    let icon: String
-    let title: String
-    @Binding var selection: Date
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: AppColors.appPrimary,
-                accessibilityLabel: title
-            )
-
-            DatePicker(title, selection: $selection, displayedComponents: .date)
-                .font(.appBody)
-                .datePickerStyle(.compact)
-                .tint(AppColors.appPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: CreateTripMapFormMetrics.tallRowMinHeight)
-        .contentShape(Rectangle())
-    }
-}
-
-private struct CreateTripMapDivider: View {
-    var body: some View {
-        Divider()
-            .background(AppColors.appDivider)
-            .padding(.leading, AppSpacing.xxxl + AppSpacing.md)
-    }
-}
-
-private enum CreateTripMapFormMetrics {
-    static let tallRowMinHeight: CGFloat = 64
-    static let trailingFieldMinWidth: CGFloat = 160
 }
 
 private extension String {

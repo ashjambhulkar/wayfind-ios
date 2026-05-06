@@ -1,171 +1,89 @@
 import SwiftUI
 
+/// Car rental booking fields — native grouped-Form sections.
+/// Rendered inside a `Form {}` in `AddBookingView`.
 struct CarRentalFormView: View {
     @Binding var company: String
     @Binding var pickupLocation: String
     @Binding var dropoffLocation: String
     @Binding var pickupDate: Date?
     @Binding var dropoffDate: Date?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            CarRentalMapSectionCard(title: "Rental") {
-                CarRentalMapTextRow(
-                    icon: "car.fill",
-                    title: "Company",
-                    placeholder: "Hertz",
-                    text: $company
-                )
-            }
-
-            CarRentalMapSectionCard(title: "Route") {
-                CarRentalMapTextRow(
-                    icon: "location.fill",
-                    title: "Pickup",
-                    placeholder: "Airport or address",
-                    text: $pickupLocation
-                )
-
-                CarRentalMapDivider()
-
-                CarRentalMapTextRow(
-                    icon: "mappin.circle.fill",
-                    title: "Dropoff",
-                    placeholder: "Airport or address",
-                    text: $dropoffLocation
-                )
-            }
-
-            CarRentalMapSectionCard(title: "Schedule") {
-                OptionalBookingDateRow(
-                    icon: "calendar.badge.plus",
-                    rowTitle: String(localized: "Pick-up"),
-                    accent: BookingCategory.carRental.color,
-                    selection: $pickupDate,
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-
-                CarRentalMapDivider()
-
-                OptionalBookingDateRow(
-                    icon: "calendar.badge.minus",
-                    rowTitle: String(localized: "Drop-off"),
-                    accent: BookingCategory.carRental.color,
-                    selection: $dropoffDate,
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-            }
-        }
-    }
-}
-
-// =============================================================================
-
-struct CarRentalOptionalDetailsSection: View {
     @Binding var carType: String
 
-    var body: some View {
-        DisclosureGroup {
-            CarRentalMapSectionCard(title: nil) {
-                CarRentalMapTextRow(
-                    icon: "car.side.fill",
-                    title: "Car Type",
-                    placeholder: "Compact SUV",
-                    text: $carType
-                )
-            }
-            .padding(.top, AppSpacing.md)
-        } label: {
-            HStack(spacing: AppSpacing.sm) {
-                MapStyleIcon(
-                    systemName: "ellipsis.circle.fill",
-                    size: .small,
-                    accent: BookingCategory.carRental.color,
-                    accessibilityLabel: "Optional car rental details"
-                )
+    @Environment(\.calendar) private var calendar
 
-                Text("Optional Details")
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
+    private var accent: Color { BookingCategory.carRental.color }
+
+    var body: some View {
+        Section(String(localized: "Rental")) {
+            LabeledContent(String(localized: "Company")) {
+                TextField(String(localized: "e.g. Hertz"), text: $company)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
             }
         }
-        .tint(AppColors.appPrimary)
-    }
-}
 
-private struct CarRentalMapSectionCard<Content: View>: View {
-    let title: String?
-    let content: Content
-
-    init(title: String?, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            if let title {
-                FormSectionTitle(title)
+        Section(String(localized: "Route")) {
+            LabeledContent(String(localized: "Pick-up")) {
+                TextField(String(localized: "Airport or address"), text: $pickupLocation)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
             }
-
-            VStack(spacing: 0) {
-                content
-            }
-            .background(AppColors.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
+            LabeledContent(String(localized: "Drop-off")) {
+                TextField(String(localized: "Airport or address"), text: $dropoffLocation)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
             }
         }
-    }
-}
 
-private struct CarRentalMapTextRow: View {
-    let icon: String
-    let title: String
-    let placeholder: String
-    @Binding var text: String
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.carRental.color,
-                accessibilityLabel: title
+        Section {
+            DatePicker(
+                String(localized: "Pick-up date"),
+                selection: Binding(
+                    get: { pickupDate ?? defaultAnchor() },
+                    set: { pickupDate = $0 }
+                ),
+                displayedComponents: [.date, .hourAndMinute]
             )
+            .tint(accent)
 
-            Text(title)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-
-            Spacer(minLength: AppSpacing.md)
-
-            TextField(placeholder, text: $text)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-                .multilineTextAlignment(.trailing)
-                .textInputAutocapitalization(.words)
-                .autocorrectionDisabled()
-                .frame(minWidth: CarRentalMapFormMetrics.trailingFieldMinWidth)
+            DatePicker(
+                String(localized: "Drop-off date"),
+                selection: Binding(
+                    get: { dropoffDate ?? dropoffAnchor() },
+                    set: { dropoffDate = $0 }
+                ),
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .tint(accent)
+        } header: {
+            Text(String(localized: "Schedule"))
+        } footer: {
+            Text(String(localized: "Times shown in the trip's destination time zone."))
+                .font(.appFootnote)
         }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: CarRentalMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
+
+        Section {
+            LabeledContent(String(localized: "Car type")) {
+                TextField(String(localized: "e.g. Compact SUV"), text: $carType)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+            }
+        } header: {
+            Text(String(localized: "Optional details"))
+        }
+    }
+
+    private func defaultAnchor() -> Date {
+        calendar.date(bySettingHour: 10, minute: 0, second: 0, of: Date()) ?? Date()
+    }
+
+    private func dropoffAnchor() -> Date {
+        let base = pickupDate ?? defaultAnchor()
+        return calendar.date(byAdding: .day, value: 3, to: base) ?? base
     }
 }
-
-private struct CarRentalMapDivider: View {
-    var body: some View {
-        Divider()
-            .background(AppColors.appDivider)
-            .padding(.leading, AppSpacing.xxxl + AppSpacing.md)
-    }
-}
-
-private enum CarRentalMapFormMetrics {
-    static let rowMinHeight: CGFloat = 56
-    static let trailingFieldMinWidth: CGFloat = 128
-}
-

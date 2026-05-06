@@ -7,6 +7,8 @@ enum FlightLookupFormState: Hashable {
     case manualFallback
 }
 
+/// Flight booking fields using native **grouped form** sections (Calendar / Reminders style).
+/// Flow: airline → flight number → departure date; parent triggers lookup when all are set.
 struct FlightFormView: View {
     @Binding var airline: String
     @Binding var carrierIATA: String
@@ -21,592 +23,329 @@ struct FlightFormView: View {
     let lookupState: FlightLookupFormState
     let verifiedFlight: VerifiedFlightLookup?
     let lookupMessage: String?
+    let onShowAirlinePicker: () -> Void
     let onUseManualEntry: () -> Void
     let onResetLookup: () -> Void
 
+    @Environment(\.calendar) private var calendar
+    @Environment(\.timeZone) private var timeZone
+
+    private var accent: Color { BookingCategory.flight.color }
+
+    private var hasCarrier: Bool {
+        let iata = carrierIATA.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return iata.count >= 2 && iata.count <= 3
+    }
+
+    private var hasFlightNumber: Bool {
+        !normalizedFlightNumber().isEmpty
+    }
+
+    private var airlineSummary: String {
+        let trimmedName = airline.trimmingCharacters(in: .whitespacesAndNewlines)
+        let iata = carrierIATA.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !iata.isEmpty, !trimmedName.isEmpty {
+            return "\(iata) · \(trimmedName)"
+        }
+        if !trimmedName.isEmpty { return trimmedName }
+        if !iata.isEmpty { return iata }
+        return String(localized: "Not set")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            switch lookupState {
-            case .lookupInput:
-                lookupInputSection
-                FlightMapSectionCard(title: "Live Tracking") {
-                    FlightTrackingInfoRow()
-                }
-            case .lookingUp:
-                lookupInputSection
-                FlightMapSectionCard(title: "Finding Flight") {
-                    FlightProgressRow()
-                }
-            case .verifiedResult:
-                if let verifiedFlight {
-                    FlightVerifiedResultCard(airline: airline, flight: verifiedFlight, onChange: onResetLookup)
-                }
-            case .manualFallback:
-                lookupInputSection
-                FlightManualFallbackSection(
-                    message: lookupMessage,
-                    departureAirport: $departureAirport,
-                    arrivalAirport: $arrivalAirport,
-                    departureDate: $departureDate,
-                    arrivalDate: $arrivalDate
-                )
+        switch lookupState {
+        case .lookupInput, .lookingUp:
+            lookupFlowSections
+        case .verifiedResult:
+            if let verifiedFlight {
+                verifiedSections(verifiedFlight)
             }
+        case .manualFallback:
+            manualFallbackSections
         }
     }
 
-    private var lookupInputSection: some View {
-        FlightMapSectionCard(title: "Find Your Flight") {
-            FlightAirlinePickerRow(
-                airline: $airline,
-                carrierIATA: $carrierIATA
-            )
+    // MARK: - Lookup flow (grouped)
 
-            FlightMapDivider()
+    @ViewBuilder
+    private var lookupFlowSections: some View {
+        let isLooking = lookupState == .lookingUp
 
-            FlightMapTextRow(
-                icon: "number",
-                title: "Flight Number",
-                placeholder: "1234",
-                capitalization: .characters,
-                text: $flightNumber
-            )
+        Section {
+            // Row 1: Airline — always enabled
+            Button {
+                onShowAirlinePicker()
+            } label: {
+                LabeledContent(String(localized: "Airline")) {
+                    Text(airlineSummary)
+                        .foregroundStyle(hasCarrier ? AppColors.textPrimary : AppColors.textSecondary)
+                }
+            }
+            .foregroundStyle(AppColors.textPrimary)
+            .disabled(isLooking)
 
-            FlightMapDivider()
+            // Row 2: Flight number — disabled until airline chosen
+            LabeledContent(String(localized: "Flight number")) {
+                TextField(String(localized: "e.g. 101"), text: $flightNumber)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+            }
+            .disabled(!hasCarrier || isLooking)
 
-            OptionalBookingDateRow(
-                icon: "calendar",
-                rowTitle: String(localized: "Departure date"),
-                accent: BookingCategory.flight.color,
-                selection: $departureDate,
+            // Row 3: Departure date — disabled until both airline + flight number set
+            DatePicker(
+                String(localized: "Departure date"),
+                selection: Binding(
+                    get: { departureDate ?? defaultDepartureAnchor() },
+                    set: { departureDate = $0 }
+                ),
                 displayedComponents: [.date]
             )
+            .disabled(!hasCarrier || !hasFlightNumber || isLooking)
+        } footer: {
+            if !hasCarrier {
+                Text(String(localized: "Choose your airline to continue."))
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textSecondary)
+            } else if !hasFlightNumber {
+                Text(String(localized: "Enter a flight number to continue."))
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textSecondary)
+            } else if departureDate == nil {
+                Text(String(localized: "Pick a departure date and we'll look up your flight."))
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textSecondary)
+            } else {
+                Text(String(localized: "We'll look up your flight automatically."))
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textSecondary)
+            }
+        }
 
-            if lookupState == .lookupInput {
-                FlightMapDivider()
-                FlightManualEntryButton(onTap: onUseManualEntry)
+        if isLooking {
+            Section {
+                HStack(spacing: AppSpacing.md) {
+                    ProgressView()
+                        .tint(accent)
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        Text(String(localized: "Looking up flight…"))
+                            .font(.appBody.weight(.semibold))
+                            .foregroundStyle(AppColors.textPrimary)
+                        Text(String(localized: "Matching airline, flight number, and departure date."))
+                            .font(.appFootnote)
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, AppSpacing.xs)
+            }
+        }
+
+        if lookupState == .lookupInput {
+            Section {
+                Button(String(localized: "Enter flight manually"), role: .none, action: onUseManualEntry)
+                    .foregroundStyle(AppColors.appPrimary)
+            } footer: {
+                Text(String(localized: "Skip lookup and type airports and times yourself."))
+                    .font(.appFootnote)
+                    .foregroundStyle(AppColors.textSecondary)
             }
         }
     }
-}
 
-struct FlightOptionalDetailsSection: View {
-    @Binding var terminal: String
-    @Binding var gate: String
-    @Binding var seat: String
+    // MARK: - Verified
 
-    var body: some View {
-        DisclosureGroup {
-            FlightMapSectionCard(title: nil) {
-                FlightMapTextRow(
-                    icon: "building.2.fill",
-                    title: "Terminal",
-                    placeholder: "Terminal",
-                    text: $terminal
-                )
-
-                FlightMapDivider()
-
-                FlightMapTextRow(
-                    icon: "door.left.hand.open",
-                    title: "Gate",
-                    placeholder: "Gate",
-                    capitalization: .characters,
-                    text: $gate
-                )
-
-                FlightMapDivider()
-
-                FlightMapTextRow(
-                    icon: "rectangle.inset.filled.and.person.filled",
-                    title: "Seat",
-                    placeholder: "12A",
-                    capitalization: .characters,
-                    text: $seat
-                )
-            }
-            .padding(.top, AppSpacing.md)
-        } label: {
-            HStack(spacing: AppSpacing.sm) {
-                MapStyleIcon(
-                    systemName: "ellipsis.circle.fill",
-                    size: .small,
-                    accent: BookingCategory.flight.color,
-                    accessibilityLabel: "Optional flight details"
-                )
-
-                Text("Optional Details")
+    @ViewBuilder
+    private func verifiedSections(_ flight: VerifiedFlightLookup) -> some View {
+        Section {
+            HStack {
+                Text(String(localized: "Flight found"))
                     .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
+                Spacer(minLength: AppSpacing.sm)
+                Button(String(localized: "Change"), action: onResetLookup)
+                    .font(.appFootnote.weight(.semibold))
+                    .foregroundStyle(AppColors.appPrimary)
             }
-        }
-        .tint(AppColors.appPrimary)
-    }
-}
-
-// =============================================================================
-
-private struct FlightMapSectionCard<Content: View>: View {
-    let title: String?
-    let content: Content
-
-    init(title: String?, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            if let title {
-                FormSectionTitle(title)
-            }
-
-            VStack(spacing: 0) {
-                content
-            }
-            .background(AppColors.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
-                    .strokeBorder(AppColors.appDivider, lineWidth: 1)
-            }
-        }
-    }
-}
-
-private struct FlightMapTextRow: View {
-    let icon: String
-    let title: String
-    let placeholder: String
-    var capitalization: TextInputAutocapitalization = .sentences
-    @Binding var text: String
-
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: icon,
-                size: .small,
-                accent: BookingCategory.flight.color,
-                accessibilityLabel: title
+            LabeledContent(String(localized: "Flight"), value: verifiedTitle(flight))
+            LabeledContent(
+                String(localized: "Route"),
+                value: "\(flight.originAirportIATA ?? "—") → \(flight.destinationAirportIATA ?? "—")"
             )
-
-            Text(title)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-
-            Spacer(minLength: AppSpacing.md)
-
-            TextField(placeholder, text: $text)
-                .font(.appBody)
-                .foregroundStyle(AppColors.textPrimary)
-                .multilineTextAlignment(.trailing)
-                .textInputAutocapitalization(capitalization)
-                .autocorrectionDisabled()
-                .frame(minWidth: FlightMapFormMetrics.trailingFieldMinWidth)
+            LabeledContent(
+                String(localized: "Departure"),
+                value: "\(flight.scheduledDepartureUTC.shortFormatted(timeZone: timeZone)) · \(flight.scheduledDepartureUTC.timeFormatted(timeZone: timeZone))"
+            )
+            LabeledContent(
+                String(localized: "Arrival"),
+                value: "\(flight.scheduledArrivalUTC.shortFormatted(timeZone: timeZone)) · \(flight.scheduledArrivalUTC.timeFormatted(timeZone: timeZone))"
+            )
+        } footer: {
+            Text(String(localized: "Provider verified — you can add optional terminal, gate, and seat below."))
+                .font(.appFootnote)
+                .foregroundStyle(AppColors.textSecondary)
         }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: FlightMapFormMetrics.rowMinHeight)
-        .contentShape(Rectangle())
+
+        optionalFlightDetailsSection
+    }
+
+    // MARK: - Manual fallback
+
+    private var manualFallbackSections: some View {
+        Group {
+            Section {
+                HStack(alignment: .top, spacing: AppSpacing.md) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(AppColors.appWarning)
+                        .font(.title3)
+                        .accessibilityHidden(true)
+                    Text(lookupMessage ?? String(localized: "Flight not found. Enter details manually."))
+                        .font(.appFootnote)
+                        .foregroundStyle(AppColors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, AppSpacing.xs)
+            }
+
+            Section(String(localized: "Flight")) {
+                LabeledContent(String(localized: "From")) {
+                    TextField(String(localized: "Airport code, e.g. JFK"), text: $departureAirport)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.characters)
+                }
+                LabeledContent(String(localized: "To")) {
+                    TextField(String(localized: "Airport code, e.g. LAX"), text: $arrivalAirport)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.characters)
+                }
+            }
+
+            Section(String(localized: "Schedule")) {
+                DatePicker(
+                    String(localized: "Departure"),
+                    selection: Binding(
+                        get: { departureDate ?? defaultDepartureAnchor() },
+                        set: { departureDate = $0 }
+                    ),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                DatePicker(
+                    String(localized: "Arrival"),
+                    selection: Binding(
+                        get: { arrivalDate ?? departureDate ?? defaultDepartureAnchor() },
+                        set: { arrivalDate = $0 }
+                    ),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+            }
+
+            optionalFlightDetailsSection
+        }
+    }
+
+    // MARK: - Optional terminal / gate / seat
+
+    private var optionalFlightDetailsSection: some View {
+        Section {
+            LabeledContent(String(localized: "Terminal")) {
+                TextField(String(localized: "e.g. A"), text: $terminal)
+                    .multilineTextAlignment(.trailing)
+            }
+            LabeledContent(String(localized: "Gate")) {
+                TextField(String(localized: "e.g. 12B"), text: $gate)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.characters)
+            }
+            LabeledContent(String(localized: "Seat")) {
+                TextField(String(localized: "e.g. 14C"), text: $seat)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.characters)
+            }
+        } header: {
+            Text(String(localized: "Optional details"))
+        } footer: {
+            Text(String(localized: "Terminal, gate, and seat are optional."))
+                .font(.appFootnote)
+                .foregroundStyle(AppColors.textSecondary)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func normalizedFlightNumber() -> String {
+        var raw = flightNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let carrier = carrierIATA.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !carrier.isEmpty, raw.hasPrefix(carrier) {
+            raw.removeFirst(carrier.count)
+            raw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return raw
+    }
+
+    private func defaultDepartureAnchor() -> Date {
+        let anchor = Date()
+        return calendar.date(bySettingHour: 12, minute: 0, second: 0, of: anchor)
+            ?? calendar.startOfDay(for: anchor)
+    }
+
+    private func verifiedTitle(_ flight: VerifiedFlightLookup) -> String {
+        let name = airline.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = name.isEmpty ? flight.carrierIATA : name
+        return "\(prefix) \(flight.flightNumber)".trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
-private struct FlightAirlinePickerRow: View {
+// MARK: - Airline picker sheet (searchable list)
+
+struct FlightAirlinePickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
     @Binding var airline: String
     @Binding var carrierIATA: String
     @State private var query = ""
-    @State private var isSearching = false
 
-    private var selectedAirline: FlightAirline? {
-        FlightAirlineCatalog.airline(matchingCode: carrierIATA)
-            ?? FlightAirlineCatalog.airline(matchingName: airline)
-    }
-
-    private var suggestions: [FlightAirline] {
-        FlightAirlineCatalog.search(query.isEmpty ? airline : query)
+    private var results: [FlightAirline] {
+        FlightAirlineCatalog.search(query.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: AppSpacing.md) {
-                MapStyleIcon(
-                    systemName: "airplane.circle.fill",
-                    size: .small,
-                    accent: BookingCategory.flight.color,
-                    accessibilityLabel: "Airline"
-                )
-
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text("Airline")
-                        .font(.appBody)
-                        .foregroundStyle(AppColors.textPrimary)
-                    Text(selectedAirline.map { "\($0.iataCode) · \($0.name)" } ?? "Pick from airline results")
-                        .font(.appSmall)
-                        .foregroundStyle(AppColors.textTertiary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: AppSpacing.md)
-
-                TextField("Search", text: $query)
-                    .font(.appBody)
-                    .foregroundStyle(AppColors.textPrimary)
-                    .multilineTextAlignment(.trailing)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .frame(minWidth: FlightMapFormMetrics.trailingFieldMinWidth)
-                    .onChange(of: query) { _, newValue in
-                        isSearching = !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    }
-            }
-            .padding(.horizontal, AppSpacing.md)
-            .frame(minHeight: FlightMapFormMetrics.rowMinHeight)
-            .contentShape(Rectangle())
-
-            if isSearching {
-                FlightMapDivider()
-
-                VStack(spacing: 0) {
-                    ForEach(suggestions.prefix(6)) { airlineOption in
-                        Button {
-                            airline = airlineOption.name
-                            carrierIATA = airlineOption.iataCode
-                            query = airlineOption.name
-                            isSearching = false
-                        } label: {
-                            HStack(spacing: AppSpacing.md) {
-                                Text(airlineOption.iataCode)
-                                    .font(.appCaption.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: FlightMapFormMetrics.airlineCodeBadgeWidth)
-                                    .padding(.vertical, AppSpacing.xs)
-                                    .background(BookingCategory.flight.color)
-                                    .clipShape(Capsule())
-
-                                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                                    Text(airlineOption.name)
-                                        .font(.appBody)
-                                        .foregroundStyle(AppColors.textPrimary)
-                                    Text("Use \(airlineOption.iataCode) for live tracking")
-                                        .font(.appSmall)
-                                        .foregroundStyle(AppColors.textTertiary)
-                                }
-
-                                Spacer(minLength: 0)
+        NavigationStack {
+            List {
+                ForEach(results) { item in
+                    Button {
+                        airline = item.name
+                        carrierIATA = item.iataCode
+                        dismiss()
+                    } label: {
+                        HStack(spacing: AppSpacing.md) {
+                            Text(item.iataCode)
+                                .font(.appCaption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 40, alignment: .center)
+                                .padding(.vertical, AppSpacing.xs)
+                                .background(BookingCategory.flight.color)
+                                .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.small, style: .continuous))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.name)
+                                    .font(.appBody)
+                                    .foregroundStyle(AppColors.textPrimary)
+                                Text(String(localized: "IATA code for live tracking"))
+                                    .font(.appFootnote)
+                                    .foregroundStyle(AppColors.textTertiary)
                             }
-                            .padding(.horizontal, AppSpacing.md)
-                            .frame(minHeight: FlightMapFormMetrics.rowMinHeight)
-                        }
-                        .buttonStyle(.plain)
-
-                        if airlineOption.id != suggestions.prefix(6).last?.id {
-                            FlightMapDivider()
+                            Spacer(minLength: 0)
                         }
                     }
                 }
             }
-        }
-        .onAppear {
-            if query.isEmpty {
-                query = airline
-            }
-        }
-    }
-}
-
-private struct FlightProgressRow: View {
-    var body: some View {
-        HStack(spacing: AppSpacing.md) {
-            ProgressView()
-                .tint(AppColors.appPrimary)
-
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                Text("Checking provider")
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-                Text("We are matching the airline, flight number, and departure date.")
-                    .font(.appSmall)
-                    .foregroundStyle(AppColors.textSecondary)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(minHeight: FlightMapFormMetrics.infoRowMinHeight)
-    }
-}
-
-private struct FlightVerifiedResultCard: View {
-    let airline: String
-    let flight: VerifiedFlightLookup
-    let onChange: () -> Void
-
-    var body: some View {
-        FlightMapSectionCard(title: "Review Flight") {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                HStack(spacing: AppSpacing.md) {
-                    MapStyleIcon(
-                        systemName: "checkmark.seal.fill",
-                        size: .small,
-                        accent: BookingCategory.flight.color,
-                        accessibilityLabel: "Verified flight"
-                    )
-
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        Text(displayTitle)
-                            .font(.cardTitle)
-                            .foregroundStyle(AppColors.textPrimary)
-                        Text("Provider verified")
-                            .font(.appSmall)
-                            .foregroundStyle(AppColors.appSuccess)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Button("Change", action: onChange)
-                        .font(.appCaption.weight(.semibold))
-                        .foregroundStyle(AppColors.appPrimary)
+            .listStyle(.insetGrouped)
+            .navigationTitle(String(localized: "Airline"))
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, prompt: String(localized: "Search airlines"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "Cancel")) { dismiss() }
                 }
-
-                FlightResultRouteRow(
-                    origin: flight.originAirportIATA ?? "Origin",
-                    destination: flight.destinationAirportIATA ?? "Destination"
-                )
-
-                FlightResultTimeRow(title: "Departure", date: flight.scheduledDepartureUTC)
-                FlightResultTimeRow(title: "Arrival", date: flight.scheduledArrivalUTC)
-
-                if let terminal = flight.terminalOrigin, !terminal.isEmpty {
-                    FlightResultTextPill(title: "Terminal", value: terminal)
-                }
-                if let gate = flight.gateOrigin, !gate.isEmpty {
-                    FlightResultTextPill(title: "Gate", value: gate)
-                }
-
-                Text("Live tracking will start automatically for premium access.")
-                    .font(.appSmall)
-                    .foregroundStyle(AppColors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(AppSpacing.md)
-        }
-    }
-
-    private var displayTitle: String {
-        let name = airline.trimmingCharacters(in: .whitespacesAndNewlines)
-        let prefix = name.isEmpty ? flight.carrierIATA : name
-        return "\(prefix) \(flight.flightNumber)"
-    }
-}
-
-private struct FlightManualFallbackSection: View {
-    let message: String?
-    @Binding var departureAirport: String
-    @Binding var arrivalAirport: String
-    @Binding var departureDate: Date?
-    @Binding var arrivalDate: Date?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            FlightMapSectionCard(title: "Manual Flight") {
-                FlightManualInfoRow(message: message)
-
-                FlightMapDivider()
-
-                FlightMapTextRow(
-                    icon: "airplane.departure",
-                    title: "From",
-                    placeholder: "JFK",
-                    capitalization: .characters,
-                    text: $departureAirport
-                )
-
-                FlightMapDivider()
-
-                FlightMapTextRow(
-                    icon: "airplane.arrival",
-                    title: "To",
-                    placeholder: "LHR",
-                    capitalization: .characters,
-                    text: $arrivalAirport
-                )
-
-                FlightMapDivider()
-
-                OptionalBookingDateRow(
-                    icon: "clock.fill",
-                    rowTitle: String(localized: "Departure"),
-                    accent: BookingCategory.flight.color,
-                    selection: $departureDate,
-                    displayedComponents: [.date, .hourAndMinute]
-                )
-
-                FlightMapDivider()
-
-                OptionalBookingDateRow(
-                    icon: "clock.badge.checkmark.fill",
-                    rowTitle: String(localized: "Arrival"),
-                    accent: BookingCategory.flight.color,
-                    selection: $arrivalDate,
-                    displayedComponents: [.date, .hourAndMinute]
-                )
             }
         }
     }
 }
-
-private struct FlightManualInfoRow: View {
-    let message: String?
-
-    var body: some View {
-        HStack(alignment: .top, spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: "exclamationmark.triangle.fill",
-                size: .small,
-                accent: AppColors.appWarning,
-                accessibilityLabel: "Manual flight"
-            )
-            Text(message ?? "Manual flights save to your trip, but live tracking will not start until a provider verifies the flight.")
-                .font(.appSmall)
-                .foregroundStyle(AppColors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .padding(.vertical, AppSpacing.sm)
-        .frame(minHeight: FlightMapFormMetrics.infoRowMinHeight)
-    }
-}
-
-private struct FlightManualEntryButton: View {
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: AppSpacing.md) {
-                MapStyleIcon(
-                    systemName: "square.and.pencil",
-                    size: .small,
-                    accent: AppColors.textTertiary,
-                    accessibilityLabel: "Manual entry"
-                )
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text("Enter manually")
-                        .font(.appBody)
-                        .foregroundStyle(AppColors.textPrimary)
-                    Text("Save without live tracking")
-                        .font(.appSmall)
-                        .foregroundStyle(AppColors.textTertiary)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.appCaption.weight(.semibold))
-                    .foregroundStyle(AppColors.textTertiary)
-            }
-            .padding(.horizontal, AppSpacing.md)
-            .frame(minHeight: FlightMapFormMetrics.rowMinHeight)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct FlightResultRouteRow: View {
-    let origin: String
-    let destination: String
-
-    var body: some View {
-        HStack(spacing: AppSpacing.sm) {
-            Text(origin)
-                .font(.cardTitle)
-            Image(systemName: "arrow.right")
-                .font(.appCaption.weight(.semibold))
-            Text(destination)
-                .font(.cardTitle)
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(AppColors.textPrimary)
-    }
-}
-
-private struct FlightResultTimeRow: View {
-    let title: String
-    let date: Date
-    /// Reads the trip TZ that `AddBookingView` injects via `.environment(\.timeZone, ...)`.
-    /// Defaults to the device TZ when shown outside that hierarchy.
-    @Environment(\.timeZone) private var environmentTimeZone
-
-    var body: some View {
-        HStack {
-            Text(title)
-                .font(.appSmall)
-                .foregroundStyle(AppColors.textTertiary)
-            Spacer(minLength: AppSpacing.md)
-            Text("\(date.shortFormatted(timeZone: environmentTimeZone)) · \(date.timeFormatted(timeZone: environmentTimeZone))")
-                .font(.appSmall.weight(.semibold))
-                .foregroundStyle(AppColors.textSecondary)
-        }
-    }
-}
-
-private struct FlightResultTextPill: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: AppSpacing.xs) {
-            Text(title)
-                .font(.appSmall)
-                .foregroundStyle(AppColors.textTertiary)
-            Text(value)
-                .font(.appSmall.weight(.semibold))
-                .foregroundStyle(AppColors.textPrimary)
-        }
-        .padding(.horizontal, AppSpacing.sm)
-        .padding(.vertical, AppSpacing.xs)
-        .background(AppColors.appBackground)
-        .clipShape(Capsule())
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct FlightTrackingInfoRow: View {
-    var body: some View {
-        HStack(alignment: .top, spacing: AppSpacing.md) {
-            MapStyleIcon(
-                systemName: "dot.radiowaves.left.and.right",
-                size: .small,
-                accent: BookingCategory.flight.color,
-                accessibilityLabel: "Live flight tracking"
-            )
-
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                Text("We will fill in the rest")
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-                Text("Route, gate, terminal, arrival time, and delays update automatically once tracking starts.")
-                    .font(.appSmall)
-                    .foregroundStyle(AppColors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .padding(.vertical, AppSpacing.sm)
-        .frame(minHeight: FlightMapFormMetrics.infoRowMinHeight)
-    }
-}
-
-private struct FlightMapDivider: View {
-    var body: some View {
-        Divider()
-            .background(AppColors.appDivider)
-            .padding(.leading, AppSpacing.xxxl + AppSpacing.md)
-    }
-}
-
-private enum FlightMapFormMetrics {
-    static let rowMinHeight: CGFloat = 56
-    static let infoRowMinHeight: CGFloat = 72
-    static let trailingFieldMinWidth: CGFloat = 96
-    static let airlineCodeBadgeWidth: CGFloat = 42
-}
-

@@ -1139,6 +1139,7 @@ struct TripDetailView: View {
                                         dayNumber: day.dayNumber,
                                         timelineDisplayTimeZone: dayTZ,
                                         hotelTimelineRole: row.hotelTimelineRole,
+                                        carRentalTimelineRole: row.carRentalTimelineRole,
                                         onEdit: { placeToEdit = place },
                                         onMoveToDay: { placeToMove = place },
                                         onDelete: { deletePlace(place, viewModel: viewModel) },

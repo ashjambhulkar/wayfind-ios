@@ -2,8 +2,9 @@
 //  CarRentalBookingDetailContent.swift
 //  wayfind
 //
-//  Car rental booking detail for `PlaceDetailSheet` — pick-up and return
-//  columns, optional span summary, vehicle row, optional address.
+//  Car rental booking detail for `PlaceDetailSheet` — company header,
+//  pick-up / drop-off strip with times, rental span, vehicle type, and
+//  optional billing address (with empty state), using trip timezone.
 //
 
 import SwiftUI
@@ -17,25 +18,55 @@ struct CarRentalBookingDetailContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            pickupReturnCard
-            vehicleCard
-            if let trimmed = address?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
-                locationCard(trimmed)
-            }
+            rentalSummaryCard
+            locationCard
         }
+        .padding(.top, AppSpacing.md)
     }
 
-    // MARK: - Pick-up & return
+    private var companyDisplay: String {
+        let c = details.company.trimmingCharacters(in: .whitespacesAndNewlines)
+        return c.isEmpty ? String(localized: "Rental company TBD") : c
+    }
 
-    private var pickupReturnCard: some View {
+    private var trimmedAddress: String? {
+        let a = address?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return a.isEmpty ? nil : a
+    }
+
+    // MARK: - Main card
+
+    private var rentalSummaryCard: some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("Pick-up & return")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(AppColors.textSecondary)
-                .textCase(.uppercase)
-                .kerning(0.5)
+            HStack(alignment: .center, spacing: AppSpacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(accent.opacity(0.14))
+                        .frame(width: 56, height: 56)
+                    Image(systemName: "car.fill")
+                        .font(.sectionHeader)
+                        .foregroundStyle(accent)
+                        .accessibilityHidden(true)
+                }
 
-            HStack(alignment: .top, spacing: AppSpacing.md) {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text(companyDisplay)
+                        .font(.sectionHeader)
+                        .foregroundStyle(AppColors.textPrimary)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
+
+                    Text(String(localized: "Pick-up & drop-off"))
+                        .font(.appCaption)
+                        .foregroundStyle(AppColors.textTertiary)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            detailDivider
+
+            HStack(alignment: .top, spacing: AppSpacing.sm) {
                 endpointColumn(
                     title: String(localized: "Pick-up"),
                     locationRaw: details.pickupLocation,
@@ -44,18 +75,7 @@ struct CarRentalBookingDetailContent: View {
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(spacing: AppSpacing.xs) {
-                    Image(systemName: "car.fill")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(accent)
-                        .accessibilityHidden(true)
-                    Capsule()
-                        .fill(AppColors.appDivider)
-                        .frame(width: 28, height: 3)
-                }
-                .padding(.top, AppSpacing.md)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(String(localized: "Car rental"))
+                routeConnector
 
                 endpointColumn(
                     title: String(localized: "Drop-off"),
@@ -67,21 +87,54 @@ struct CarRentalBookingDetailContent: View {
             }
 
             if let spanLine = rentalSpanSummaryLine {
-                Label(spanLine, systemImage: "calendar")
-                    .font(.appCaption.weight(.semibold))
-                    .foregroundStyle(accent)
-                    .padding(.horizontal, AppSpacing.md)
-                    .padding(.vertical, AppSpacing.sm)
-                    .background(accent.opacity(0.12))
-                    .clipShape(Capsule())
-                    .accessibilityLabel(spanLine)
+                HStack {
+                    Spacer(minLength: 0)
+                    Label(spanLine, systemImage: "calendar")
+                        .font(.appCaption.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, AppSpacing.md)
+                        .padding(.vertical, AppSpacing.sm)
+                        .background(accent.opacity(0.12))
+                        .clipShape(Capsule())
+                        .accessibilityLabel(spanLine)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, AppSpacing.xs)
             }
+
+            detailDivider
+
+            detailRow(
+                icon: "key.horizontal.fill",
+                title: String(localized: "Vehicle"),
+                value: vehicleTypeDisplay
+            )
         }
         .padding(AppSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppColors.appSurface)
         .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous)
+                .strokeBorder(accent.opacity(0.2), lineWidth: 1)
+        )
         .padding(.horizontal, AppSpacing.lg)
-        .padding(.top, AppSpacing.md)
+    }
+
+    private var routeConnector: some View {
+        VStack(spacing: AppSpacing.xs) {
+            Image(systemName: "car.side.fill")
+                .font(.sectionHeader)
+                .foregroundStyle(accent)
+                .accessibilityHidden(true)
+            Capsule()
+                .fill(AppColors.appDivider)
+                .frame(width: 32, height: 3)
+        }
+        .padding(.top, AppSpacing.sm)
+        .frame(minWidth: 72)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(String(localized: "Car rental"))
     }
 
     private func endpointColumn(
@@ -105,15 +158,17 @@ struct CarRentalBookingDetailContent: View {
 
             if let instant {
                 Text(instant.timeFormatted(timeZone: timeZone))
-                    .font(.sectionHeader)
+                    .font(.tripDetailHeroTitle)
                     .foregroundStyle(AppColors.textPrimary)
-                    .minimumScaleFactor(0.8)
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.75)
+                    .lineLimit(1)
 
                 Text(dateSubtitle(for: instant))
                     .font(.appCaption)
                     .foregroundStyle(AppColors.textSecondary)
             } else {
-                Text("Time TBD")
+                Text(String(localized: "Time TBD"))
                     .font(.appBody.weight(.medium))
                     .foregroundStyle(AppColors.textSecondary)
             }
@@ -148,29 +203,7 @@ struct CarRentalBookingDetailContent: View {
         if days == 1 {
             return String(localized: "1 day")
         }
-        return String(localized: "\(days) days")
-    }
-
-    // MARK: - Vehicle
-
-    private var vehicleCard: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("Vehicle")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(AppColors.textSecondary)
-                .textCase(.uppercase)
-                .kerning(0.5)
-
-            carDetailRow(
-                icon: "key.horizontal.fill",
-                title: String(localized: "Type"),
-                value: vehicleTypeDisplay
-            )
-        }
-        .padding(AppSpacing.lg)
-        .background(AppColors.appSurface)
-        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-        .padding(.horizontal, AppSpacing.lg)
+        return String(format: String(localized: "%d days"), days)
     }
 
     private var vehicleTypeDisplay: String {
@@ -181,50 +214,74 @@ struct CarRentalBookingDetailContent: View {
         return trimmed
     }
 
-    // MARK: - Address
-
-    private func locationCard(_ line: String) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("Address")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(AppColors.textSecondary)
-                .textCase(.uppercase)
-                .kerning(0.5)
-
-            HStack(alignment: .top, spacing: AppSpacing.md) {
-                Image(systemName: "mappin.and.ellipse")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 22, alignment: .center)
-
-                Text(line)
-                    .font(.appBody)
-                    .foregroundStyle(AppColors.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .accessibilityElement(children: .combine)
-        }
-        .padding(AppSpacing.lg)
-        .background(AppColors.appSurface)
-        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
-        .padding(.horizontal, AppSpacing.lg)
+    private var detailDivider: some View {
+        Rectangle()
+            .fill(AppColors.appDivider.opacity(0.85))
+            .frame(height: 1)
     }
 
-    private func carDetailRow(icon: String, title: String, value: String) -> some View {
+    private func detailRow(icon: String, title: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.md) {
             Image(systemName: icon)
-                .font(.body.weight(.medium))
+                .font(.appBody.weight(.medium))
                 .foregroundStyle(accent)
                 .frame(width: 22, alignment: .center)
             Text(title)
                 .font(.appCaption.weight(.medium))
                 .foregroundStyle(AppColors.textSecondary)
-                .frame(width: 76, alignment: .leading)
+                .frame(width: 88, alignment: .leading)
             Text(value)
                 .font(.appBody.weight(.medium))
                 .foregroundStyle(AppColors.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Location
+
+    private var locationCard: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            Text(String(localized: "Location"))
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AppColors.textSecondary)
+                .textCase(.uppercase)
+                .kerning(0.5)
+
+            if let line = trimmedAddress {
+                HStack(alignment: .top, spacing: AppSpacing.md) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(accent)
+                        .frame(width: 22, alignment: .center)
+
+                    Text(line)
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(String(localized: "Address"))
+                .accessibilityValue(line)
+            } else {
+                HStack(alignment: .top, spacing: AppSpacing.md) {
+                    Image(systemName: "mappin.slash")
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textTertiary)
+                        .frame(width: 22, alignment: .center)
+
+                    Text(String(localized: "No address on this booking yet"))
+                        .font(.appBody)
+                        .foregroundStyle(AppColors.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(AppSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppColors.appSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+        .padding(.horizontal, AppSpacing.lg)
     }
 }
