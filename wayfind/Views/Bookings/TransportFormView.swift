@@ -6,6 +6,8 @@ struct TransportFormView: View {
     @Binding var operatorName: String
     @Binding var serviceNumber: String
     @Binding var departureStation: String
+    @Binding var departureLat: Double?
+    @Binding var departureLng: Double?
     @Binding var arrivalStation: String
     @Binding var departureDate: Date?
     @Binding var arrivalDate: Date?
@@ -32,18 +34,20 @@ struct TransportFormView: View {
         }
 
         Section(String(localized: "Route")) {
-            LabeledContent(String(localized: "Departure station")) {
-                TextField(String(localized: "Station name"), text: $departureStation)
-                    .multilineTextAlignment(.trailing)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-            }
-            LabeledContent(String(localized: "Arrival station")) {
-                TextField(String(localized: "Station name"), text: $arrivalStation)
-                    .multilineTextAlignment(.trailing)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-            }
+            AddressAutocompleteRow(
+                label: String(localized: "Departure station"),
+                placeholder: String(localized: "Station name"),
+                text: $departureStation,
+                latBinding: $departureLat,
+                lngBinding: $departureLng
+            )
+            // Arrival maps to TransportDetails.arrivalStation (string only).
+            // No end_lat/end_lng write path from the iOS client today.
+            AddressAutocompleteRow(
+                label: String(localized: "Arrival station"),
+                placeholder: String(localized: "Station name"),
+                text: $arrivalStation
+            )
         }
 
         Section {

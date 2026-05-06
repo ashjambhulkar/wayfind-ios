@@ -5,6 +5,8 @@ import SwiftUI
 struct ActivityFormView: View {
     @Binding var activityName: String
     @Binding var location: String
+    @Binding var locationLat: Double?
+    @Binding var locationLng: Double?
     @Binding var activityDate: Date?
     @Binding var duration: String
     @Binding var provider: String
@@ -22,12 +24,13 @@ struct ActivityFormView: View {
                     .textInputAutocapitalization(.words)
                     .autocorrectionDisabled()
             }
-            LabeledContent(String(localized: "Location")) {
-                TextField(String(localized: "Address or venue"), text: $location)
-                    .multilineTextAlignment(.trailing)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-            }
+            AddressAutocompleteRow(
+                label: String(localized: "Location"),
+                placeholder: String(localized: "Address or venue"),
+                text: $location,
+                latBinding: $locationLat,
+                lngBinding: $locationLng
+            )
         }
 
         Section {

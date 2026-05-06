@@ -5,6 +5,8 @@ import SwiftUI
 struct RestaurantFormView: View {
     @Binding var restaurantName: String
     @Binding var address: String
+    @Binding var addressLat: Double?
+    @Binding var addressLng: Double?
     @Binding var reservationDate: Date?
     @Binding var partySize: Int
 
@@ -25,12 +27,13 @@ struct RestaurantFormView: View {
                     .autocorrectionDisabled()
             }
 
-            LabeledContent(String(localized: "Address")) {
-                TextField(String(localized: "Street, city"), text: $address)
-                    .multilineTextAlignment(.trailing)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-            }
+            AddressAutocompleteRow(
+                label: String(localized: "Address"),
+                placeholder: String(localized: "Street, city"),
+                text: $address,
+                latBinding: $addressLat,
+                lngBinding: $addressLng
+            )
 
             DatePicker(
                 String(localized: "Reservation"),

@@ -5,6 +5,8 @@ import SwiftUI
 struct HotelFormView: View {
     @Binding var hotelName: String
     @Binding var address: String
+    @Binding var addressLat: Double?
+    @Binding var addressLng: Double?
     @Binding var checkInDate: Date?
     @Binding var checkOutDate: Date?
     @Binding var roomType: String
@@ -22,12 +24,13 @@ struct HotelFormView: View {
                     .autocorrectionDisabled()
             }
 
-            LabeledContent(String(localized: "Address")) {
-                TextField(String(localized: "Street, city"), text: $address)
-                    .multilineTextAlignment(.trailing)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-            }
+            AddressAutocompleteRow(
+                label: String(localized: "Address"),
+                placeholder: String(localized: "Street, city"),
+                text: $address,
+                latBinding: $addressLat,
+                lngBinding: $addressLng
+            )
         }
 
         Section {

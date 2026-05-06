@@ -5,6 +5,8 @@ import SwiftUI
 struct CarRentalFormView: View {
     @Binding var company: String
     @Binding var pickupLocation: String
+    @Binding var pickupLat: Double?
+    @Binding var pickupLng: Double?
     @Binding var dropoffLocation: String
     @Binding var pickupDate: Date?
     @Binding var dropoffDate: Date?
@@ -25,18 +27,20 @@ struct CarRentalFormView: View {
         }
 
         Section(String(localized: "Route")) {
-            LabeledContent(String(localized: "Pick-up")) {
-                TextField(String(localized: "Airport or address"), text: $pickupLocation)
-                    .multilineTextAlignment(.trailing)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-            }
-            LabeledContent(String(localized: "Drop-off")) {
-                TextField(String(localized: "Airport or address"), text: $dropoffLocation)
-                    .multilineTextAlignment(.trailing)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-            }
+            AddressAutocompleteRow(
+                label: String(localized: "Pick-up"),
+                placeholder: String(localized: "Airport or address"),
+                text: $pickupLocation,
+                latBinding: $pickupLat,
+                lngBinding: $pickupLng
+            )
+            // Drop-off maps to CarRentalDetails.dropoffLocation (string only).
+            // No end_lat/end_lng write path from the iOS client today.
+            AddressAutocompleteRow(
+                label: String(localized: "Drop-off"),
+                placeholder: String(localized: "Airport or address"),
+                text: $dropoffLocation
+            )
         }
 
         Section {

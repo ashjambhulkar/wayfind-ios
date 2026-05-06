@@ -42,16 +42,22 @@ struct AddBookingView: View {
     @State private var hotelCheckOut: Date? = nil
     @State private var hotelRoomType = ""
     @State private var hotelAddress = ""
+    @State private var hotelAddressLat: Double? = nil
+    @State private var hotelAddressLng: Double? = nil
     @State private var hotelCheckInTime = ""
     @State private var hotelCheckOutTime = ""
 
     @State private var restaurantName = ""
     @State private var restaurantAddress = ""
+    @State private var restaurantAddressLat: Double? = nil
+    @State private var restaurantAddressLng: Double? = nil
     @State private var restaurantReservationDate: Date? = nil
     @State private var restaurantPartySize = 2
 
     @State private var carCompany = ""
     @State private var carPickupLocation = ""
+    @State private var carPickupLat: Double? = nil
+    @State private var carPickupLng: Double? = nil
     @State private var carDropoffLocation = ""
     @State private var carPickupDate: Date? = nil
     @State private var carDropoffDate: Date? = nil
@@ -59,6 +65,8 @@ struct AddBookingView: View {
 
     @State private var activityName = ""
     @State private var activityLocation = ""
+    @State private var activityLocationLat: Double? = nil
+    @State private var activityLocationLng: Double? = nil
     @State private var activityDate: Date? = nil
     @State private var activityDuration = ""
     @State private var activityProvider = ""
@@ -67,6 +75,8 @@ struct AddBookingView: View {
     @State private var transportOperator = ""
     @State private var transportServiceNumber = ""
     @State private var transportDepartureStation = ""
+    @State private var transportDepartureLat: Double? = nil
+    @State private var transportDepartureLng: Double? = nil
     @State private var transportArrivalStation = ""
     @State private var transportDepartureDate: Date? = nil
     @State private var transportArrivalDate: Date? = nil
@@ -175,6 +185,8 @@ struct AddBookingView: View {
                     HotelFormView(
                         hotelName: $hotelName,
                         address: $hotelAddress,
+                        addressLat: $hotelAddressLat,
+                        addressLng: $hotelAddressLng,
                         checkInDate: $hotelCheckIn,
                         checkOutDate: $hotelCheckOut,
                         roomType: $hotelRoomType
@@ -183,6 +195,8 @@ struct AddBookingView: View {
                     CarRentalFormView(
                         company: $carCompany,
                         pickupLocation: $carPickupLocation,
+                        pickupLat: $carPickupLat,
+                        pickupLng: $carPickupLng,
                         dropoffLocation: $carDropoffLocation,
                         pickupDate: $carPickupDate,
                         dropoffDate: $carDropoffDate,
@@ -192,6 +206,8 @@ struct AddBookingView: View {
                     ActivityFormView(
                         activityName: $activityName,
                         location: $activityLocation,
+                        locationLat: $activityLocationLat,
+                        locationLng: $activityLocationLng,
                         activityDate: $activityDate,
                         duration: $activityDuration,
                         provider: $activityProvider,
@@ -202,6 +218,8 @@ struct AddBookingView: View {
                         operatorName: $transportOperator,
                         serviceNumber: $transportServiceNumber,
                         departureStation: $transportDepartureStation,
+                        departureLat: $transportDepartureLat,
+                        departureLng: $transportDepartureLng,
                         arrivalStation: $transportArrivalStation,
                         departureDate: $transportDepartureDate,
                         arrivalDate: $transportArrivalDate,
@@ -211,6 +229,8 @@ struct AddBookingView: View {
                     RestaurantFormView(
                         restaurantName: $restaurantName,
                         address: $restaurantAddress,
+                        addressLat: $restaurantAddressLat,
+                        addressLng: $restaurantAddressLng,
                         reservationDate: $restaurantReservationDate,
                         partySize: $restaurantPartySize
                     )
@@ -434,6 +454,8 @@ struct AddBookingView: View {
         case .hotel(let h):
             hotelName = place.name
             hotelAddress = place.address ?? ""
+            hotelAddressLat = place.lat
+            hotelAddressLng = place.lng
             if let d = h.checkInDate { hotelCheckIn = d }
             if let d = h.checkOutDate { hotelCheckOut = d }
             hotelRoomType = h.roomType
@@ -442,17 +464,24 @@ struct AddBookingView: View {
         case .restaurant(let r):
             restaurantName = place.name
             restaurantAddress = r.address ?? place.address ?? ""
+            restaurantAddressLat = place.lat
+            restaurantAddressLng = place.lng
             if let d = r.reservationTime { restaurantReservationDate = d }
             restaurantPartySize = r.partySize ?? 2
         case .carRental(let c):
             carCompany = c.company
             carPickupLocation = c.pickupLocation
+            carPickupLat = place.lat
+            carPickupLng = place.lng
             carDropoffLocation = c.dropoffLocation
             if let d = c.pickupTime { carPickupDate = d }
             if let d = c.dropoffTime { carDropoffDate = d }
             carType = c.carType
         case .activity(let a):
             activityName = place.name
+            activityLocation = place.address ?? ""
+            activityLocationLat = place.lat
+            activityLocationLng = place.lng
             activityProvider = a.provider
             activityDuration = a.duration ?? ""
             activityTicketNumber = a.ticketNumber
@@ -461,6 +490,8 @@ struct AddBookingView: View {
             transportOperator = t.operatorName
             transportServiceNumber = t.serviceNumber
             transportDepartureStation = t.departureStation
+            transportDepartureLat = place.lat
+            transportDepartureLng = place.lng
             transportArrivalStation = t.arrivalStation
             if let d = t.departureTime { transportDepartureDate = d }
             if let d = t.arrivalTime { transportArrivalDate = d }
@@ -498,6 +529,8 @@ struct AddBookingView: View {
                 HotelFormView(
                     hotelName: $hotelName,
                     address: $hotelAddress,
+                    addressLat: $hotelAddressLat,
+                    addressLng: $hotelAddressLng,
                     checkInDate: $hotelCheckIn,
                     checkOutDate: $hotelCheckOut,
                     roomType: $hotelRoomType
@@ -506,6 +539,8 @@ struct AddBookingView: View {
                 RestaurantFormView(
                     restaurantName: $restaurantName,
                     address: $restaurantAddress,
+                    addressLat: $restaurantAddressLat,
+                    addressLng: $restaurantAddressLng,
                     reservationDate: $restaurantReservationDate,
                     partySize: $restaurantPartySize
                 )
@@ -513,6 +548,8 @@ struct AddBookingView: View {
                 CarRentalFormView(
                     company: $carCompany,
                     pickupLocation: $carPickupLocation,
+                    pickupLat: $carPickupLat,
+                    pickupLng: $carPickupLng,
                     dropoffLocation: $carDropoffLocation,
                     pickupDate: $carPickupDate,
                     dropoffDate: $carDropoffDate,
@@ -522,6 +559,8 @@ struct AddBookingView: View {
                 ActivityFormView(
                     activityName: $activityName,
                     location: $activityLocation,
+                    locationLat: $activityLocationLat,
+                    locationLng: $activityLocationLng,
                     activityDate: $activityDate,
                     duration: $activityDuration,
                     provider: $activityProvider,
@@ -532,6 +571,8 @@ struct AddBookingView: View {
                     operatorName: $transportOperator,
                     serviceNumber: $transportServiceNumber,
                     departureStation: $transportDepartureStation,
+                    departureLat: $transportDepartureLat,
+                    departureLng: $transportDepartureLng,
                     arrivalStation: $transportArrivalStation,
                     departureDate: $transportDepartureDate,
                     arrivalDate: $transportArrivalDate,
@@ -793,8 +834,8 @@ struct AddBookingView: View {
                 itineraryDayId: targetDayId,
                 name: hotelName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Hotel",
                 address: hotelAddress.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-                lat: nil,
-                lng: nil,
+                lat: hotelAddressLat,
+                lng: hotelAddressLng,
                 category: "hotel",
                 notes: nil,
                 sortOrder: 0,
@@ -817,8 +858,8 @@ struct AddBookingView: View {
                 itineraryDayId: targetDayId,
                 name: restaurantName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Restaurant",
                 address: trimmedStreet.nilIfEmpty,
-                lat: nil,
-                lng: nil,
+                lat: restaurantAddressLat,
+                lng: restaurantAddressLng,
                 category: "restaurant",
                 notes: nil,
                 sortOrder: 0,
@@ -843,8 +884,8 @@ struct AddBookingView: View {
                 itineraryDayId: targetDayId,
                 name: carCompany.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Car Rental",
                 address: carPickupLocation.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-                lat: nil,
-                lng: nil,
+                lat: carPickupLat,
+                lng: carPickupLng,
                 category: "transport",
                 notes: nil,
                 sortOrder: 0,
@@ -866,8 +907,8 @@ struct AddBookingView: View {
                 itineraryDayId: targetDayId,
                 name: activityName.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Activity",
                 address: activityLocation.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-                lat: nil,
-                lng: nil,
+                lat: activityLocationLat,
+                lng: activityLocationLng,
                 category: "attraction",
                 notes: nil,
                 sortOrder: 0,
@@ -893,8 +934,8 @@ struct AddBookingView: View {
                 itineraryDayId: targetDayId,
                 name: transportDisplayName(),
                 address: transportDepartureStation.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
-                lat: nil,
-                lng: nil,
+                lat: transportDepartureLat,
+                lng: transportDepartureLng,
                 category: "transport",
                 notes: nil,
                 sortOrder: 0,
