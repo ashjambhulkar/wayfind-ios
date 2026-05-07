@@ -86,5 +86,8 @@ verify_jwt = false
 
 # City cover image pool worker. Called by cron/manual worker with x-worker-secret;
 # uses service-role + UNSPLASH_ACCESS_KEY internally and never trusts client input.
+#
+# Quotas are enforced in the function (defaults): max 50× GET search/photos per rolling hour,
+# 30 images per search (per_page). Optional secrets: UNSPLASH_SEARCH_HOURLY_MAX, or legacy UNSPLASH_HOURLY_BUDGET.
 [functions.city-cover-images]
 verify_jwt = false

@@ -28,16 +28,16 @@ final class TripPlaceAnnotation: NSObject, MKAnnotation {
     @objc dynamic var coordinate: CLLocationCoordinate2D
     var title: String?
     let dayNumber: Int
-    /// 1-indexed position used as the pin label.
+    /// 1-indexed day-local position used as the pin label.
     let sortLabel: Int
 
-    init(place: Place, dayNumber: Int) {
+    init(place: Place, dayNumber: Int, sortLabel: Int) {
         self.id = place.id.uuidString
         self.placeId = place.id
         self.coordinate = place.coordinate
         self.title = place.name
         self.dayNumber = dayNumber
-        self.sortLabel = place.sortOrder + 1
+        self.sortLabel = sortLabel
         super.init()
     }
 

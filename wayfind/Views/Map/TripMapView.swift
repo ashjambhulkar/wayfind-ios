@@ -602,8 +602,9 @@ struct TripMapView: View {
     private var mapDataLifecycleView: some View {
         mapSearchableView
             .task {
-                await loadMapData()
-                await resolveCityProfileId()
+                async let mapDataTask: Void = loadMapData()
+                async let cityProfileTask: Void = resolveCityProfileId()
+                _ = await (mapDataTask, cityProfileTask)
             }
             .onChange(of: places) { _, _ in
                 if mapState.searchResults.isEmpty && mapState.selectedSearchResult == nil {
@@ -1212,7 +1213,7 @@ struct TripMapView: View {
     }
 
     private func loadMapData() async {
-        let days = await dataService.fetchDays(for: trip.id)
+        let (days, placesByDayId) = await dataService.fetchTripTimeline(for: trip.id)
         let sorted = days.sorted { $0.dayNumber < $1.dayNumber }
 
         scheduledDays = sorted.filter { !$0.isWishlist }
@@ -1226,11 +1227,10 @@ struct TripMapView: View {
 
         var collected: [Place] = []
         var wishlist: [Place] = []
-
+        collected.reserveCapacity(placesByDayId.values.reduce(into: 0) { $0 += $1.count })
         for day in sorted {
-            let dayPlaces = await dataService.fetchPlaces(for: day.id)
+            let dayPlaces = placesByDayId[day.id] ?? []
             collected.append(contentsOf: dayPlaces)
-
             if day.isWishlist {
                 wishlist = dayPlaces
             }
@@ -1238,11 +1238,6 @@ struct TripMapView: View {
 
         places = collected
         wishlistPlaces = wishlist
-
-        // Polylines: hydrate the in-memory cache from `city_travel_times`
-        // so the map renders real Apple-routed lines on first open
-        // (the cache used to only get populated by AI plan apply).
-        Task { await refreshPolylinesForCurrentPlaces() }
     }
 
     /// Hydrate cached polylines for the trip's current place pairs.

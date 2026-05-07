@@ -524,7 +524,7 @@ struct TripMapPlacesExpandedSheet: View {
             systemName: "mappin.circle.fill",
             iconFont: .system(size: MapChromeIconMetrics.accessoryGlyphPointSize, weight: .semibold),
             symbolRenderingMode: .monochrome,
-            monochromeForeground: AppColors.iconOnColoredSurface,
+            monochromeForeground: .primary,
             legacyDiskFill: true,
             accessibilityLabel: String(localized: "Suggested Places"),
             accessibilityHint: String(localized: "Opens the list of suggested places for this trip")

@@ -206,6 +206,11 @@ final class DataService {
         return try await real.uploadCoverPhoto(data: imageData, tripId: tripId)
     }
 
+    func fetchCityProfileCovers(cityProfileId: UUID) async -> [SupabaseManager.CityProfileCoverImage] {
+        guard let real else { return [] }
+        return (try? await real.fetchCityProfileCovers(cityProfileId: cityProfileId)) ?? []
+    }
+
     func uploadProfileAvatar(imageData: Data, contentType: String) async throws -> String {
         guard let real else { throw ProfileSaveError.requiresSignedInBackend }
         return try await real.uploadProfileAvatar(imageData: imageData, contentType: contentType)
@@ -242,6 +247,10 @@ final class DataService {
     func fetchParsedBookings(for tripId: UUID) async -> [ParsedBooking] {
         if let real { return (try? await real.fetchParsedBookings(for: tripId)) ?? [] }
         return await mock!.fetchParsedBookings(for: tripId)
+    }
+
+    func deleteFailedQueueEntries(for tripId: UUID) async {
+        if let real { try? await real.deleteFailedQueueEntries(for: tripId) }
     }
 
     func fetchForwardingEmailAddress(for tripId: UUID) async -> String? {
@@ -335,6 +344,16 @@ final class DataService {
     func fetchBudgetSnapshot(tripId: UUID) async -> BudgetSnapshot {
         if real != nil {
             return (try? await BudgetService.shared.fetchAll(tripId: tripId)) ?? .empty
+        }
+        return await mock!.fetchBudgetSnapshot(tripId: tripId)
+    }
+
+    /// Variant used by realtime/pull-to-refresh flows that need to distinguish
+    /// "server returned an empty snapshot" from "fetch failed". On failure this
+    /// returns nil so callers can preserve their current on-screen snapshot.
+    func fetchBudgetSnapshotIfAvailable(tripId: UUID) async -> BudgetSnapshot? {
+        if real != nil {
+            return try? await BudgetService.shared.fetchAll(tripId: tripId)
         }
         return await mock!.fetchBudgetSnapshot(tripId: tripId)
     }

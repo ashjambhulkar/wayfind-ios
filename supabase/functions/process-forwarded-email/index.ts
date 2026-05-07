@@ -483,6 +483,20 @@ interface BodyExtractionResult {
   error: string | null;
 }
 
+/**
+ * Returns true when >90% of the first 2 KB of non-whitespace characters are
+ * in the base64 alphabet.  This catches the case where a raw base64-encoded
+ * attachment blob leaked into the text field and prevents wasting an LLM call
+ * on binary noise that contains no booking information.
+ */
+function isLikelyBase64Blob(s: string): boolean {
+  if (s.length < 500) return false;
+  const sample = s.replace(/\s/g, "").slice(0, 2000);
+  if (sample.length === 0) return false;
+  const nonBase64 = sample.replace(/[A-Za-z0-9+/=]/g, "").length;
+  return nonBase64 / sample.length < 0.05;
+}
+
 async function extractFromBody(
   apiKey: string,
   html: string,
@@ -502,6 +516,13 @@ async function extractFromBody(
   let sourceUsed: "text" | "html_stripped" = "text";
 
   if (text.length >= 200) {
+    // Guard: if the text field is a raw base64-encoded blob (attachment data
+    // that leaked into the text field before the MIME fix), skip it entirely.
+    // Sending base64 noise to the LLM produces no bookings and wastes tokens.
+    if (isLikelyBase64Blob(text)) {
+      console.warn(`${TAG} extractFromBody: text field looks like base64 blob (${text.length} chars) — skipping body extraction`);
+      return noResult;
+    }
     bodyText = text;
     sourceUsed = "text";
   } else if (html.length > 0) {
@@ -694,6 +715,11 @@ async function persistBookings(
         end_location: booking.end_location,
         details_json: detailsWithSource,
         total_price: booking.total_price,
+        // Write `amount` explicitly so tg_sync_booking_expense fires correctly.
+        // Pre-migration rows only had total_price; the tg_coerce_booking_amount
+        // trigger handles the coercion for legacy rows but new inserts always
+        // carry both fields to avoid relying on the BEFORE trigger order.
+        amount: booking.total_price,
         currency: booking.currency,
         source: "forwarded_email",
       })

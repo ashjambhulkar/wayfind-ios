@@ -980,10 +980,6 @@ struct PlaceDetailSheet: View {
 
             infoCard {
                 VStack(alignment: .leading, spacing: 16) {
-                    if let address = place.address, !address.isEmpty {
-                        detailRow(icon: "mappin.circle.fill", title: "Address", value: address, tint: AppColors.appPrimary)
-                    }
-
                     if let hours = openingHoursDisplay, !hours.rows.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 10) {
@@ -1035,9 +1031,8 @@ struct PlaceDetailSheet: View {
 
                     let hasHours = !(openingHoursDisplay?.rows.isEmpty ?? true)
                     let hasContact = effectiveWebsite != nil || effectivePhone != nil
-                    let hasAddress = place.address?.isEmpty == false
 
-                    if !hasHours && !hasContact && !hasAddress {
+                    if !hasHours && !hasContact {
                         Text("No practical details available")
                             .font(.body)
                             .foregroundStyle(.secondary)

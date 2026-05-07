@@ -111,7 +111,8 @@ struct TripBudgetTabView: View {
                             trip: trip,
                             viewModel: viewModel,
                             members: orderedMembers,
-                            payerUserId: viewModel.currentUserId ?? collaborationStore.currentUserId
+                            payerUserId: viewModel.currentUserId ?? collaborationStore.currentUserId,
+                            onSave: { showAddExpense = false }
                         )
                     }
                     .sheet(item: $expenseToEdit) { expense in
@@ -120,7 +121,8 @@ struct TripBudgetTabView: View {
                             viewModel: viewModel,
                             members: orderedMembers,
                             payerUserId: expense.payerUserId ?? viewModel.currentUserId ?? collaborationStore.currentUserId,
-                            editingExpense: expense
+                            editingExpense: expense,
+                            onSave: { expenseToEdit = nil }
                         )
                     }
                     .sheet(isPresented: $editTripBudget) {
@@ -167,7 +169,18 @@ struct TripBudgetTabView: View {
                             expenseToDelete = nil
                         }
                     } message: { expense in
-                        Text("\(expense.title) — \(MoneyFormatter.string(expense.originalAmount, currency: expense.originalCurrencyCode)). This can't be undone.")
+                        let baseMessage = "\(expense.title) — \(MoneyFormatter.string(expense.originalAmount, currency: expense.originalCurrencyCode))."
+                        let linkNote: String = {
+                            switch expense.provenance {
+                            case .bookingLinked:
+                                return " The linked booking will keep its cost, but the budget row won't track it anymore."
+                            case .combinedFlight:
+                                return " The linked flight bookings will keep their costs, but the combined budget row will be removed."
+                            case .manual:
+                                return " This can't be undone."
+                            }
+                        }()
+                        Text(baseMessage + linkNote)
                     }
             } else {
                 loadingPlaceholder

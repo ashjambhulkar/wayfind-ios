@@ -1307,23 +1307,91 @@ struct TripDetailView: View {
 
     /// Phase 7 — when the booking form supplies a non-zero amount we mirror
     /// it into a tracked `trip_expense` so the budget hub picks it up
-    /// immediately. The DB trigger `tg_sync_booking_expense` already does
-    /// this for backend-imported bookings on `trip_bookings` insert/update;
-    /// the iOS add-booking path writes to `trip_activities` (no trigger
-    /// fires there), so we run the equivalent insert here. We default to a
-    /// `full` split so the user's own ledger reflects the cost without
-    /// surprising other collaborators with an unsolicited share — they can
-    /// open the new expense in the budget tab and switch to Equal/Exact if
-    /// they want to divide it.
+    /// immediately.
+    ///
+    /// Canonical writer policy (BudgetBookingBehaviorPolicy):
+    ///   • DB trigger `tg_sync_booking_expense` exclusively owns rows where
+    ///     `is_auto_synced = true`.  If such a row already exists, we skip
+    ///     the companion write to avoid corrupting the trigger's flag and
+    ///     creating a dual-write race.
+    ///   • If no auto-synced row exists (e.g. the trigger has not fired yet,
+    ///     or the user edited the row and cleared isAutoSynced), the iOS
+    ///     companion runs as a fallback so the budget screen always shows
+    ///     the cost immediately.
     private func trackBookingExpenseIfNeeded(place: Place, cost: BookingCost?) async {
         guard let cost else { return }
+        guard place.isBooking else { return }
         guard let userId = budgetViewModel?.currentUserId ?? collaborationStore.currentUserId else { return }
+        let tripCap = (viewModel?.trip ?? trip).budgetCurrencyCode
+        var existingExpense: TripExpense? = nil
+        if let budgetVM = budgetViewModel {
+            existingExpense = budgetVM.snapshot.expenses.first(where: { $0.bookingId == place.id })
+        }
+        if existingExpense == nil {
+            let snapshot = await dataService.fetchBudgetSnapshot(tripId: trip.id)
+            existingExpense = snapshot.expenses.first(where: { $0.bookingId == place.id })
+        }
+
+        // If the DB trigger already owns this row, leave it alone. A companion
+        // write here would overwrite is_auto_synced=true → false and break
+        // future booking→budget sync for this booking.
+        if let existing = existingExpense, existing.isAutoSynced {
+            return
+        }
+
+        if let previous = existingExpense {
+            let updatedExpense = TripExpense(
+                id: previous.id,
+                tripId: previous.tripId,
+                userId: previous.userId ?? userId,
+                payerUserId: previous.payerUserId ?? userId,
+                bookingId: place.id,
+                title: place.name,
+                amount: cost.amount,
+                currencyCode: cost.currency,
+                category: ExpenseCategory.fromBookingKind(place.bookingType),
+                splitType: .full,
+                expenseDate: place.startTime ?? previous.expenseDate,
+                notes: previous.notes,
+                isAutoSynced: false,
+                createdAt: previous.createdAt,
+                updatedAt: previous.updatedAt
+            )
+            let updatedSplit = ExpenseSplit(
+                id: UUID(),
+                expenseId: updatedExpense.id,
+                tripId: updatedExpense.tripId,
+                userId: updatedExpense.payerUserId ?? userId,
+                amount: cost.amount,
+                currencyCode: cost.currency,
+                isAccepted: true,
+                createdAt: nil,
+                updatedAt: nil
+            )
+
+            if let budgetVM = budgetViewModel {
+                _ = await budgetVM.updateExpense(
+                    updatedExpense,
+                    splits: [updatedSplit],
+                    tripBudgetCurrency: tripCap
+                ) { _ in }
+            } else {
+                try? await dataService.updateExpense(
+                    updatedExpense,
+                    splits: [updatedSplit],
+                    tripBudgetCurrency: tripCap,
+                    previousPersistedRow: previous
+                )
+            }
+            return
+        }
+
         let expense = TripExpense(
             id: UUID(),
             tripId: trip.id,
             userId: userId,
             payerUserId: userId,
-            bookingId: place.isBooking ? place.id : nil,
+            bookingId: place.id,
             title: place.name,
             amount: cost.amount,
             currencyCode: cost.currency,
@@ -1346,7 +1414,6 @@ struct TripDetailView: View {
             createdAt: nil,
             updatedAt: nil
         )
-        let tripCap = (viewModel?.trip ?? trip).budgetCurrencyCode
         if let budgetVM = budgetViewModel {
             _ = await budgetVM.addExpense(expense, splits: [split], tripBudgetCurrency: tripCap) { _ in }
         } else {

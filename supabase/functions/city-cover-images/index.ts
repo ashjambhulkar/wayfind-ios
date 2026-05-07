@@ -25,6 +25,8 @@ type UnsplashResult = {
   id: string;
   width?: number;
   height?: number;
+  /** Community likes — used to prefer stronger photos when many match the search. */
+  likes?: number;
   urls?: { regular?: string };
   user?: {
     name?: string;
@@ -52,13 +54,31 @@ const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const UNSPLASH_ACCESS_KEY = Deno.env.get('UNSPLASH_ACCESS_KEY') ?? '';
 const WORKER_SECRET =
   Deno.env.get('CITY_COVER_WORKER_SECRET') ?? Deno.env.get('WORKER_SECRET') ?? '';
-const UNSPLASH_HOURLY_BUDGET = Number(
-  Deno.env.get('UNSPLASH_HOURLY_BUDGET') ?? '30'
-);
+
+/**
+ * Unsplash quota — **search/photos only** (one HTTP GET = one billable search).
+ *
+ * - **50** calls max per rolling hour (override with `UNSPLASH_SEARCH_HOURLY_MAX` or legacy `UNSPLASH_HOURLY_BUDGET`).
+ * - **30** images returned per search (`per_page`; Unsplash API maximum for this endpoint).
+ */
+const UNSPLASH_SEARCH_HOURLY_MAX = (() => {
+  const raw = Number(
+    Deno.env.get('UNSPLASH_SEARCH_HOURLY_MAX') ??
+      Deno.env.get('UNSPLASH_HOURLY_BUDGET') ??
+      '50'
+  );
+  if (!Number.isFinite(raw)) return 50;
+  return Math.max(1, Math.min(500, Math.trunc(raw)));
+})();
+/** Unsplash allows at most 30 results per `GET /search/photos` — do not raise. */
+const UNSPLASH_SEARCH_PER_PAGE = 30;
 
 const SEARCH_ENDPOINT = 'search/photos';
 const DOWNLOAD_ENDPOINT = 'photos/download';
-const TARGET_POOL_SIZE = 5;
+/** How many curated rows we keep per city profile (after ranking candidates). */
+const TARGET_POOL_SIZE = 12;
+/** Drop tiny thumbnails that look bad as trip hero covers. */
+const MIN_SHORT_EDGE_PX = 1080;
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -115,6 +135,10 @@ Deno.serve(async (req) => {
       fetch_results: fetchResults,
       downloads_claimed: assignments.length,
       download_results: downloadResults,
+      unsplash_search_policy: {
+        hourly_max_requests: UNSPLASH_SEARCH_HOURLY_MAX,
+        images_per_search_request: UNSPLASH_SEARCH_PER_PAGE,
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -165,8 +189,8 @@ async function processFetchJob(client: SupabaseClient, job: CoverFetchJob) {
   }
 
   const usedThisHour = await hourlyUsage(client, SEARCH_ENDPOINT);
-  if (usedThisHour >= UNSPLASH_HOURLY_BUDGET) {
-    await requeueJob(client, job.id, 'unsplash_hourly_budget_exhausted', 15);
+  if (usedThisHour >= UNSPLASH_SEARCH_HOURLY_MAX) {
+    await requeueJob(client, job.id, 'unsplash_search_hourly_cap_exhausted', 15);
     return { job_id: job.id, status: 'deferred', reason: 'quota' };
   }
 
@@ -234,21 +258,53 @@ async function hourlyUsage(
   );
 }
 
+function rankCoverCandidates(photos: UnsplashResult[]): UnsplashResult[] {
+  const basic = photos.filter((p) => p.id && p.urls?.regular);
+  const hiRes = basic.filter((photo) => {
+    const w = photo.width ?? 0;
+    const h = photo.height ?? 0;
+    if (w <= 0 || h <= 0) return true;
+    return Math.min(w, h) >= MIN_SHORT_EDGE_PX;
+  });
+  const pool = hiRes.length >= TARGET_POOL_SIZE ? hiRes : basic;
+
+  return [...pool]
+    .sort((a, b) => {
+      const likeA = a.likes ?? 0;
+      const likeB = b.likes ?? 0;
+      if (likeB !== likeA) return likeB - likeA;
+      const areaA = (a.width ?? 0) * (a.height ?? 0);
+      const areaB = (b.width ?? 0) * (b.height ?? 0);
+      return areaB - areaA;
+    })
+    .slice(0, TARGET_POOL_SIZE);
+}
+
 async function fetchUnsplashPhotos(
   city: CityProfile
 ): Promise<UnsplashResult[]> {
+  // Prefer `city_search_label` (usually "City, Region/Country" from Places) over
+  // bare `display_name` to avoid ambiguous names (e.g. multiple "Springfield"s).
+  const primary =
+    city.city_search_label?.trim() ||
+    city.display_name?.trim() ||
+    '';
+  const country = city.country_code?.trim();
   const query = [
-    city.display_name,
-    'travel city landmark skyline',
+    primary,
+    country,
+    'cityscape architecture travel',
   ]
-    .filter(Boolean)
+    .filter((part) => Boolean(part && String(part).length > 0))
     .join(' ');
 
   const url = new URL('https://api.unsplash.com/search/photos');
   url.searchParams.set('query', query);
   url.searchParams.set('orientation', 'landscape');
-  url.searchParams.set('per_page', String(TARGET_POOL_SIZE));
+  url.searchParams.set('per_page', String(UNSPLASH_SEARCH_PER_PAGE));
   url.searchParams.set('content_filter', 'high');
+  // Default is relevant; set explicitly so behavior stays predictable if API changes.
+  url.searchParams.set('order_by', 'relevant');
 
   const response = await fetch(url, {
     headers: { Authorization: `Client-ID ${UNSPLASH_ACCESS_KEY}` },
@@ -259,7 +315,7 @@ async function fetchUnsplashPhotos(
     throw new Error(`unsplash_search_${response.status}: ${detail}`);
   }
 
-  return (body.results ?? []).filter((photo) => photo.id && photo.urls?.regular);
+  return rankCoverCandidates(body.results ?? []);
 }
 
 async function upsertCoverImages(

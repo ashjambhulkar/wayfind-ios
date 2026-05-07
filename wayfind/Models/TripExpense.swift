@@ -25,6 +25,11 @@ struct TripExpense: Identifiable, Hashable, Sendable {
     /// expenses. `ON DELETE SET NULL` so deleting the booking detaches the
     /// expense rather than nuking the user's own ledger.
     let bookingId: UUID?
+    /// Groups multiple flight-booking legs (connecting/return) under one
+    /// combined budget row. When non-nil, the expense represents the combined
+    /// total across all bookings sharing this ID rather than a single booking.
+    /// `nil` for all non-flight and single-leg entries.
+    let bookingGroupId: UUID?
     let title: String
     /// Ledger amount in ``currencyCode`` (trip budget ISO). Equals the user’s
     /// typed total when that currency matches the trip cap; otherwise it is
@@ -82,6 +87,7 @@ struct TripExpense: Identifiable, Hashable, Sendable {
         userId: UUID?,
         payerUserId: UUID?,
         bookingId: UUID?,
+        bookingGroupId: UUID? = nil,
         title: String,
         amount: Decimal,
         currencyCode: String,
@@ -102,6 +108,7 @@ struct TripExpense: Identifiable, Hashable, Sendable {
         self.userId = userId
         self.payerUserId = payerUserId
         self.bookingId = bookingId
+        self.bookingGroupId = bookingGroupId
         self.title = title
         self.amount = amount
         let code = currencyCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -130,6 +137,28 @@ struct TripExpense: Identifiable, Hashable, Sendable {
     var isOriginalDistinctFromTripLedger: Bool {
         originalCurrencyCode != currencyCode
             || TripExpenseLedgerNormalizer.roundMoney2(originalAmount) != TripExpenseLedgerNormalizer.roundMoney2(amount)
+    }
+
+    /// User-visible origin of this expense row. Drives badge display and
+    /// edit-confirmation copy on the budget screen.
+    var provenance: Provenance {
+        if let groupId = bookingGroupId {
+            return .combinedFlight(groupId: groupId)
+        }
+        return bookingId != nil ? .bookingLinked : .manual
+    }
+
+    enum Provenance: Sendable, Hashable {
+        /// Row is linked to a single `trip_bookings` record. Edits may write
+        /// back to the booking amount (two-way sync). Badge: "Linked".
+        case bookingLinked
+        /// Row represents the combined total for a multi-leg or return flight
+        /// itinerary. `groupId` ties the legs together in the DB.
+        /// Badge: "Combined".
+        case combinedFlight(groupId: UUID)
+        /// Row was entered manually in the Add Expense sheet. Edits stay
+        /// in budget only. No badge shown (manual is the implicit default).
+        case manual
     }
 }
 

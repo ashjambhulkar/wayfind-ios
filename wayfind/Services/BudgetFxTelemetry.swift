@@ -177,6 +177,71 @@ enum BudgetFxTelemetry {
         )
     }
 
+    // MARK: - Booking sync observability
+
+    /// Records when a budget expense amount diverges from its linked booking amount.
+    /// This can happen if the two-way sync write fails, realtime delivers out-of-order,
+    /// or a companion write raced with the DB trigger. Used for alerting on persistent drift.
+    static func recordSyncMismatch(
+        expenseId: UUID,
+        bookingId: UUID,
+        expenseAmount: Decimal,
+        bookingAmount: Decimal,
+        currency: String
+    ) {
+        let delta = abs(expenseAmount - bookingAmount)
+        os_signpost(
+            .event,
+            log: signpostLog,
+            name: "BookingSync",
+            "event=sync_mismatch expense_id=%{public}s booking_id=%{public}s delta=%{public}s currency=%{public}s",
+            expenseId.uuidString,
+            bookingId.uuidString,
+            "\(delta)",
+            currency
+        )
+        ObservabilityService.breadcrumb(
+            "budget_booking_sync_mismatch",
+            category: "budget_sync",
+            level: .warning,
+            context: [
+                "expense_id": expenseId.uuidString,
+                "booking_id": bookingId.uuidString,
+                "expense_amount": "\(expenseAmount)",
+                "booking_amount": "\(bookingAmount)",
+                "delta": "\(delta)",
+                "currency": currency,
+            ]
+        )
+    }
+
+    /// Records a detected duplicate linked expense (two expense rows pointing
+    /// at the same booking_id). This indicates a dual-writer race before the
+    /// unique index was applied.
+    static func recordDuplicateLinkedExpense(
+        bookingId: UUID,
+        expenseIds: [UUID]
+    ) {
+        os_signpost(
+            .event,
+            log: signpostLog,
+            name: "BookingSync",
+            "event=duplicate_linked_expense booking_id=%{public}s count=%{public}d",
+            bookingId.uuidString,
+            expenseIds.count
+        )
+        ObservabilityService.breadcrumb(
+            "budget_duplicate_linked_expense",
+            category: "budget_sync",
+            level: .error,
+            context: [
+                "booking_id": bookingId.uuidString,
+                "duplicate_count": expenseIds.count,
+                "expense_ids": expenseIds.map(\.uuidString).joined(separator: ","),
+            ]
+        )
+    }
+
     // MARK: - Private
 
     private static func clampLatency(_ raw: Int) -> Int {

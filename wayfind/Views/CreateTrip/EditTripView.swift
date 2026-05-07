@@ -26,6 +26,13 @@ struct EditTripView: View {
     @State private var isSaving = false
     @State private var saveError: String?
 
+    // City cover picker
+    @State private var showCoverPicker = false
+    @State private var cityImages: [SupabaseManager.CityProfileCoverImage] = []
+    @State private var isLoadingCityImages = false
+    @State private var selectedCityImage: SupabaseManager.CityProfileCoverImage?
+    @State private var selectedCityImageId: UUID?
+
     init(trip: Trip, onSave: ((Trip) -> Void)? = nil) {
         self.trip = trip
         self.onSave = onSave
@@ -125,11 +132,36 @@ struct EditTripView: View {
             .task(id: photoPickerItem) {
                 await loadPickedPhoto()
             }
+            .task {
+                await loadCityImages()
+            }
             .onChange(of: startDate) { _, newValue in
                 if newValue > endDate { endDate = newValue }
             }
             .onChange(of: endDate) { _, newValue in
                 if newValue < startDate { startDate = newValue }
+            }
+            .sheet(isPresented: $showCoverPicker) {
+                CityCoversPickerSheet(
+                    destination: trip.destination,
+                    cityImages: cityImages,
+                    currentCoverUrl: trip.coverImageUrl,
+                    onSelectCityImage: { image in
+                        selectedCityImage = image
+                        selectedCityImageId = image.id
+                        photoPickerItem = nil
+                        pickedCoverJPEG = nil
+                    },
+                    onSelectUserPhoto: { item in
+                        photoPickerItem = item
+                        selectedCityImage = nil
+                        selectedCityImageId = nil
+                    },
+                    selectedCityImageId: $selectedCityImageId
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(AppColors.appBackground)
             }
         }
     }
@@ -140,14 +172,21 @@ struct EditTripView: View {
             .listRowInsets(EdgeInsets())
 
         if AppConfig.useRealBackend {
-            PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                Label("Choose Photo", systemImage: "photo.on.rectangle.angled")
+            Button {
+                showCoverPicker = true
+            } label: {
+                HStack {
+                    if isLoadingCityImages {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Choose Cover Photo", systemImage: "photo.on.rectangle.angled")
+                    }
+                }
             }
 
-            if pickedCoverJPEG != nil {
+            if hasPendingCoverChange {
                 Button(role: .destructive) {
-                    photoPickerItem = nil
-                    pickedCoverJPEG = nil
+                    clearCoverSelection()
                 } label: {
                     Label("Clear Selected Photo", systemImage: "xmark.circle.fill")
                 }
@@ -166,6 +205,25 @@ struct EditTripView: View {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFill()
+                    .overlay(alignment: .bottomTrailing) {
+                        coverPreviewBadge(text: "Your photo", icon: "person.crop.circle.fill")
+                    }
+            } else if let cityImage = selectedCityImage, let url = URL(string: cityImage.imageUrl) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                            .overlay(alignment: .bottomTrailing) {
+                                if let name = cityImage.photographerName {
+                                    coverPreviewBadge(text: name, icon: "camera.fill")
+                                }
+                            }
+                    case .empty:
+                        ProgressView().frame(maxWidth: .infinity, minHeight: EditTripCoverPhoto.previewHeight)
+                    default:
+                        Color.clear
+                    }
+                }
             } else if let urlString = trip.coverImageUrl, let url = URL(string: urlString) {
                 AsyncImage(url: url) { phase in
                     switch phase {
@@ -199,6 +257,27 @@ struct EditTripView: View {
         .clipped()
     }
 
+    private func coverPreviewBadge(text: String, icon: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(.appCaption.weight(.medium))
+            .foregroundStyle(.white)
+            .padding(.horizontal, AppSpacing.xs)
+            .padding(.vertical, AppSpacing.xxs)
+            .background(.black.opacity(0.45), in: Capsule())
+            .padding(AppSpacing.xs)
+    }
+
+    private var hasPendingCoverChange: Bool {
+        pickedCoverJPEG != nil || selectedCityImage != nil
+    }
+
+    private func clearCoverSelection() {
+        photoPickerItem = nil
+        pickedCoverJPEG = nil
+        selectedCityImage = nil
+        selectedCityImageId = nil
+    }
+
     @MainActor
     private func loadPickedPhoto() async {
         guard let photoPickerItem else { return }
@@ -220,6 +299,14 @@ struct EditTripView: View {
     }
 
     @MainActor
+    private func loadCityImages() async {
+        guard AppConfig.useRealBackend, let cityProfileId = trip.cityProfileId else { return }
+        isLoadingCityImages = true
+        defer { isLoadingCityImages = false }
+        cityImages = await dataService.fetchCityProfileCovers(cityProfileId: cityProfileId)
+    }
+
+    @MainActor
     private func saveAsync() async {
         guard canSave else { return }
         isSaving = true
@@ -231,7 +318,11 @@ struct EditTripView: View {
         var coverUrl = trip.coverImageUrl
         var coverAttribution = trip.coverImageAttribution
 
-        if let jpeg = pickedCoverJPEG, AppConfig.useRealBackend {
+        if let cityImage = selectedCityImage {
+            // City image: use URL directly, no upload needed.
+            coverUrl = cityImage.imageUrl
+            coverAttribution = cityImage.attribution
+        } else if let jpeg = pickedCoverJPEG, AppConfig.useRealBackend {
             do {
                 coverUrl = try await dataService.uploadTripCoverPhoto(tripId: trip.id, imageData: jpeg)
                 coverAttribution = EditTripCoverPhoto.userAttribution
@@ -250,6 +341,8 @@ struct EditTripView: View {
             userId: trip.userId,
             title: trimmedTitle,
             destination: trimmedDestination,
+            destinationPlaceId: trip.destinationPlaceId,
+            cityProfileId: trip.cityProfileId,
             lat: trip.lat,
             lng: trip.lng,
             startDate: startDate,
@@ -260,7 +353,9 @@ struct EditTripView: View {
             createdAt: trip.createdAt,
             updatedAt: touch,
             databaseStatus: dbStatus,
-            isMarkedActiveOnServer: isActive
+            isMarkedActiveOnServer: isActive,
+            totalBudget: trip.totalBudget,
+            budgetCurrencyCode: trip.budgetCurrencyCode
         )
         onSave?(updated)
         dismiss()

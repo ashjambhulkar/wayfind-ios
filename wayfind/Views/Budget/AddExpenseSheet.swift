@@ -27,6 +27,12 @@ struct AddExpenseSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ToastManager.self) private var toastManager
 
+    /// Called after a successful save so the presenter can close the sheet via
+    /// its own binding. `dismiss()` alone can silently fail when the parent
+    /// re-renders (due to `reload()`) between the network round-trip and the
+    /// dismiss call, leaving the sheet open even though the record was saved.
+    var onSave: (() -> Void)? = nil
+
     @State private var title: String = ""
     @State private var amountText: String = ""
     @State private var currency: String = "USD"
@@ -130,6 +136,11 @@ struct AddExpenseSheet: View {
             .tint(category.accentColor)
             .navigationTitle(editingExpense == nil ? "Add Expense" : "Edit Expense")
             .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                if let p = editingExpense?.provenance, p == .bookingLinked || isCombinedFlight(p) {
+                    linkedBookingNotice
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -167,6 +178,28 @@ struct AddExpenseSheet: View {
                 }
             }
         }
+    }
+
+    // MARK: - Linked booking notice
+
+    private func isCombinedFlight(_ provenance: TripExpense.Provenance) -> Bool {
+        if case .combinedFlight = provenance { return true }
+        return false
+    }
+
+    private var linkedBookingNotice: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: "link")
+                .font(.appCaption.weight(.semibold))
+                .foregroundStyle(AppColors.appPrimary)
+            Text("Changes to amount also update the linked booking.")
+                .font(.appCaption)
+                .foregroundStyle(AppColors.textSecondary)
+            Spacer()
+        }
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.vertical, AppSpacing.sm)
+        .background(.regularMaterial)
     }
 
     private var amountRow: some View {
@@ -320,12 +353,20 @@ struct AddExpenseSheet: View {
             }
         }
         if success {
-            await flushStagedReceipts(for: expense)
             toastManager.show(ToastData(
                 message: editingExpense == nil ? "Expense added" : "Expense updated",
                 type: .success
             ))
+            // `onSave` closes the sheet via the presenter's own binding, which
+            // is reliable even when `reload()` has already replaced the
+            // presentation coordinator before this code runs. `dismiss()` is
+            // kept as a fallback for callers that don't supply `onSave`.
+            onSave?()
             dismiss()
+            // Flush receipts after dismissal so the upload never blocks the
+            // sheet close. Failures are non-fatal — the user can re-attach
+            // receipts in edit mode.
+            Task { await flushStagedReceipts(for: expense) }
         }
     }
 

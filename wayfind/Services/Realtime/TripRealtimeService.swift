@@ -68,6 +68,7 @@ final class TripRealtimeService {
         case timeline           // trip_activities + trip_days + trip_bookings + trips row
         case collaborators      // trip_collaborators
         case budget             // trip_expenses + expense_splits + trip_budgets + expense_settlements
+        case budgetPeriodic     // low-frequency fallback full refresh
         case reconnect          // backoff after CHANNEL_ERROR / TIMED_OUT
         case fullReload         // reconnect drain: timeline + collaborators + budget in one window
     }
@@ -80,6 +81,11 @@ final class TripRealtimeService {
     private var reconnectAttempt: Int = 0
     private let maxReconnectDelayMs: Int = 16_000
     private var hasDrainedCurrentSubscription = false
+    /// Throttle for reconnect-drain budget reloads. Network flaps can produce
+    /// repeated `.offline -> .subscribed` transitions; without a cooldown the
+    /// budget tab visibly pulses as each reconnect runs a full reload.
+    private var lastBudgetDrainReloadAt: Date?
+    private let budgetDrainReloadCooldown: TimeInterval = 2
 
     init() {}
 
@@ -136,6 +142,7 @@ final class TripRealtimeService {
     /// listens for those tables; this just installs the reload target.
     func bindBudget(_ viewModel: BudgetViewModel) {
         budgetViewModel = viewModel
+        startBudgetPeriodicRefreshLoop()
     }
 
     /// Drops the budget reload target without tearing down the channel. The
@@ -143,6 +150,8 @@ final class TripRealtimeService {
     /// debounce body is a single nil-check.
     func unbindBudget() {
         budgetViewModel = nil
+        debounceTasks[.budgetPeriodic]?.cancel()
+        debounceTasks[.budgetPeriodic] = nil
     }
 
     /// Tear down the channel and cancel every in-flight task. Safe to call
@@ -270,27 +279,130 @@ final class TripRealtimeService {
             }
         )
 
-        // ===== Collaborative budget tables =====
-        // Each event collapses into one debounced `BudgetViewModel.reload`
-        // (300 ms — matches the spec). `trip_expenses` and `trip_budgets`
-        // already have `trip_id`; `expense_splits` carries a denormalised
-        // `trip_id` column populated by the `tg_expense_splits_set_trip_id`
-        // trigger so we can filter by it without joining. `expense_settlements`
-        // is a fresh table with `trip_id` from day one.
-        for table in ["trip_expenses", "expense_splits", "trip_budgets", "expense_settlements"] {
-            subscriptions.append(
-                newChannel.onPostgresChange(
-                    AnyAction.self,
-                    schema: "public",
-                    table: table,
-                    filter: filter
-                ) { [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        self?.scheduleBudgetRefetch()
-                    }
-                }
-            )
-        }
+        // ===== Collaborative budget tables (event-driven patching) =====
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                InsertAction.self,
+                schema: "public",
+                table: "trip_expenses",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleTripExpenseInsert(action) }
+            }
+        )
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                UpdateAction.self,
+                schema: "public",
+                table: "trip_expenses",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleTripExpenseUpdate(action) }
+            }
+        )
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                DeleteAction.self,
+                schema: "public",
+                table: "trip_expenses",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleTripExpenseDelete(action) }
+            }
+        )
+
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                InsertAction.self,
+                schema: "public",
+                table: "expense_splits",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleExpenseSplitInsert(action) }
+            }
+        )
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                UpdateAction.self,
+                schema: "public",
+                table: "expense_splits",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleExpenseSplitUpdate(action) }
+            }
+        )
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                DeleteAction.self,
+                schema: "public",
+                table: "expense_splits",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleExpenseSplitDelete(action) }
+            }
+        )
+
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                InsertAction.self,
+                schema: "public",
+                table: "trip_budgets",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleTripBudgetInsert(action) }
+            }
+        )
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                UpdateAction.self,
+                schema: "public",
+                table: "trip_budgets",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleTripBudgetUpdate(action) }
+            }
+        )
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                DeleteAction.self,
+                schema: "public",
+                table: "trip_budgets",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleTripBudgetDelete(action) }
+            }
+        )
+
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                InsertAction.self,
+                schema: "public",
+                table: "expense_settlements",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleSettlementInsert(action) }
+            }
+        )
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                UpdateAction.self,
+                schema: "public",
+                table: "expense_settlements",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleSettlementUpdate(action) }
+            }
+        )
+        subscriptions.append(
+            newChannel.onPostgresChange(
+                DeleteAction.self,
+                schema: "public",
+                table: "expense_settlements",
+                filter: filter
+            ) { [weak self] action in
+                Task { @MainActor [weak self] in self?.handleSettlementDelete(action) }
+            }
+        )
 
         // ===== trips =====
         // Filter by `id=eq.<tripId>` here because `trips` doesn't have a
@@ -448,7 +560,17 @@ final class TripRealtimeService {
             guard let self, let viewModel = self.viewModel else { return }
             await viewModel.loadTripData()
             self.collaborationStore?.refresh()
-            if let budgetVm = self.budgetViewModel { await budgetVm.reload() }
+            if let budgetVm = self.budgetViewModel {
+                let now = Date()
+                let canRunBudgetDrainReload: Bool = {
+                    guard let last = self.lastBudgetDrainReloadAt else { return true }
+                    return now.timeIntervalSince(last) >= self.budgetDrainReloadCooldown
+                }()
+                if canRunBudgetDrainReload {
+                    self.lastBudgetDrainReloadAt = now
+                    await budgetVm.reloadFromRealtime()
+                }
+            }
         }
     }
 
@@ -459,14 +581,27 @@ final class TripRealtimeService {
         }
     }
 
-    /// Coalesces every budget-table event into one `BudgetViewModel.reload`.
+    /// Coalesces every budget-table event into one `BudgetViewModel.reloadFromRealtime`.
     /// 300 ms matches `phase4_realtime` in the implementation plan and lines
     /// up with how a sensible burst (insert expense → insert N splits) looks
     /// on the wire — they all arrive within ~50ms.
+    /// Uses `reloadFromRealtime()` (not `reload()`) so the viewmodel can skip
+    /// the fetch when a mutation-driven explicit reload just completed within
+    /// its suppress window, preventing the double-fetch on every write.
     private func scheduleBudgetRefetch() {
         scheduleDebounce(.budget, delayMs: 300) { [weak self] in
             guard let self, let viewModel = self.budgetViewModel else { return }
-            await viewModel.reload()
+            await viewModel.reloadFromRealtime()
+        }
+    }
+
+    /// Safety net for missed/out-of-order events: perform a low-frequency
+    /// budget snapshot refresh even in event-driven mode.
+    private func startBudgetPeriodicRefreshLoop() {
+        scheduleDebounce(.budgetPeriodic, delayMs: 45_000) { [weak self] in
+            guard let self, self.currentTripId != nil, let viewModel = self.budgetViewModel else { return }
+            await viewModel.reloadFromRealtime()
+            self.startBudgetPeriodicRefreshLoop()
         }
     }
 
@@ -587,6 +722,116 @@ final class TripRealtimeService {
         return nil
     }
 
+    // MARK: - Budget realtime patch handlers
+
+    private func handleTripExpenseInsert(_ action: InsertAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let row = RealtimeRowDecoder.decode(RealtimeTripExpenseRow.self, from: action.record) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeExpenseUpsert(row.asModel)
+    }
+
+    private func handleTripExpenseUpdate(_ action: UpdateAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let row = RealtimeRowDecoder.decode(RealtimeTripExpenseRow.self, from: action.record) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeExpenseUpsert(row.asModel)
+    }
+
+    private func handleTripExpenseDelete(_ action: DeleteAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let id = RealtimeRowDecoder.uuid("id", in: action.oldRecord) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeExpenseDelete(id: id)
+    }
+
+    private func handleExpenseSplitInsert(_ action: InsertAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let row = RealtimeRowDecoder.decode(RealtimeExpenseSplitRow.self, from: action.record) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeSplitUpsert(row.asModel)
+    }
+
+    private func handleExpenseSplitUpdate(_ action: UpdateAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let row = RealtimeRowDecoder.decode(RealtimeExpenseSplitRow.self, from: action.record) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeSplitUpsert(row.asModel)
+    }
+
+    private func handleExpenseSplitDelete(_ action: DeleteAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let id = RealtimeRowDecoder.uuid("id", in: action.oldRecord) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeSplitDelete(id: id)
+    }
+
+    private func handleTripBudgetInsert(_ action: InsertAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let row = RealtimeRowDecoder.decode(RealtimeTripBudgetRow.self, from: action.record) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeBudgetUpsert(row.asModel)
+    }
+
+    private func handleTripBudgetUpdate(_ action: UpdateAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let row = RealtimeRowDecoder.decode(RealtimeTripBudgetRow.self, from: action.record) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeBudgetUpsert(row.asModel)
+    }
+
+    private func handleTripBudgetDelete(_ action: DeleteAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let id = RealtimeRowDecoder.uuid("id", in: action.oldRecord) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeBudgetDelete(id: id)
+    }
+
+    private func handleSettlementInsert(_ action: InsertAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let row = RealtimeRowDecoder.decode(RealtimeExpenseSettlementRow.self, from: action.record) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeSettlementUpsert(row.asModel)
+    }
+
+    private func handleSettlementUpdate(_ action: UpdateAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let row = RealtimeRowDecoder.decode(RealtimeExpenseSettlementRow.self, from: action.record) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeSettlementUpsert(row.asModel)
+    }
+
+    private func handleSettlementDelete(_ action: DeleteAction) {
+        guard let viewModel = budgetViewModel else { return }
+        guard let id = RealtimeRowDecoder.uuid("id", in: action.oldRecord) else {
+            scheduleBudgetRefetch()
+            return
+        }
+        viewModel.applyRealtimeSettlementDelete(id: id)
+    }
+
     // MARK: - Collaborator update — access flag handling
 
     private func handleCollaboratorUpdate(_ action: UpdateAction) {
@@ -677,6 +922,143 @@ final class TripRealtimeService {
             try? await Task.sleep(nanoseconds: 400_000_000) // 0.4s
             navigate?()
         }
+    }
+}
+
+// MARK: - Budget realtime row mapping
+
+private struct RealtimeTripExpenseRow: Decodable, Sendable {
+    let id: UUID
+    let trip_id: UUID
+    let user_id: UUID?
+    let payer_user_id: UUID?
+    let booking_id: UUID?
+    let booking_group_id: UUID?
+    let title: String
+    let amount: DecimalCodec
+    let currency: String
+    let original_currency: String?
+    let original_amount: DecimalCodec?
+    let fx_rate_at_capture: DecimalCodec?
+    let fx_rate_date: String?
+    let category: String
+    let split_type: String?
+    let expense_date: String?
+    let notes: String?
+    let is_auto_synced: Bool?
+    let created_at: String?
+    let updated_at: String?
+
+    var asModel: TripExpense {
+        let expenseDay = ExpenseDateFormatter.parse(expense_date) ?? Date()
+        let origAmt = original_amount?.value ?? amount.value
+        let origCur = original_currency ?? currency
+        let fx = fx_rate_at_capture?.value ?? 1
+        let fxDay = ExpenseDateFormatter.parse(fx_rate_date) ?? expenseDay
+        return TripExpense(
+            id: id,
+            tripId: trip_id,
+            userId: user_id,
+            payerUserId: payer_user_id ?? user_id,
+            bookingId: booking_id,
+            bookingGroupId: booking_group_id,
+            title: title,
+            amount: amount.value,
+            currencyCode: currency,
+            category: ExpenseCategory.from(rawValue: category),
+            splitType: TripExpense.SplitType.from(rawValue: split_type),
+            expenseDate: expenseDay,
+            notes: notes,
+            isAutoSynced: is_auto_synced ?? false,
+            createdAt: SupabaseModelMapping.parsePostgresTimestamp(created_at),
+            updatedAt: SupabaseModelMapping.parsePostgresTimestamp(updated_at),
+            originalAmount: origAmt,
+            originalCurrencyCode: origCur,
+            fxRateAtCapture: fx,
+            fxRateDate: fxDay
+        )
+    }
+}
+
+private struct RealtimeExpenseSplitRow: Decodable, Sendable {
+    let id: UUID
+    let expense_id: UUID
+    let trip_id: UUID
+    let user_id: UUID
+    let amount: DecimalCodec
+    let currency: String
+    let is_accepted: Bool?
+    let created_at: String?
+    let updated_at: String?
+
+    var asModel: ExpenseSplit {
+        ExpenseSplit(
+            id: id,
+            expenseId: expense_id,
+            tripId: trip_id,
+            userId: user_id,
+            amount: amount.value,
+            currencyCode: currency,
+            isAccepted: is_accepted ?? true,
+            createdAt: SupabaseModelMapping.parsePostgresTimestamp(created_at),
+            updatedAt: SupabaseModelMapping.parsePostgresTimestamp(updated_at)
+        )
+    }
+}
+
+private struct RealtimeTripBudgetRow: Decodable, Sendable {
+    let id: UUID
+    let trip_id: UUID
+    let user_id: UUID
+    let category: String
+    let planned_amount: DecimalCodec
+    let currency: String
+    let created_at: String?
+    let updated_at: String?
+
+    var asModel: TripBudget {
+        TripBudget(
+            id: id,
+            tripId: trip_id,
+            userId: user_id,
+            category: ExpenseCategory.from(rawValue: category),
+            plannedAmount: planned_amount.value,
+            currencyCode: currency,
+            createdAt: SupabaseModelMapping.parsePostgresTimestamp(created_at),
+            updatedAt: SupabaseModelMapping.parsePostgresTimestamp(updated_at)
+        )
+    }
+}
+
+private struct RealtimeExpenseSettlementRow: Decodable, Sendable {
+    let id: UUID
+    let trip_id: UUID
+    let from_user_id: UUID
+    let to_user_id: UUID
+    let amount: DecimalCodec
+    let currency: String
+    let is_settled: Bool?
+    let settled_at: String?
+    let settled_via: String?
+    let notes: String?
+    let created_at: String?
+    let updated_at: String?
+
+    var asModel: ExpenseSettlement {
+        ExpenseSettlement(
+            id: id,
+            tripId: trip_id,
+            fromUserId: from_user_id,
+            toUserId: to_user_id,
+            amount: amount.value,
+            currencyCode: currency,
+            isSettled: is_settled ?? false,
+            settledAt: SupabaseModelMapping.parsePostgresTimestamp(settled_at),
+            settledVia: ExpenseSettlement.SettlementMethod.from(rawValue: settled_via),
+            notes: notes,
+            createdAt: SupabaseModelMapping.parsePostgresTimestamp(created_at),
+            updatedAt: SupabaseModelMapping.parsePostgresTimestamp(updated_at)
+        )
     }
 }
 

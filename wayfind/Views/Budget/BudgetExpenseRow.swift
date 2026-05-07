@@ -36,10 +36,13 @@ struct BudgetExpenseRow: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(expense.title.isEmpty ? expense.category.displayLabel : expense.title)
-                    .font(.appBody.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-                    .lineLimit(1)
+                HStack(spacing: AppSpacing.xs) {
+                    Text(expense.title.isEmpty ? expense.category.displayLabel : expense.title)
+                        .font(.appBody.weight(.semibold))
+                        .foregroundStyle(AppColors.textPrimary)
+                        .lineLimit(1)
+                    provenanceBadge
+                }
                 Text(captionText)
                     .font(.appCaption)
                     .foregroundStyle(AppColors.textTertiary)
@@ -80,6 +83,39 @@ struct BudgetExpenseRow: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
+    // MARK: - Provenance badge
+
+    /// Small pill that immediately communicates whether this row was
+    /// auto-generated from a booking or entered manually. Visible at a glance
+    /// so users understand edit propagation before they tap.
+    @ViewBuilder
+    private var provenanceBadge: some View {
+        if BudgetLedgerNormalizationPolicy.isNeedsAmount(expense) {
+            ProvenancePill(
+                label: String(localized: "Needs amount"),
+                icon: "exclamationmark.circle",
+                color: .orange
+            )
+        } else {
+            switch expense.provenance {
+            case .bookingLinked:
+                ProvenancePill(
+                    label: String(localized: "Linked"),
+                    icon: "link",
+                    color: AppColors.appPrimary
+                )
+            case .combinedFlight:
+                ProvenancePill(
+                    label: String(localized: "Combined"),
+                    icon: "airplane",
+                    color: AppColors.appPrimary
+                )
+            case .manual:
+                EmptyView()
+            }
+        }
+    }
+
     @ViewBuilder
     private var avatar: some View {
         if let urlString = payerAvatarURL, let url = URL(string: urlString) {
@@ -112,7 +148,6 @@ struct BudgetExpenseRow: View {
     private var captionText: String {
         var pieces: [String] = []
         if let payerName { pieces.append("\(payerName) paid") }
-        if expense.isAutoSynced { pieces.append("From booking") }
         if BudgetLedgerNormalizationPolicy.bookingSyncedLedgerDiffersFromTripBudgetCap(
             expense: expense,
             tripBudgetCurrency: tripBudgetCurrencyCode
@@ -127,18 +162,50 @@ struct BudgetExpenseRow: View {
     }
 
     private var accessibilityLabel: String {
-        var label = "\(expense.title.isEmpty ? expense.category.displayLabel : expense.title), "
+        var parts: [String] = []
+        parts.append(expense.title.isEmpty ? expense.category.displayLabel : expense.title)
         if expense.isOriginalDistinctFromTripLedger {
-            label += MoneyFormatter.string(expense.originalAmount, currency: expense.originalCurrencyCode)
-            label += ", "
-            label += MoneyFormatter.string(expense.amount, currency: expense.currencyCode)
+            parts.append(MoneyFormatter.string(expense.originalAmount, currency: expense.originalCurrencyCode))
+            parts.append(MoneyFormatter.string(expense.amount, currency: expense.currencyCode) + " in trip currency")
         } else {
-            label += MoneyFormatter.string(expense.amount, currency: expense.currencyCode)
+            parts.append(MoneyFormatter.string(expense.amount, currency: expense.currencyCode))
         }
-        if let payerName {
-            label += ", paid by \(payerName)"
+        if let payerName { parts.append("paid by \(payerName)") }
+        if BudgetLedgerNormalizationPolicy.isNeedsAmount(expense) {
+            parts.append("needs amount — booking cost was cleared")
+        } else {
+            switch expense.provenance {
+            case .bookingLinked:
+                parts.append("linked to booking")
+            case .combinedFlight:
+                parts.append("combined flight itinerary")
+            case .manual:
+                break
+            }
         }
-        return label
+        return parts.joined(separator: ", ")
+    }
+}
+
+// MARK: - Provenance pill
+
+private struct ProvenancePill: View {
+    let label: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.system(size: 8, weight: .semibold))
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(color.opacity(0.12), in: Capsule())
+        .accessibilityHidden(true)
     }
 }
 

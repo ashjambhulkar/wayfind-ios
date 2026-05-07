@@ -147,7 +147,16 @@ struct TripMapKitView: UIViewRepresentable {
         map.showsUserLocation = true
         map.showsCompass = false
         map.showsScale = false
+        map.isPitchEnabled = true
+        map.isRotateEnabled = true
         map.pointOfInterestFilter = .excludingAll  // our pins, not Apple's
+        // Allow pinch-zooming all the way out to world/globe scale. Some
+        // map configurations clamp the default max distance too aggressively.
+        map.cameraBoundary = nil
+        map.cameraZoomRange = MKMapView.CameraZoomRange(
+            minCenterCoordinateDistance: 150,
+            maxCenterCoordinateDistance: 80_000_000
+        )
         map.preferredConfiguration = Self.makeConfiguration(configuration)
 
         map.register(
@@ -214,10 +223,12 @@ struct TripMapKitView: UIViewRepresentable {
         switch kind {
         case .standard:
             let cfg = MKStandardMapConfiguration()
+            cfg.elevationStyle = .realistic
             cfg.pointOfInterestFilter = .excludingAll
             return cfg
         case .hybrid:
             let cfg = MKHybridMapConfiguration()
+            cfg.elevationStyle = .realistic
             cfg.pointOfInterestFilter = .excludingAll
             return cfg
         }
@@ -297,6 +308,18 @@ struct TripMapKitView: UIViewRepresentable {
             var toAdd: [MKAnnotation] = []
             var toRemove: [MKAnnotation] = []
 
+            var dayLocalSortLabelByPlaceId: [UUID: Int] = [:]
+            let nonBookingByDay = Dictionary(grouping: mappable.filter { !$0.isBooking }) { $0.itineraryDayId }
+            for (_, dayPlaces) in nonBookingByDay {
+                let ordered = dayPlaces.sorted { lhs, rhs in
+                    if lhs.sortOrder != rhs.sortOrder { return lhs.sortOrder < rhs.sortOrder }
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+                for (index, place) in ordered.enumerated() {
+                    dayLocalSortLabelByPlaceId[place.id] = index + 1
+                }
+            }
+
             for place in mappable {
                 let key = place.id.uuidString
                 if place.isBooking {
@@ -316,8 +339,13 @@ struct TripMapKitView: UIViewRepresentable {
                 } else {
                     nextTripIds.insert(key)
                     let dayNum = dayNumberByDayId[place.itineraryDayId] ?? 1
+                    let dayLocalSortLabel = dayLocalSortLabelByPlaceId[place.id] ?? 1
                     if let existing = tripAnnotationsById[key] {
-                        let candidate = TripPlaceAnnotation(place: place, dayNumber: dayNum)
+                        let candidate = TripPlaceAnnotation(
+                            place: place,
+                            dayNumber: dayNum,
+                            sortLabel: dayLocalSortLabel
+                        )
                         if existing.visualFingerprint != candidate.visualFingerprint {
                             existing.coordinate = candidate.coordinate
                             existing.title = candidate.title
@@ -330,7 +358,11 @@ struct TripMapKitView: UIViewRepresentable {
                             }
                         }
                     } else {
-                        let new = TripPlaceAnnotation(place: place, dayNumber: dayNum)
+                        let new = TripPlaceAnnotation(
+                            place: place,
+                            dayNumber: dayNum,
+                            sortLabel: dayLocalSortLabel
+                        )
                         tripAnnotationsById[key] = new
                         toAdd.append(new)
                     }
@@ -565,11 +597,15 @@ struct TripMapKitView: UIViewRepresentable {
                 )
             case .globe(let center):
                 guard CLLocationCoordinate2DIsValid(center) else { return }
-                let region = MKCoordinateRegion(
-                    center: center,
-                    span: MKCoordinateSpan(latitudeDelta: 80, longitudeDelta: 120)
+                // Use a far camera distance so "globe-level" framing is
+                // visually reachable (instead of a mid-zoom world region).
+                let camera = MKMapCamera(
+                    lookingAtCenter: center,
+                    fromDistance: 55_000_000,
+                    pitch: 0,
+                    heading: 0
                 )
-                map.setRegion(region, animated: animated)
+                map.setCamera(camera, animated: animated)
             }
         }
 

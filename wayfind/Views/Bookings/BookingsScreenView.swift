@@ -197,15 +197,64 @@ struct BookingsScreenView: View {
     /// dashboard via the bookings tab). When a cost is supplied we file a
     /// `full`-split expense for the current user; the budget hub picks it
     /// up via realtime as soon as the user navigates to that tab.
+    ///
+    /// Canonical writer policy: skip if the DB trigger already owns this row
+    /// (isAutoSynced = true) to avoid dual-write race and flag corruption.
     private func trackBookingExpenseIfNeeded(place: Place, cost: BookingCost?) async {
         guard let cost else { return }
+        guard place.isBooking else { return }
         guard let userId = collaborationStore.currentUserId else { return }
+        let existingExpense = (await dataService.fetchBudgetSnapshot(tripId: trip.id))
+            .expenses
+            .first(where: { $0.bookingId == place.id })
+
+        // DB trigger owns auto-synced rows — never overwrite them from iOS.
+        if let existing = existingExpense, existing.isAutoSynced { return }
+
+        if let previous = existingExpense {
+            let updatedExpense = TripExpense(
+                id: previous.id,
+                tripId: previous.tripId,
+                userId: previous.userId ?? userId,
+                payerUserId: previous.payerUserId ?? userId,
+                bookingId: place.id,
+                title: place.name,
+                amount: cost.amount,
+                currencyCode: cost.currency,
+                category: ExpenseCategory.fromBookingKind(place.bookingType),
+                splitType: .full,
+                expenseDate: place.startTime ?? previous.expenseDate,
+                notes: previous.notes,
+                isAutoSynced: false,
+                createdAt: previous.createdAt,
+                updatedAt: previous.updatedAt
+            )
+            let split = ExpenseSplit(
+                id: UUID(),
+                expenseId: updatedExpense.id,
+                tripId: updatedExpense.tripId,
+                userId: updatedExpense.payerUserId ?? userId,
+                amount: cost.amount,
+                currencyCode: cost.currency,
+                isAccepted: true,
+                createdAt: nil,
+                updatedAt: nil
+            )
+            try? await dataService.updateExpense(
+                updatedExpense,
+                splits: [split],
+                tripBudgetCurrency: trip.budgetCurrencyCode,
+                previousPersistedRow: previous
+            )
+            return
+        }
+
         let expense = TripExpense(
             id: UUID(),
             tripId: trip.id,
             userId: userId,
             payerUserId: userId,
-            bookingId: place.isBooking ? place.id : nil,
+            bookingId: place.id,
             title: place.name,
             amount: cost.amount,
             currencyCode: cost.currency,

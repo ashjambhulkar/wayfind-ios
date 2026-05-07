@@ -95,6 +95,16 @@ struct ReviewForwardedBookingsView: View {
             await loadData()
             scheduleDismissals()
         }
+        .onDisappear {
+            // Delete failed entries from the queue when the user closes this
+            // screen. They've seen the errors; keeping stale failures visible
+            // on the next visit would be confusing.
+            let tripId = trip.id
+            let ds = dataService
+            Task.detached(priority: .utility) {
+                await ds.deleteFailedQueueEntries(for: tripId)
+            }
+        }
         .task(id: hasPending) {
             guard hasPending else { return }
             let deadline = Date.now.addingTimeInterval(Self.pollingTimeoutSeconds)
@@ -150,11 +160,13 @@ struct ReviewForwardedBookingsView: View {
             .first?.id
 
         if !initialLoadComplete {
-            // Silently pre-dismiss any bookings that were already confirmed before
-            // this screen session so they don't flash "Added" then disappear.
-            // Items confirmed during this session reach dismissedIds via scheduleDismissals().
-            let preConfirmed = Set(b.filter { $0.status == .confirmed }.map(\.id))
-            dismissedIds.formUnion(preConfirmed)
+            // Silently pre-dismiss items that were already in a terminal state
+            // before this screen session opened.
+            // - confirmed: they flashed "Added" in a prior session; skip the replay.
+            // - failed: stale errors from prior sessions are cleaned up by onDisappear,
+            //   but pre-dismiss them here too so they never flash on a cold open.
+            let preDismiss = Set(b.filter { $0.status == .confirmed || $0.status == .failed }.map(\.id))
+            dismissedIds.formUnion(preDismiss)
             initialLoadComplete = true
         }
     }

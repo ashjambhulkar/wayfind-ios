@@ -79,11 +79,40 @@ enum BudgetLedgerNormalizationPolicy {
 
     // MARK: - Inference (persisted `TripExpense` rows)
 
-    /// Best-effort classification from stored flags. Extend when email import
-    /// or other writers add discriminant columns.
+    /// Best-effort classification from stored flags.
+    /// Priority: isAutoSynced > bookingId / bookingGroupId presence > manual.
     static func inferWriteSource(from expense: TripExpense) -> BudgetExpenseWriteSource {
         if expense.isAutoSynced { return .databaseAutoSync }
+        if expense.bookingId != nil || expense.bookingGroupId != nil { return .iosBookingCompanion }
         return .manualComposer
+    }
+
+    // MARK: - "Needs amount" state
+
+    /// `true` when a linked expense has a zero (or effectively zero) amount,
+    /// meaning the booking it tracks had its cost cleared. The row is kept in
+    /// the budget list as a "Needs amount" reminder rather than deleted.
+    static func isNeedsAmount(_ expense: TripExpense) -> Bool {
+        guard expense.provenance != .manual else { return false }
+        return TripExpenseLedgerNormalizer.roundMoney2(expense.amount) == 0
+            && TripExpenseLedgerNormalizer.roundMoney2(expense.originalAmount) == 0
+    }
+
+    // MARK: - Orphaned / unlinked state
+
+    /// `true` when a row was once booking-linked but the booking was deleted
+    /// (FK ON DELETE SET NULL cleared booking_id). The expense survives as
+    /// orphaned spend history. Detection requires the `expense_source` DB
+    /// column (migration 20260607100000) to be non-null for reliable results;
+    /// before the column is populated this will return false for affected rows.
+    static func isOrphanedBookingRow(_ expense: TripExpense) -> Bool {
+        // bookingId was cleared by ON DELETE SET NULL, but provenance is .manual
+        // because bookingGroupId is also nil. We rely on isAutoSynced having been
+        // true at some point — which is reset to false by the user-edit trigger —
+        // so we cannot distinguish orphaned rows from manual rows post-edit without
+        // the expense_source column. This function is forward-compatible: once the
+        // expense_source column is decoded into TripExpense, update this check.
+        false
     }
 
     /// `true` when this row came from **DB booking sync** and its ledger ISO

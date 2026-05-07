@@ -245,6 +245,75 @@ export interface SafeBooking {
   model_used: string;
 }
 
+function parseTotalPrice(raw: unknown): number | null {
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? raw : null;
+  }
+  if (typeof raw !== "string") return null;
+
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Handle common accounting negatives, e.g. "(1,234.56)".
+  const isAccountingNegative =
+    trimmed.startsWith("(") && trimmed.endsWith(")");
+
+  // Keep only numeric separators/signs and drop currency symbols / labels.
+  const cleaned = trimmed
+    .replace(/[^0-9,.\-]/g, "")
+    .replace(/(?!^)-/g, "");
+
+  if (!cleaned) return null;
+
+  // Heuristics:
+  // - If both separators appear, treat the right-most one as decimal marker.
+  // - If only commas and the last group is 2 digits, treat comma as decimal.
+  // - Otherwise commas are thousand separators.
+  let normalized = cleaned;
+  const lastDot = cleaned.lastIndexOf(".");
+  const lastComma = cleaned.lastIndexOf(",");
+
+  if (lastDot !== -1 && lastComma !== -1) {
+    const decimalIsComma = lastComma > lastDot;
+    normalized = decimalIsComma
+      ? cleaned.replace(/\./g, "").replace(",", ".")
+      : cleaned.replace(/,/g, "");
+  } else if (lastComma !== -1 && lastDot === -1) {
+    const trailing = cleaned.slice(lastComma + 1);
+    normalized = trailing.length === 2
+      ? cleaned.replace(/\./g, "").replace(",", ".")
+      : cleaned.replace(/,/g, "");
+  } else {
+    normalized = cleaned.replace(/,/g, "");
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return isAccountingNegative ? -Math.abs(parsed) : parsed;
+}
+
+function normalizeCurrency(raw: unknown): string {
+  if (typeof raw !== "string") return "USD";
+  const trimmed = raw.trim();
+  if (!trimmed) return "USD";
+
+  const upper = trimmed.toUpperCase();
+  if (/^[A-Z]{3}$/.test(upper)) return upper;
+
+  // Common symbol fallbacks when model returns "$", "€", etc.
+  const symbolMap: Record<string, string> = {
+    "$": "USD",
+    "US$": "USD",
+    "€": "EUR",
+    "£": "GBP",
+    "¥": "JPY",
+    "₹": "INR",
+    "A$": "AUD",
+    "C$": "CAD",
+  };
+  return symbolMap[trimmed] ?? "USD";
+}
+
 export function sanitizeBookings(
   extracted: Record<string, unknown>,
   modelUsed: string,
@@ -276,10 +345,8 @@ export function sanitizeBookings(
           : null,
       end_location:
         typeof entry.end_location === "string" ? entry.end_location : null,
-      total_price:
-        typeof entry.total_price === "number" ? entry.total_price : null,
-      currency:
-        typeof entry.currency === "string" ? entry.currency : "USD",
+      total_price: parseTotalPrice(entry.total_price),
+      currency: normalizeCurrency(entry.currency),
       details_json: details,
       confidence:
         typeof entry.confidence === "number" &&

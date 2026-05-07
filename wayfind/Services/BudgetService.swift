@@ -265,6 +265,21 @@ final class BudgetService {
             .eq("id", value: ledger.id.uuidString.lowercased())
             .execute()
 
+        // Two-way sync: if this expense is linked to a booking and the amount
+        // changed, write back to trip_bookings.amount. We use originalAmount
+        // (the user-entered value) so the booking preserves its own currency
+        // rather than the FX-converted trip ledger amount.
+        if let bookingId = ledger.bookingId,
+           let previous = previousPersistedRow,
+           TripExpenseLedgerNormalizer.roundMoney2(ledger.originalAmount)
+               != TripExpenseLedgerNormalizer.roundMoney2(previous.originalAmount) {
+            try await patchBookingAmount(
+                bookingId: bookingId,
+                amount: ledger.originalAmount,
+                currency: ledger.originalCurrencyCode
+            )
+        }
+
         try await client
             .from("expense_splits")
             .delete()
@@ -395,6 +410,35 @@ final class BudgetService {
             .execute()
     }
 
+    // MARK: - Two-way sync: budget amount → booking
+
+    /// Writes back the user-edited `amount` to the linked `trip_bookings` row.
+    ///
+    /// Loop-guard: the booking UPDATE triggers `tg_sync_booking_expense` again,
+    /// but because `is_auto_synced` is already FALSE (user edited it), the ON
+    /// CONFLICT UPDATE clause's `WHERE is_auto_synced = TRUE` does not match
+    /// and the expense row is left untouched. This breaks the round-trip loop.
+    ///
+    /// Only called when `BudgetBookingBehaviorPolicy.twoWaySyncEnabled` is true
+    /// and the updated expense carries a non-nil `bookingId`.
+    func patchBookingAmount(
+        bookingId: UUID,
+        amount: Decimal,
+        currency: String
+    ) async throws {
+        guard BudgetBookingBehaviorPolicy.twoWaySyncEnabled else { return }
+        guard let client else { throw SupabaseManagerError.notConfigured }
+        let payload = BookingAmountPatch(
+            amount: DecimalCodec(amount),
+            currency: currency
+        )
+        try await client
+            .from("trip_bookings")
+            .update(payload)
+            .eq("id", value: bookingId.uuidString.lowercased())
+            .execute()
+    }
+
     // MARK: - Per-category budgets
 
     /// Upserts a per-category planned amount. We key by (trip_id, user_id,
@@ -502,6 +546,11 @@ private struct TripTotalBudgetUpdate: Encodable, Sendable {
     let budget_currency: String
 }
 
+private struct BookingAmountPatch: Encodable, Sendable {
+    let amount: DecimalCodec
+    let currency: String
+}
+
 private struct TripExpenseInsert: Encodable, Sendable {
     let id: UUID
     let trip_id: UUID
@@ -582,6 +631,7 @@ private struct TripExpenseRow: Decodable, Sendable {
     let user_id: UUID?
     let payer_user_id: UUID?
     let booking_id: UUID?
+    let booking_group_id: UUID?
     let title: String
     let amount: DecimalCodec
     let currency: String
@@ -609,6 +659,7 @@ private struct TripExpenseRow: Decodable, Sendable {
             userId: user_id,
             payerUserId: payer_user_id ?? user_id,
             bookingId: booking_id,
+            bookingGroupId: booking_group_id,
             title: title,
             amount: amount.value,
             currencyCode: currency,

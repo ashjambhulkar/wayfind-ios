@@ -62,6 +62,13 @@ final class BudgetViewModel {
     /// down on trip switch, so each new trip always fetches once and caches.
     private var hasFetchedProfileCurrency = false
 
+    /// Deadline before which realtime-triggered reloads are suppressed.
+    /// Set after each explicit mutation reload so the realtime echo that
+    /// arrives ~300ms later does not fire a redundant second network fetch.
+    /// The window (1.5 s) is deliberately longer than the realtime debounce
+    /// (300 ms) so any burst of events from a single write is absorbed.
+    private var suppressRealtimeReloadUntil: Date?
+
     /// Optimistic mutation queue. We stash the in-flight mutation under its
     /// own UUID so the rollback path can find it without iterating snapshots.
     /// Empty in the steady state.
@@ -102,7 +109,18 @@ final class BudgetViewModel {
         if !hasLoadedAtLeastOnce {
             isLoading = true
         }
-        let next = await dataService.fetchBudgetSnapshot(tripId: tripId)
+        guard let next = await dataService.fetchBudgetSnapshotIfAvailable(tripId: tripId) else {
+            guard generation == loadGeneration else { return }
+            // Critical UX guard: never replace a previously loaded snapshot
+            // with `.empty` on transient network/realtime fetch failure.
+            lastFetchFailed = true
+            isLoading = false
+            if !hasLoadedAtLeastOnce {
+                // First load failed: still unblock the spinner so the user can retry.
+                hasLoadedAtLeastOnce = true
+            }
+            return
+        }
         guard generation == loadGeneration else { return }
         snapshot = next
         hasLoadedAtLeastOnce = true
@@ -111,6 +129,24 @@ final class BudgetViewModel {
         if !hasFetchedProfileCurrency {
             await refreshPreferredDisplayCurrencyFromProfile()
             hasFetchedProfileCurrency = true
+        }
+        detectAndReportDuplicateLinkedExpenses(in: next.expenses)
+    }
+
+    /// Scans for multiple expense rows sharing the same `bookingId`. This
+    /// indicates a dual-writer race pre-migration. Emits telemetry so the
+    /// issue shows up in Sentry without crashing the UI.
+    private func detectAndReportDuplicateLinkedExpenses(in expenses: [TripExpense]) {
+        var bookingGroups: [UUID: [UUID]] = [:]
+        for expense in expenses {
+            guard let bookingId = expense.bookingId else { continue }
+            bookingGroups[bookingId, default: []].append(expense.id)
+        }
+        for (bookingId, expenseIds) in bookingGroups where expenseIds.count > 1 {
+            BudgetFxTelemetry.recordDuplicateLinkedExpense(
+                bookingId: bookingId,
+                expenseIds: expenseIds
+            )
         }
     }
 
@@ -127,6 +163,18 @@ final class BudgetViewModel {
         await reload()
     }
 
+    /// Called exclusively by `TripRealtimeService` on incoming budget table
+    /// events. Skips the reload if a mutation-driven explicit reload just
+    /// completed within the suppress window — avoids the double-fetch that
+    /// happens when `addExpense`/`updateExpense` calls `reload()` and the
+    /// realtime echo arrives 300 ms later.
+    func reloadFromRealtime() async {
+        if let suppressedUntil = suppressRealtimeReloadUntil, Date() < suppressedUntil {
+            return
+        }
+        await reload()
+    }
+
     /// Marks the last reload as failed without replacing the snapshot. Wired
     /// from places where the fetch surface is `try`-throwing (e.g. when the
     /// caller needs to differentiate "empty result" from "RLS denied"). The
@@ -134,6 +182,73 @@ final class BudgetViewModel {
     /// `.empty`, so we don't currently call this — present for future use.
     func markFetchFailed() {
         lastFetchFailed = true
+    }
+
+    // MARK: - Realtime patch apply (event-driven model)
+
+    /// Marks the view-model as loaded from realtime deltas even if we have
+    /// not completed a full snapshot fetch yet.
+    private func markLoadedFromRealtime() {
+        hasLoadedAtLeastOnce = true
+        isLoading = false
+        lastFetchFailed = false
+    }
+
+    func applyRealtimeExpenseUpsert(_ expense: TripExpense) {
+        if let index = snapshot.expenses.firstIndex(where: { $0.id == expense.id }) {
+            snapshot.expenses[index] = expense
+        } else {
+            snapshot.expenses.append(expense)
+        }
+        markLoadedFromRealtime()
+    }
+
+    func applyRealtimeExpenseDelete(id: UUID) {
+        snapshot.expenses.removeAll { $0.id == id }
+        snapshot.splits.removeAll { $0.expenseId == id }
+        markLoadedFromRealtime()
+    }
+
+    func applyRealtimeSplitUpsert(_ split: ExpenseSplit) {
+        if let index = snapshot.splits.firstIndex(where: { $0.id == split.id }) {
+            snapshot.splits[index] = split
+        } else {
+            snapshot.splits.append(split)
+        }
+        markLoadedFromRealtime()
+    }
+
+    func applyRealtimeSplitDelete(id: UUID) {
+        snapshot.splits.removeAll { $0.id == id }
+        markLoadedFromRealtime()
+    }
+
+    func applyRealtimeBudgetUpsert(_ budget: TripBudget) {
+        if let index = snapshot.budgets.firstIndex(where: { $0.id == budget.id }) {
+            snapshot.budgets[index] = budget
+        } else {
+            snapshot.budgets.append(budget)
+        }
+        markLoadedFromRealtime()
+    }
+
+    func applyRealtimeBudgetDelete(id: UUID) {
+        snapshot.budgets.removeAll { $0.id == id }
+        markLoadedFromRealtime()
+    }
+
+    func applyRealtimeSettlementUpsert(_ settlement: ExpenseSettlement) {
+        if let index = snapshot.settlements.firstIndex(where: { $0.id == settlement.id }) {
+            snapshot.settlements[index] = settlement
+        } else {
+            snapshot.settlements.append(settlement)
+        }
+        markLoadedFromRealtime()
+    }
+
+    func applyRealtimeSettlementDelete(id: UUID) {
+        snapshot.settlements.removeAll { $0.id == id }
+        markLoadedFromRealtime()
     }
 
     // MARK: - Derived rollups
@@ -211,6 +326,9 @@ final class BudgetViewModel {
             )
             pendingMutations.removeValue(forKey: mutationId)
             await reload()
+            suppressRealtimeReloadUntil = Date().addingTimeInterval(
+                BudgetBookingBehaviorPolicy.mutationReloadSuppressWindowSeconds
+            )
             return true
         } catch {
             pendingMutations.removeValue(forKey: mutationId)
@@ -251,6 +369,9 @@ final class BudgetViewModel {
             )
             pendingMutations.removeValue(forKey: mutationId)
             await reload()
+            suppressRealtimeReloadUntil = Date().addingTimeInterval(
+                BudgetBookingBehaviorPolicy.mutationReloadSuppressWindowSeconds
+            )
             return true
         } catch {
             pendingMutations.removeValue(forKey: mutationId)

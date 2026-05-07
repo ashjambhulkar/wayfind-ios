@@ -784,8 +784,8 @@ struct AddBookingView: View {
             saveError = "Add the required booking details before saving."
             return
         }
-        let place = makePlace()
         let cost = parsedCost()
+        let place = makePlace(cost: cost)
         isSaving = true
         saveError = nil
         let didSave = await onSave?(place, cost) ?? true
@@ -811,10 +811,12 @@ struct AddBookingView: View {
         return BookingCost(amount: amount, currency: code.isEmpty ? "USD" : code)
     }
 
-    private func makePlace() -> Place {
+    private func makePlace(cost: BookingCost?) -> Place {
         let trimmedConfirmation = confirmationNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         let confirmation = trimmedConfirmation.isEmpty ? nil : trimmedConfirmation
         let placeId = bookingRowId
+        let bookingAmount = cost?.amount
+        let bookingCurrency = cost?.currency.uppercased()
 
         switch selectedType {
         case .flight:
@@ -861,7 +863,9 @@ struct AddBookingView: View {
                 isBooking: true,
                 bookingType: BookingCategory.flight.rawValue,
                 confirmationNumber: confirmation,
-                bookingDetails: .flight(details)
+                bookingDetails: .flight(details),
+                bookingAmount: bookingAmount,
+                bookingCurrencyCode: bookingCurrency
             )
         case .hotel:
             let details = HotelDetails(
@@ -887,7 +891,9 @@ struct AddBookingView: View {
                 isBooking: true,
                 bookingType: BookingCategory.hotel.rawValue,
                 confirmationNumber: confirmation,
-                bookingDetails: .hotel(details)
+                bookingDetails: .hotel(details),
+                bookingAmount: bookingAmount,
+                bookingCurrencyCode: bookingCurrency
             )
         case .restaurant:
             let trimmedStreet = restaurantAddress.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -911,7 +917,9 @@ struct AddBookingView: View {
                 isBooking: true,
                 bookingType: BookingCategory.restaurant.rawValue,
                 confirmationNumber: confirmation,
-                bookingDetails: .restaurant(details)
+                bookingDetails: .restaurant(details),
+                bookingAmount: bookingAmount,
+                bookingCurrencyCode: bookingCurrency
             )
         case .carRental:
             let details = CarRentalDetails(
@@ -937,7 +945,9 @@ struct AddBookingView: View {
                 isBooking: true,
                 bookingType: BookingCategory.carRental.rawValue,
                 confirmationNumber: confirmation,
-                bookingDetails: .carRental(details)
+                bookingDetails: .carRental(details),
+                bookingAmount: bookingAmount,
+                bookingCurrencyCode: bookingCurrency
             )
         case .activity:
             let details = ActivityDetails(
@@ -960,7 +970,9 @@ struct AddBookingView: View {
                 isBooking: true,
                 bookingType: BookingCategory.activity.rawValue,
                 confirmationNumber: confirmation,
-                bookingDetails: .activity(details)
+                bookingDetails: .activity(details),
+                bookingAmount: bookingAmount,
+                bookingCurrencyCode: bookingCurrency
             )
         case .transport:
             let details = TransportDetails(
@@ -987,7 +999,9 @@ struct AddBookingView: View {
                 isBooking: true,
                 bookingType: BookingCategory.transport.rawValue,
                 confirmationNumber: confirmation,
-                bookingDetails: .transport(details)
+                bookingDetails: .transport(details),
+                bookingAmount: bookingAmount,
+                bookingCurrencyCode: bookingCurrency
             )
         }
     }

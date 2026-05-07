@@ -255,6 +255,52 @@ final class SupabaseManager {
         let attribution: String?
     }
 
+    struct CityProfileCoverImage: Identifiable, Sendable {
+        let id: UUID
+        let imageUrl: String
+        let photographerName: String?
+        let photographerUrl: String?
+        let photoPageUrl: String?
+
+        var attribution: String? {
+            guard let name = photographerName, !name.isEmpty else { return nil }
+            return "Photo by \(name) on Unsplash"
+        }
+    }
+
+    func fetchCityProfileCovers(cityProfileId: UUID) async throws -> [CityProfileCoverImage] {
+        guard let client = AuthSessionService.shared.client else { return [] }
+
+        struct Row: Decodable {
+            let id: UUID
+            let image_url: String
+            let photographer_name: String?
+            let photographer_url: String?
+            let photo_page_url: String?
+        }
+
+        let rows: [Row] = try await client
+            .from("city_profile_cover_images")
+            .select("id, image_url, photographer_name, photographer_url, photo_page_url")
+            .eq("city_profile_id", value: cityProfileId.uuidString.lowercased())
+            .eq("is_active", value: true)
+            .order("position")
+            .order("assignment_count")
+            .limit(20)
+            .execute()
+            .value
+
+        return rows.map {
+            CityProfileCoverImage(
+                id: $0.id,
+                imageUrl: $0.image_url,
+                photographerName: $0.photographer_name,
+                photographerUrl: $0.photographer_url,
+                photoPageUrl: $0.photo_page_url
+            )
+        }
+    }
+
     private func pickCachedCityCover(
         cityProfileId: UUID,
         tripId: UUID
@@ -1755,6 +1801,17 @@ final class SupabaseManager {
 
     func deletePlace(id: UUID) async throws {
         let (client, _) = try await requireClientAndUserId()
+
+        // Delete auto-synced expenses that were created from this booking so
+        // the budget reflects the deletion immediately. Manually-added expenses
+        // (is_auto_synced = false) are left untouched.
+        try? await client
+            .from("trip_expenses")
+            .delete()
+            .eq("booking_id", value: id.uuidString)
+            .eq("is_auto_synced", value: true)
+            .execute()
+
         do {
             try await client
                 .from("trip_bookings")
@@ -1856,6 +1913,19 @@ final class SupabaseManager {
             .value
 
         return rows.compactMap(Self.mapEmailForwardingQueueRow)
+    }
+
+    /// Deletes all `failed` queue entries for the given trip.
+    /// Called when the user dismisses the Forwarded Bookings screen so stale
+    /// error cards don't resurface on the next visit.
+    func deleteFailedQueueEntries(for tripId: UUID) async throws {
+        let (client, _) = try await requireClientAndUserId()
+        try await client
+            .from("email_forwarding_queue")
+            .delete()
+            .eq("trip_id", value: tripId.uuidString)
+            .eq("status", value: "failed")
+            .execute()
     }
 
     /// Uploads JPEG bytes to Storage (path matches Expo: `{userId}/trip-covers/{tripId}/cover.jpg`).
