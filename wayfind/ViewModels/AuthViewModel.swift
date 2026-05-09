@@ -396,6 +396,9 @@ final class AuthViewModel {
         }
 
         authState = .signedIn
+        Task {
+            await PushNotificationService.shared.resyncFCMTokenAfterAuth()
+        }
     }
 
     private func fallbackName(from email: String) -> String {

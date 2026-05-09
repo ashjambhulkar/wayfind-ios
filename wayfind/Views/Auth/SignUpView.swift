@@ -26,9 +26,7 @@ struct SignUpView: View {
                     Spacer()
                         .frame(height: AppSpacing.xxl)
 
-                    Image(systemName: "globe.americas.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(AppColors.appPrimary)
+                    AuthBrandMark()
 
                     Text("Wayfind")
                         .font(Font.screenTitle)
@@ -66,8 +64,7 @@ struct SignUpView: View {
                         .frame(height: AppSpacing.md)
 
                     AuthOutlineIconButton(
-                        icon: "g.circle.fill",
-                        title: "Continue with Google"
+                        googleBundledLogoTitle: "Continue with Google"
                     ) {
                         Task {
                             await authViewModel.signInWithGoogle()

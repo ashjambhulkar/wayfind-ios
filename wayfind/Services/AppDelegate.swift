@@ -135,12 +135,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-        // Hand the raw APNs token to Firebase so it can mint the FCM
-        // token. The MessagingDelegate fires after this with the FCM
-        // string we actually persist server-side.
-        Task { @MainActor in
-            PushNotificationService.shared.setAPNSToken(deviceToken)
-        }
+        // Hand the raw APNs token to Firebase. `setAPNSToken` sets
+        // `Messaging.messaging().apnsToken` and immediately fetches the FCM
+        // token so we don't need a separate explicit token query.
+        PushNotificationService.shared.setAPNSToken(deviceToken)
     }
 
     func application(

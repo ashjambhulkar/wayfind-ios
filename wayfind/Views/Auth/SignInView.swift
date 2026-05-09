@@ -1,5 +1,6 @@
 import AuthenticationServices
 import SwiftUI
+import UIKit
 
 struct SignInView: View {
     @Environment(AuthViewModel.self) private var authViewModel
@@ -25,9 +26,7 @@ struct SignInView: View {
                     Spacer()
                         .frame(height: AppSpacing.xxl)
 
-                    Image(systemName: "globe.americas.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(AppColors.appPrimary)
+                    AuthBrandMark()
 
                     Text("Wayfind")
                         .font(Font.screenTitle)
@@ -69,8 +68,7 @@ struct SignInView: View {
                     // MARK: - Google Sign In
 
                     AuthOutlineIconButton(
-                        icon: "g.circle.fill",
-                        title: "Continue with Google"
+                        googleBundledLogoTitle: "Continue with Google"
                     ) {
                         Task {
                             await authViewModel.signInWithGoogle()
@@ -230,6 +228,18 @@ struct SignInView: View {
     }
 }
 
+/// Raster logo (`AppLogo` asset) above the app name on sign-in / sign-up.
+struct AuthBrandMark: View {
+    var body: some View {
+        Image("AppLogo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 72, height: 72)
+            .clipShape(RoundedRectangle(cornerRadius: AppCornerRadius.large, style: .continuous))
+            .accessibilityLabel("Wayfind")
+    }
+}
+
 struct AuthIconRow<Content: View>: View {
     let icon: String
     @ViewBuilder let content: () -> Content
@@ -257,14 +267,37 @@ struct AuthIconRow<Content: View>: View {
 }
 
 struct AuthOutlineIconButton: View {
-    let icon: String
+    private enum LeadingIcon {
+        case sfSymbol(String)
+        case googleBundledLogo
+    }
+
+    private let leadingIcon: LeadingIcon
     let title: String
     let action: () -> Void
+
+    init(icon: String, title: String, action: @escaping () -> Void) {
+        self.leadingIcon = .sfSymbol(icon)
+        self.title = title
+        self.action = action
+    }
+
+    /// Uses the multicolor “G” shipped inside `GoogleSignIn_GoogleSignIn.bundle` (official SDK asset).
+    init(googleBundledLogoTitle title: String, action: @escaping () -> Void) {
+        self.leadingIcon = .googleBundledLogo
+        self.title = title
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: AppSpacing.sm) {
-                Image(systemName: icon)
+                switch leadingIcon {
+                case .sfSymbol(let name):
+                    Image(systemName: name)
+                case .googleBundledLogo:
+                    GoogleSignInBundledLogoView()
+                }
                 Text(title)
                     .font(Font.appButton)
             }
@@ -280,6 +313,47 @@ struct AuthOutlineIconButton: View {
         }
         .buttonStyle(AuthOutlinePressStyle())
     }
+}
+
+/// Multicolor Google “G” from the Google Sign-In SDK resource bundle (no duplicate asset in our catalog).
+private struct GoogleSignInBundledLogoView: View {
+    private static var resourceBundle: Bundle? {
+        let names = ["GoogleSignIn_GoogleSignIn", "GoogleSignIn"]
+        for name in names {
+            if let url = Bundle.main.url(forResource: name, withExtension: "bundle"),
+               let bundle = Bundle(url: url) {
+                return bundle
+            }
+        }
+        return nil
+    }
+
+    private static var logoImage: UIImage? {
+        guard let bundle = resourceBundle else { return nil }
+        return UIImage(named: "google", in: bundle, compatibleWith: nil)
+    }
+
+    var body: some View {
+        Group {
+            if let uiImage = Self.logoImage {
+                Image(uiImage: uiImage)
+                    .renderingMode(.original)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: GoogleSignInBundledLogoMetrics.size, height: GoogleSignInBundledLogoMetrics.size)
+                    .accessibilityHidden(true)
+            } else {
+                Image(systemName: "g.circle.fill")
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
+private enum GoogleSignInBundledLogoMetrics {
+    /// Aligns with Google’s sign-in button artwork scale at our 48pt row height.
+    static let size: CGFloat = 20
 }
 
 struct AuthOutlinePressStyle: ButtonStyle {

@@ -44,6 +44,19 @@ final class PushNotificationService {
     /// row for the user — important for users with multiple devices.
     private(set) var lastRegisteredToken: String?
 
+    /// Set when `MessagingDelegate` delivers a token while there is no Supabase
+    /// session yet (common on cold start). `resyncFCMTokenAfterAuth()` flushes
+    /// this after login because Firebase often does **not** call the delegate
+    /// again with the same token.
+    private var deferredFCMTokenUntilSession: String?
+
+    /// True once `application(_:didRegisterForRemoteNotificationsWithDeviceToken:)`
+    /// has fired and we have called `Messaging.messaging().apnsToken = ...`.
+    /// Guards any explicit `Messaging.messaging().token` call — Firebase will
+    /// refuse with "APNS device token not set" if we request an FCM token before
+    /// this point.
+    private var hasAPNSToken = false
+
     private init() {}
 
     // MARK: - Registration
@@ -62,9 +75,9 @@ final class PushNotificationService {
             let session = try await client.auth.session
             userId = session.user.id
         } catch {
-            // Not signed in — we'll re-register the next time
-            // `MessagingDelegate.didReceiveRegistrationToken` fires after
-            // the next sign-in (FCM regenerates tokens reasonably often).
+            // Not signed in — keep the token so `resyncFCMTokenAfterAuth()` can
+            // upsert after `applySession` finishes (delegate may not fire again).
+            deferredFCMTokenUntilSession = token
             return
         }
         let row = FCMTokenUpsert(
@@ -78,6 +91,7 @@ final class PushNotificationService {
                 .upsert(row, onConflict: "user_id,token")
                 .execute()
             lastRegisteredToken = token
+            deferredFCMTokenUntilSession = nil
         } catch {
             // Don't surface this to the user — push registration is a
             // background concern. Capture only the failure class, never
@@ -125,6 +139,39 @@ final class PushNotificationService {
                 context: ["platform": "ios"]
             )
         }
+    }
+
+    /// Called after Supabase session is established (`applySession`). Triggers
+    /// APNs registration so the OS hands us a device token (which then lets
+    /// Firebase mint an FCM token via `setAPNSToken`). If `hasAPNSToken` is
+    /// already true — the token arrived before login — we can also query the
+    /// FCM token directly and flush any deferred value.
+    func resyncFCMTokenAfterAuth() async {
+        guard AppConfig.useRealBackend else { return }
+
+        // Always ask for APNs registration; this is idempotent and ensures the
+        // token arrives even if the user bypassed the onboarding permission UI.
+        await MainActor.run {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+
+        // Only query the FCM token explicitly when we know the APNs token has
+        // already been delivered. If it hasn't, `setAPNSToken` will fetch the
+        // FCM token as soon as the APNs callback fires.
+        guard hasAPNSToken else {
+            return
+        }
+
+        #if canImport(FirebaseMessaging)
+        let fromSDK = await Self.queryFirebaseRegistrationToken()
+        let token = fromSDK ?? deferredFCMTokenUntilSession
+        guard let token, !token.isEmpty else { return }
+        await registerFCMToken(token)
+        #else
+        if let token = deferredFCMTokenUntilSession, !token.isEmpty {
+            await registerFCMToken(token)
+        }
+        #endif
     }
 
     // MARK: - Notification tap routing
@@ -182,13 +229,28 @@ final class PushNotificationService {
 
     // MARK: - APNs token bridging
 
-    /// Hands the APNs device token to FirebaseMessaging so it can mint
-    /// the FCM token. Called from
-    /// `application(_:didRegisterForRemoteNotificationsWithDeviceToken:)`.
-    /// No-op when Firebase isn't compiled in.
-    func setAPNSToken(_ deviceToken: Data) {
+    /// Hands the APNs device token to FirebaseMessaging, marks `hasAPNSToken`,
+    /// then immediately fetches the FCM registration token. This is the correct
+    /// place to trigger the FCM fetch — Firebase will refuse with "APNS device
+    /// token not set" if `Messaging.messaging().token` is called before this.
+    nonisolated func setAPNSToken(_ deviceToken: Data) {
         #if canImport(FirebaseMessaging)
         Messaging.messaging().apnsToken = deviceToken
+
+        Messaging.messaging().token { token, error in
+            if let error {
+                print("[PushNotificationService] Firebase Messaging.token error after APNs set:", error.localizedDescription)
+                return
+            }
+            guard let token, !token.isEmpty else {
+                print("[PushNotificationService] Firebase returned nil FCM token after APNs set")
+                return
+            }
+            Task { @MainActor in
+                await PushNotificationService.shared.registerFCMToken(token)
+                PushNotificationService.shared.hasAPNSToken = true
+            }
+        }
         #else
         _ = deviceToken
         #endif
@@ -209,5 +271,20 @@ private struct FCMTokenUpsert: Encodable, Sendable {
     }
 }
 
+#if canImport(FirebaseMessaging)
+private extension PushNotificationService {
+    /// Async bridge to `Messaging.messaging().token(completion:)` (nonisolated).
+    nonisolated static func queryFirebaseRegistrationToken() async -> String? {
+        await withCheckedContinuation { continuation in
+            Messaging.messaging().token { token, error in
+                if let error {
+                    print("[PushNotificationService] Firebase Messaging.token error:", error.localizedDescription)
+                }
+                continuation.resume(returning: token)
+            }
+        }
+    }
+}
+#endif
 
 // =============================================================================

@@ -12,6 +12,8 @@
 		A1AA5E170000000000154A23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = A1AA5E170000000000154A22 /* Sentry */; };
 		A1AAC0DE2F7F0D8C00154A08 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAC0DE2F7F0D8C00154A06 /* RevenueCat */; };
 		A1AAC0DE2F7F0D8C00154A09 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAC0DE2F7F0D8C00154A07 /* RevenueCatUI */; };
+		A1AAFIR042F7F0D8C00154F01 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAFIR022F7F0D8C00154F01 /* FirebaseCore */; };
+		A1AAFIR052F7F0D8C00154F01 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAFIR032F7F0D8C00154F01 /* FirebaseMessaging */; };
 		A1AAINJ032F7F0D8C00154B03 /* Inject in Frameworks */ = {isa = PBXBuildFile; productRef = A1AAINJ022F7F0D8C00154B02 /* Inject */; };
 /* End PBXBuildFile section */
 
@@ -61,6 +63,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1AAFIR042F7F0D8C00154F01 /* FirebaseCore in Frameworks */,
+				A1AAFIR052F7F0D8C00154F01 /* FirebaseMessaging in Frameworks */,
 				210F8DA92F8D7EA1001E4E65 /* GoogleSignIn in Frameworks */,
 				A1AAINJ032F7F0D8C00154B03 /* Inject in Frameworks */,
 				A1AAC0DE2F7F0D8C00154A08 /* RevenueCat in Frameworks */,
@@ -127,6 +131,8 @@
 			);
 			name = wayfind;
 			packageProductDependencies = (
+				A1AAFIR022F7F0D8C00154F01 /* FirebaseCore */,
+				A1AAFIR032F7F0D8C00154F01 /* FirebaseMessaging */,
 				A1AAPRD032F7F0D8C00154A03 /* Supabase */,
 				A1AAPRD042F7F0D8C00154A04 /* GoogleSignIn */,
 				A1AAINJ022F7F0D8C00154B02 /* Inject */,
@@ -217,6 +223,7 @@
 			mainGroup = 21CB271B2F7F0D8C00154A0F;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				A1AAFIR012F7F0D8C00154F01 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				A1AAINJ012F7F0D8C00154B01 /* XCRemoteSwiftPackageReference "Inject" */,
 				A1AAPKG012F7F0D8C00154A01 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 				A1AAPKG022F7F0D8C00154A02 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
@@ -429,21 +436,21 @@
 				CODE_SIGN_ENTITLEMENTS = wayfind/Wayfind.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 7RNU3W6ND4;
+				DEVELOPMENT_TEAM = K5KRU4JQ76;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InfoAdditions.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.2;
+				MARKETING_VERSION = 2.0.1;
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"-Xlinker",
@@ -469,21 +476,21 @@
 				CODE_SIGN_ENTITLEMENTS = wayfind/Wayfind.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 7RNU3W6ND4;
+				DEVELOPMENT_TEAM = K5KRU4JQ76;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InfoAdditions.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.2;
+				MARKETING_VERSION = 2.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = app.wayfind.travel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -631,6 +638,8 @@
 				kind = upToNextMajorVersion;
 				minimumVersion = 9.9.0;
 			};
+			traits = (
+			);
 		};
 		A1AAC0DE2F7F0D8C00154A05 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -638,6 +647,14 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 5.69.0;
+			};
+		};
+		A1AAFIR012F7F0D8C00154F01 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.15.0;
 			};
 		};
 		A1AAINJ012F7F0D8C00154B01 /* XCRemoteSwiftPackageReference "Inject" */ = {
@@ -681,6 +698,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A1AAC0DE2F7F0D8C00154A05 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
 			productName = RevenueCatUI;
+		};
+		A1AAFIR022F7F0D8C00154F01 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1AAFIR012F7F0D8C00154F01 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		A1AAFIR032F7F0D8C00154F01 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1AAFIR012F7F0D8C00154F01 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
 		};
 		A1AAINJ022F7F0D8C00154B02 /* Inject */ = {
 			isa = XCSwiftPackageProductDependency;
