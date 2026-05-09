@@ -49,8 +49,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        // 1. Firebase must configure first so the Messaging singleton is
-        // ready before we set its delegate.
+        // Firebase: idempotent guard — `WayfindApp.init()` calls
+        // `FirebaseApp.configure()` first (the App struct is instantiated
+        // before this method). This is kept as a fallback only.
         #if canImport(FirebaseCore)
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()

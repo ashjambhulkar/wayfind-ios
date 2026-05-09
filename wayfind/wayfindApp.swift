@@ -2,14 +2,16 @@ import Auth
 import MapKit
 import SwiftUI
 
+#if canImport(FirebaseCore)
+import FirebaseCore
+#endif
+
 @main
 struct WayfindApp: App {
     /// Phase 5 — UIKit lifecycle bridge. `@UIApplicationDelegateAdaptor`
-    /// hands SwiftUI a managed `AppDelegate` instance that fires
-    /// `application(_:didFinishLaunchingWithOptions:)` *before* this
-    /// scene is constructed, which is the only correct place to call
-    /// `FirebaseApp.configure()` and to capture cold-start notification
-    /// payloads off `launchOptions`.
+    /// connects the SwiftUI lifecycle to UIKit so `AppDelegate` receives
+    /// push-notification callbacks, APNs device-token delivery, and
+    /// cold-start launch-option parsing.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     @State private var authViewModel = AuthViewModel()
@@ -31,6 +33,15 @@ struct WayfindApp: App {
     @State private var inviteJoinResult: InviteJoinResult?
 
     init() {
+        // Configure Firebase here — the App struct is instantiated before
+        // AppDelegate.didFinishLaunchingWithOptions fires, so this is the
+        // earliest user-code hook. AppDelegate repeats the call guarded by
+        // `FirebaseApp.app() == nil` as a belt-and-suspenders fallback.
+        #if canImport(FirebaseCore)
+        if FirebaseApp.app() == nil {
+            FirebaseApp.configure()
+        }
+        #endif
         AuthSessionService.shared.configure()
     }
 
